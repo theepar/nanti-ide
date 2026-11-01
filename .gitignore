@@ -1,0 +1,14 @@
+# Dependencies & Build
+target/
+
+# Local tooling & agents
+.snapgent/
+.snapgent
+
+# Internal planning / PRD
+PRD*.md
+
+# OS / Editor files
+.DS_Store
+Thumbs.db
+*.pdb
