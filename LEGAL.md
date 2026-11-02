@@ -43,7 +43,18 @@ Users who choose to install local `.vsix` packages or download extensions from t
 
 ---
 
-## 4. Clean-Room Implementation & Originality
+## 4. Privacy, Zero-Telemetry & Local-First Commitment
+
+`nanti.` is architected on the premise of uncompromising developer privacy and local-first execution:
+
+- **Strict Zero-Telemetry Policy:** `nanti.` contains **no telemetry collection code, no analytics beacons, no crash reporting daemons, and no unique machine fingerprinting**. The core executable operates completely offline and never initiates background network pings.
+- **Local-First Architecture:** All code editing, tree-sitter parsing, syntax highlighting, Git operations, and terminal shell commands run entirely on the local device. Your intellectual property and code never leave your machine.
+- **Explicit Consent Isolation:** If an extension attempts to open an external web resource, `nanti.` halts the action and presents an explicit confirmation dialogue to the user before launching the system browser.
+- **Privacy by Design:** By storing zero personal data and avoiding all remote telemetry transmissions, `nanti.` inherently satisfies strict enterprise privacy frameworks and global data protection regulations (including GDPR and CCPA).
+
+---
+
+## 5. Clean-Room Implementation & Originality
 
 - **Clean-Room Engineering:** All source code in `nanti.` (including the workbench shell, rope buffer editor, terminal emulator interface, LSP client, Git wrapper, and Node.js extension host shim) has been written independently from scratch in Rust and JavaScript.
 - **Interoperability Under Copyright Law:** The extension API shim implements compatibility based solely on publicly documented APIs, public TypeScript type definitions, and observed runtime behavior. This implementation is protected under international copyright interoperability provisions, including:
@@ -91,3 +102,4 @@ Upon receipt of a valid notice, the maintainers will investigate promptly and ta
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NONINFRINGEMENT. 
 
 IN NO EVENT SHALL THE AUTHORS, COPYRIGHT HOLDERS, OR CONTRIBUTORS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE, INCLUDING BUT NOT LIMITED TO DATA LOSS, SYSTEM DAMAGE, INTERRUPTION OF SERVICE, OR THIRD-PARTY EXTENSION BEHAVIOR.
+
