@@ -590,6 +590,7 @@ impl Model {
     }
 
     pub fn open_market_detail(&mut self, index: usize) {
+        self.settings_open = false;
         use crate::extensions::Readme;
         let Some(m) = self.marketplace_results.get(index).cloned() else {
             return;
@@ -622,6 +623,7 @@ impl Model {
     }
 
     pub fn open_installed_detail(&mut self, index: usize) {
+        self.settings_open = false;
         use crate::extensions::Readme;
         let Some(x) = self.extensions.get(index).cloned() else {
             return;
@@ -646,6 +648,10 @@ impl Model {
             categories: Vec::new(),
             readme,
         });
+    }
+
+    pub fn close_settings(&mut self) {
+        self.settings_open = false;
     }
 
     pub fn close_ext_detail(&mut self) {

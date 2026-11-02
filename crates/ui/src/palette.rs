@@ -67,6 +67,7 @@ pub enum Command {
     RunTask,
     About,
     Exit,
+    OpenSettings,
     ToggleComment,
     MoveLineUp,
     MoveLineDown,
@@ -78,7 +79,7 @@ pub enum Command {
 }
 
 impl Command {
-    pub const ALL: [Command; 67] = [
+    pub const ALL: [Command; 68] = [
         Command::CommandPalette,
         Command::QuickOpen,
         Command::Save,
@@ -138,6 +139,7 @@ impl Command {
         Command::RunTask,
         Command::About,
         Command::Exit,
+        Command::OpenSettings,
         Command::ToggleComment,
         Command::MoveLineUp,
         Command::MoveLineDown,
@@ -209,6 +211,7 @@ impl Command {
             Command::RunTask => "Run: Show Tasks",
             Command::About => "Help: About nanti.",
             Command::Exit => "File: Exit",
+            Command::OpenSettings => "Preferences: Open Settings",
             Command::ToggleComment => "Edit: Toggle Line Comment",
             Command::MoveLineUp => "Edit: Move Line Up",
             Command::MoveLineDown => "Edit: Move Line Down",
@@ -258,6 +261,7 @@ impl Command {
             Command::DuplicateLineDown => Some("Shift+Alt+Down"),
             Command::DeleteLine => Some("Ctrl+Shift+K"),
             Command::RenameItem => Some("F2"),
+            Command::OpenSettings => Some("Ctrl+,"),
             _ => None,
         }
     }
@@ -269,6 +273,7 @@ impl Command {
             ("s", _) => Command::Save,
             ("w", _) => Command::CloseTab,
             ("b", _) => Command::ToggleSidebar,
+            (",", _) => Command::OpenSettings,
             ("tab", false) | ("pagedown", _) => Command::NextTab,
             ("tab", true) | ("pageup", _) => Command::PrevTab,
             ("z", false) => Command::Undo,

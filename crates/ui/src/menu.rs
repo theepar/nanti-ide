@@ -64,6 +64,8 @@ pub fn items(kind: MenuKind) -> Vec<MenuItem> {
             Cmd(C::CloseTab),
             Cmd(C::CloseAllTabs),
             Sep,
+            Cmd(C::OpenSettings),
+            Sep,
             Cmd(C::Exit),
         ],
         MenuKind::Edit => vec![

@@ -235,6 +235,7 @@ struct Scrolls {
     tasks: ScrollHandle,
     ext: ScrollHandle,
     ext_detail: ScrollHandle,
+    settings: ScrollHandle,
     problems: ScrollHandle,
     output: ScrollHandle,
     search: ScrollHandle,
@@ -1506,6 +1507,29 @@ impl Workbench {
                             }))
                     }))
             }))
+            .child(div().flex_1())
+            .child(
+                div()
+                    .id("activity-settings")
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .w(px(40.))
+                    .h(px(40.))
+                    .mb_2()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .hover(|s| s.bg(rgb(theme::HOVER)))
+                    .when(self.model.settings_open, |d| d.bg(rgb(theme::SELECTED)))
+                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.apply_command(Command::OpenSettings, window, cx);
+                    }))
+                    .child(assets::icon(
+                        "settings",
+                        22.,
+                        if self.model.settings_open { 0xffffff } else { theme::ICON },
+                    )),
+            )
     }
 
     fn explorer_entries(&self) -> Rc<Vec<model::Entry>> {
@@ -1687,15 +1711,50 @@ impl Workbench {
             .flex()
             .flex_none()
             .h(px(35.))
-            .bg(rgb(if self.model.tabs.is_empty() && self.model.ext_detail.is_none() {
+            .bg(rgb(if self.model.tabs.is_empty() && self.model.ext_detail.is_none() && !self.model.settings_open {
                 theme::EDITOR
             } else {
                 theme::TAB_BAR
             }))
             .when(
-                !self.model.tabs.is_empty() || self.model.ext_detail.is_some(),
+                !self.model.tabs.is_empty()
+                    || self.model.ext_detail.is_some()
+                    || self.model.settings_open,
                 |d| d.border_b_1().border_color(rgb(theme::BORDER)),
             )
+            .children(self.model.settings_open.then(|| {
+                div()
+                    .id("tab-settings")
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .pl_3()
+                    .pr_1()
+                    .text_size(px(13.))
+                    .border_r_1()
+                    .border_color(rgb(theme::BORDER))
+                    .bg(rgb(theme::EDITOR))
+                    .text_color(rgb(theme::TEXT))
+                    .child(assets::icon("settings", 14., theme::TEXT_DIM))
+                    .child("Settings")
+                    .child(
+                        div()
+                            .id("tab-settings-close")
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .w(px(18.))
+                            .h(px(18.))
+                            .rounded_sm()
+                            .cursor_pointer()
+                            .hover(|s| s.bg(rgb(theme::SELECTED)))
+                            .on_click(cx.listener(|this, _: &ClickEvent, _w, cx| {
+                                this.model.close_settings();
+                                cx.notify();
+                            }))
+                            .child(assets::icon("close", 12., theme::TEXT_DIM)),
+                    )
+            }))
             .children(self.model.ext_detail.as_ref().map(|d| {
                 div()
                     .id("tab-ext-detail")
@@ -1730,7 +1789,9 @@ impl Workbench {
                     )
             }))
             .children(self.model.tabs.iter().enumerate().map(|(i, t)| {
-                let active = self.model.active_tab == Some(i) && self.model.ext_detail.is_none();
+                let active = self.model.active_tab == Some(i)
+                    && self.model.ext_detail.is_none()
+                    && !self.model.settings_open;
                 let dirty = t.is_dirty();
                 div()
                     .id(("tab", i))
@@ -3834,9 +3895,15 @@ impl Render for Workbench {
         let tab_bar = (!maximized).then(|| self.tab_bar(cx).into_any_element());
         let prompt_bar = self.prompt_bar(cx).map(IntoElement::into_any_element);
         let external_prompt_bar = self.external_prompt_bar(cx).map(IntoElement::into_any_element);
-        let editor: Option<AnyElement> = (!maximized).then(|| match &self.model.ext_detail {
-            Some(detail) => self.ext_detail_page(detail, cx),
-            None => self.editor(window, cx).into_any_element(),
+        let editor: Option<AnyElement> = (!maximized).then(|| {
+            if self.model.settings_open {
+                self.settings_page(cx)
+            } else {
+                match &self.model.ext_detail {
+                    Some(detail) => self.ext_detail_page(detail, cx),
+                    None => self.editor(window, cx).into_any_element(),
+                }
+            }
         });
         let bottom_panel = layout.panel.then(|| self.bottom_panel(window, cx).into_any_element());
         self.model.refresh_find();

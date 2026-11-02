@@ -276,6 +276,30 @@ fn moving_the_sidebar_and_panel_is_saved_and_restored(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn the_settings_page_renders_and_layout_commands_still_apply(cx: &mut TestAppContext) {
+    use ui::layout::Side;
+    use ui::palette::Command;
+    let ws = workspace("settingspage");
+    let (window, cx) = open(cx, &ws.0, None);
+    window
+        .update(cx, |wb, _, cx| {
+            wb.model_mut().run_command(Command::OpenSettings);
+            cx.notify();
+        })
+        .unwrap();
+    cx.run_until_parked();
+    assert!(window.read_with(cx, |wb, _| wb.model().settings_open).unwrap());
+    window
+        .update(cx, |wb, _, cx| {
+            wb.model_mut().run_command(Command::SidebarRight);
+            cx.notify();
+        })
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(layout(window, cx).sidebar_side, Side::Right);
+}
+
+#[gpui::test]
 fn pump_saves_after_a_drag_ends_but_not_in_the_middle_of_one(cx: &mut TestAppContext) {
     let ws = workspace("pump");
     let file = ws.0.join("layout.json");

@@ -225,6 +225,7 @@ pub struct Model {
     pub(crate) icon_tx: std::sync::mpsc::Sender<(String, PathBuf)>,
     pub(crate) icon_rx: std::sync::mpsc::Receiver<(String, PathBuf)>,
     pub ext_detail: Option<ExtDetail>,
+    pub settings_open: bool,
     pub(crate) readme_rx: Option<
         std::sync::mpsc::Receiver<(String, Result<crate::extensions::ExtExtra, String>)>,
     >,
@@ -275,6 +276,7 @@ impl Model {
             icon_tx,
             icon_rx,
             ext_detail: None,
+            settings_open: false,
             readme_rx: None,
             marketplace_rx: None,
             install_rx: None,
@@ -393,6 +395,7 @@ impl Model {
 
     pub fn open_file(&mut self, path: &Path) {
         self.ext_detail = None;
+        self.settings_open = false;
         if let Some(i) = self
             .tabs
             .iter()
@@ -437,6 +440,7 @@ impl Model {
 
     pub fn activate_tab(&mut self, index: usize) {
         self.ext_detail = None;
+        self.settings_open = false;
         if index < self.tabs.len() {
             self.active_tab = Some(index);
         }
@@ -480,6 +484,7 @@ impl Model {
 
     pub fn open_diff(&mut self, rel: &str, staged: bool) {
         self.ext_detail = None;
+        self.settings_open = false;
         let conflicted = self
             .scm
             .status
@@ -932,6 +937,11 @@ impl Model {
                 }
             }
             Command::ToggleRightPanel => self.layout.right = !self.layout.right,
+            Command::OpenSettings => {
+                self.settings_open = true;
+                self.ext_detail = None;
+                self.readme_rx = None;
+            }
             Command::SidebarLeft | Command::SidebarRight => {
                 self.layout.sidebar_side = if command == Command::SidebarLeft {
                     Side::Left
@@ -1347,6 +1357,19 @@ mod tests {
         m.search_marketplace("   ");
         assert!(m.marketplace_results.is_empty() && m.marketplace_query.is_none());
         assert!(m.marketplace_message.is_none());
+    }
+
+    #[test]
+    fn the_settings_page_opens_and_gives_way_to_files() {
+        let ws = workspace("settings");
+        let mut m = Model::new(ws.0.clone());
+        m.run_command(Command::OpenSettings);
+        assert!(m.settings_open);
+        m.open_file(&ws.0.join("b.txt"));
+        assert!(!m.settings_open);
+        m.run_command(Command::OpenSettings);
+        m.close_settings();
+        assert!(!m.settings_open);
     }
 
     #[test]

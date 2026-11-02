@@ -16,6 +16,7 @@ const ASSETS: &[(&str, &str)] = &[
     ("icons/layout-panel-on.svg", include_str!("../assets/icons/layout-panel-on.svg")),
     ("icons/layout-right-on.svg", include_str!("../assets/icons/layout-right-on.svg")),
     ("icons/minimize.svg", include_str!("../assets/icons/minimize.svg")),
+    ("icons/settings.svg", include_str!("../assets/icons/settings.svg")),
     ("icons/files.svg", include_str!("../assets/icons/files.svg")),
     ("icons/search.svg", include_str!("../assets/icons/search.svg")),
     ("icons/git.svg", include_str!("../assets/icons/git.svg")),
