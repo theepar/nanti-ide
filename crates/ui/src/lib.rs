@@ -1611,8 +1611,16 @@ impl Workbench {
                     .rounded_md()
                     .cursor_pointer()
                     .hover(|s| s.bg(rgb(theme::HOVER)))
-                    .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
+                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         this.model.select_activity(a);
+                        if this.model.activity == a && this.model.layout.sidebar {
+                            match a {
+                                Activity::Extensions => this.focus_target(Target::ExtSearch, window),
+                                Activity::Search => this.focus_target(Target::Search, window),
+                                Activity::SourceControl => this.focus_target(Target::Commit, window),
+                                _ => {}
+                            }
+                        }
                         cx.notify();
                     }))
                     .child(assets::icon(
@@ -3001,6 +3009,7 @@ impl Workbench {
             .font_family(FONT_FAMILY)
             .text_size(px(FONT_SIZE))
             .text_color(rgb(theme::TEXT))
+            .cursor_text()
             .overflow_hidden()
             .on_mouse_down(
                 MouseButton::Left,
@@ -3009,6 +3018,10 @@ impl Workbench {
                     cx.notify();
                 }),
             )
+            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                this.focus_target(target, window);
+                cx.notify();
+            }))
             .child(if text.is_empty() {
                 div().text_color(rgb(theme::TEXT_DIM)).child(placeholder)
             } else {
