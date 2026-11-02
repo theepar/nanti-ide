@@ -1,4 +1,3 @@
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -74,7 +73,12 @@ impl Problems {
         changed
     }
 
-    pub fn update_lsp_diagnostics(&mut self, path: PathBuf, title: String, items: Vec<Diagnostic>) -> bool {
+    pub fn update_lsp_diagnostics(
+        &mut self,
+        path: PathBuf,
+        title: String,
+        items: Vec<Diagnostic>,
+    ) -> bool {
         let entry = self.cache.entry(path.clone()).or_insert_with(|| Entry {
             version: 0,
             seen: 0,
@@ -87,11 +91,7 @@ impl Problems {
         } else if let Some(f) = self.files.iter_mut().find(|f| f.path == path) {
             f.items = items;
         } else {
-            self.files.push(ProblemFile {
-                path,
-                title,
-                items,
-            });
+            self.files.push(ProblemFile { path, title, items });
         }
         true
     }

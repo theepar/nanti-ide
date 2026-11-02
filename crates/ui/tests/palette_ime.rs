@@ -1,4 +1,3 @@
-
 use std::path::{Path, PathBuf};
 
 use gpui::{EntityInputHandler, TestAppContext, VisualTestContext, WindowHandle};
@@ -283,7 +282,7 @@ fn ctrl_p_switches_between_the_two_palettes_and_ignores_other_shortcuts(cx: &mut
     let ws = workspace("pal6", &[("a.txt", "x")]);
     let (window, cx) = open(cx, &ws.0, "a.txt");
     cx.simulate_keystrokes("ctrl-shift-p");
-    cx.simulate_keystrokes("ctrl-s ctrl-a");  // must not leak to the editor / save
+    cx.simulate_keystrokes("ctrl-s ctrl-a"); // must not leak to the editor / save
     assert_eq!(text(window, cx), "x");
     cx.simulate_keystrokes("ctrl-p");
     let mode = window

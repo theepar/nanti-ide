@@ -1,4 +1,3 @@
-
 use crate::palette::Command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

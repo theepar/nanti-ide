@@ -1,4 +1,3 @@
-
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
@@ -407,7 +406,7 @@ impl Workbench {
         match self.model.layout.save(&path) {
             Ok(()) => self.layout_saved = self.model.layout.clone(),
             Err(e) => {
-                self.layout_saved = self.model.layout.clone();  // do not retry every tick
+                self.layout_saved = self.model.layout.clone(); // do not retry every tick
                 self.model.message = Some(format!("Could not save layout: {e}"));
             }
         }
@@ -425,7 +424,7 @@ impl Workbench {
     pub fn allow_window_close(&mut self) -> bool {
         let ok = self.quitting || self.model.request_quit();
         if ok {
-            self.kill_all_terminals();  // never leave shells running behind a closed window
+            self.kill_all_terminals(); // never leave shells running behind a closed window
             self.lsp.shutdown_all();
         }
         ok
@@ -474,7 +473,8 @@ impl Workbench {
                 }
             }
         }
-        let sync_events: Vec<crate::model::DocSyncEvent> = self.model.doc_sync_events.drain(..).collect();
+        let sync_events: Vec<crate::model::DocSyncEvent> =
+            self.model.doc_sync_events.drain(..).collect();
         for ev in &sync_events {
             if let Some(panel) = self.panel.as_ref() {
                 match ev {
@@ -499,7 +499,9 @@ impl Workbench {
                 }
             }
             match ev {
-                crate::model::DocSyncEvent::Open { uri, version, text, .. } => {
+                crate::model::DocSyncEvent::Open {
+                    uri, version, text, ..
+                } => {
                     if let Some(path) = crate::lsp::uri_to_path(uri) {
                         if let Some(lang) = Language::from_path(&path) {
                             if let Some(server) = self.lsp.ensure_server(lang, &self.model.root) {
@@ -549,7 +551,11 @@ impl Workbench {
                         .file_name()
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_else(|| path.display().to_string());
-                    if self.model.problems.update_lsp_diagnostics(path, title, items) {
+                    if self
+                        .model
+                        .problems
+                        .update_lsp_diagnostics(path, title, items)
+                    {
                         changed = true;
                     }
                 }
@@ -863,7 +869,10 @@ impl Workbench {
 
     fn accept_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(p) = self.model.palette.as_ref() {
-            if let Some(crate::palette::PaletteAction::Command(c @ (Command::OpenFile | Command::OpenFolder))) = p.selected_action() {
+            if let Some(crate::palette::PaletteAction::Command(
+                c @ (Command::OpenFile | Command::OpenFolder),
+            )) = p.selected_action()
+            {
                 self.model.close_palette();
                 self.apply_command(c, window, cx);
                 return;
@@ -1082,7 +1091,12 @@ impl Workbench {
         self.after_field_key(window, cx);
     }
 
-    fn on_ext_search_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_ext_search_key(
+        &mut self,
+        ev: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let m = ev.keystroke.modifiers;
         let key = ev.keystroke.key.as_str();
         if m.control && !m.alt {
@@ -1357,12 +1371,25 @@ impl Workbench {
         let vp = window.viewport_size();
         let (vw, vh) = (f32::from(vp.width), f32::from(vp.height));
         let (x, y) = (f32::from(ev.position.x), f32::from(ev.position.y));
-        let right_open = self.model.layout.right && (self.panel.is_some() || self.force_right_panel);
+        let right_open =
+            self.model.layout.right && (self.panel.is_some() || self.force_right_panel);
         let l = &mut self.model.layout;
         let status = if l.status_bar { STATUS_BAR_HEIGHT } else { 0.0 };
-        let activity = if l.activity_bar { ACTIVITY_BAR_WIDTH } else { 0.0 };
-        let sidebar_w = if l.sidebar { l.effective_sidebar(vw) + SPLITTER } else { 0.0 };
-        let right_w = if right_open { l.effective_right(vw) + SPLITTER } else { 0.0 };
+        let activity = if l.activity_bar {
+            ACTIVITY_BAR_WIDTH
+        } else {
+            0.0
+        };
+        let sidebar_w = if l.sidebar {
+            l.effective_sidebar(vw) + SPLITTER
+        } else {
+            0.0
+        };
+        let right_w = if right_open {
+            l.effective_right(vw) + SPLITTER
+        } else {
+            0.0
+        };
         let (left_edge, right_edge) = match l.sidebar_side {
             Side::Left => (activity + sidebar_w, 0.0),
             Side::Right => (0.0, activity + sidebar_w),
@@ -1455,8 +1482,12 @@ impl Workbench {
             .w(px(48.))
             .h_full()
             .bg(rgb(theme::ACTIVITY_BAR))
-            .when(self.model.layout.sidebar_side == Side::Left, |d| d.border_r_1())
-            .when(self.model.layout.sidebar_side == Side::Right, |d| d.border_l_1())
+            .when(self.model.layout.sidebar_side == Side::Left, |d| {
+                d.border_r_1()
+            })
+            .when(self.model.layout.sidebar_side == Side::Right, |d| {
+                d.border_l_1()
+            })
             .border_color(rgb(theme::BORDER))
             .items_center()
             .pt_2()
@@ -1527,7 +1558,11 @@ impl Workbench {
                     .child(assets::icon(
                         "settings",
                         22.,
-                        if self.model.settings_open { 0xffffff } else { theme::ICON },
+                        if self.model.settings_open {
+                            0xffffff
+                        } else {
+                            theme::ICON
+                        },
                     )),
             )
     }
@@ -1546,141 +1581,136 @@ impl Workbench {
     }
 
     fn sidebar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let body: AnyElement =
-            if self.model.activity == Activity::Explorer {
-                let active_path = self.model.active().map(|t| t.path.clone());
-                let entries = self.explorer_entries();
-                let total = entries.len();
-                let viewport = f32::from(self.scrolls.explorer.bounds().size.height);
-                let viewport = if viewport > 0.0 { viewport } else { 1600.0 };
-                let scrolled = (-f32::from(self.scrolls.explorer.offset().y)).max(0.0);
-                let first = ((scrolled / EXPLORER_ROW_H) as usize)
-                    .saturating_sub(OVERSCAN_ROWS)
-                    .min(total);
-                let last = (((scrolled + viewport) / EXPLORER_ROW_H).ceil() as usize
-                    + OVERSCAN_ROWS)
-                    .min(total)
-                    .max(first);
-                let list =
-                    div()
-                        .id("explorer-list")
-                        .size_full()
-                        .overflow_y_scroll()
-                        .track_scroll(&self.scrolls.explorer)
-                        .child(div().h(px(first as f32 * EXPLORER_ROW_H)).flex_none())
-                        .children(entries[first..last].iter().cloned().enumerate().map(
-                            |(k, e)| {
-                                let i = first + k;
-                                let selected = (!e.is_dir && active_path.as_ref() == Some(&e.path))
-                                    || self.model.explorer_sel.as_deref() == Some(e.path.as_path());
-                                let chevron = match (e.is_dir, e.expanded) {
-                                    (true, true) => Some("chevron-down"),
-                                    (true, false) => Some("chevron-right"),
-                                    (false, _) => None,
-                                };
-                                let path = e.path.clone();
-                                let is_dir = e.is_dir;
-                                let decor = self.model.scm.decor_for(&e.path, e.is_dir);
-                                let name_color = decor.map_or(theme::TEXT, |d| tone_color(d.tone));
-                                div()
-                                    .id(("entry", i))
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .pl(px(8. + 12. * e.depth as f32))
-                                    .pr_2()
-                                    .h(px(EXPLORER_ROW_H))
-                                    .text_size(px(13.))
-                                    .text_color(rgb(name_color))
-                                    .cursor_pointer()
-                                    .on_mouse_down(
-                                        MouseButton::Right,
-                                        cx.listener({
-                                            let path = path.clone();
-                                            move |this, ev: &MouseDownEvent, _w, cx| {
-                                                this.model.open_context_menu(
-                                                    &path,
-                                                    is_dir,
-                                                    f32::from(ev.position.x),
-                                                    f32::from(ev.position.y),
-                                                );
-                                                cx.notify();
-                                            }
-                                        }),
-                                    )
-                                    .when(selected, |d| {
-                                        d.bg(rgb(theme::SELECTED))
-                                    })
-                                    .hover(|s| s.bg(rgb(theme::HOVER)))
-                                    .on_click(cx.listener(
-                                        move |this, _: &ClickEvent, window, cx| {
-                                            this.model.select_entry(&path);
-                                            if is_dir {
-                                                this.model.toggle_dir(&path);
-                                            } else {
-                                                this.model.open_file(&path);
-                                                this.focus_editor(window);
-                                            }
+        let body: AnyElement = if self.model.activity == Activity::Explorer {
+            let active_path = self.model.active().map(|t| t.path.clone());
+            let entries = self.explorer_entries();
+            let total = entries.len();
+            let viewport = f32::from(self.scrolls.explorer.bounds().size.height);
+            let viewport = if viewport > 0.0 { viewport } else { 1600.0 };
+            let scrolled = (-f32::from(self.scrolls.explorer.offset().y)).max(0.0);
+            let first = ((scrolled / EXPLORER_ROW_H) as usize)
+                .saturating_sub(OVERSCAN_ROWS)
+                .min(total);
+            let last = (((scrolled + viewport) / EXPLORER_ROW_H).ceil() as usize + OVERSCAN_ROWS)
+                .min(total)
+                .max(first);
+            let list = div()
+                .id("explorer-list")
+                .size_full()
+                .overflow_y_scroll()
+                .track_scroll(&self.scrolls.explorer)
+                .child(div().h(px(first as f32 * EXPLORER_ROW_H)).flex_none())
+                .children(
+                    entries[first..last]
+                        .iter()
+                        .cloned()
+                        .enumerate()
+                        .map(|(k, e)| {
+                            let i = first + k;
+                            let selected = (!e.is_dir && active_path.as_ref() == Some(&e.path))
+                                || self.model.explorer_sel.as_deref() == Some(e.path.as_path());
+                            let chevron = match (e.is_dir, e.expanded) {
+                                (true, true) => Some("chevron-down"),
+                                (true, false) => Some("chevron-right"),
+                                (false, _) => None,
+                            };
+                            let path = e.path.clone();
+                            let is_dir = e.is_dir;
+                            let decor = self.model.scm.decor_for(&e.path, e.is_dir);
+                            let name_color = decor.map_or(theme::TEXT, |d| tone_color(d.tone));
+                            div()
+                                .id(("entry", i))
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .pl(px(8. + 12. * e.depth as f32))
+                                .pr_2()
+                                .h(px(EXPLORER_ROW_H))
+                                .text_size(px(13.))
+                                .text_color(rgb(name_color))
+                                .cursor_pointer()
+                                .on_mouse_down(
+                                    MouseButton::Right,
+                                    cx.listener({
+                                        let path = path.clone();
+                                        move |this, ev: &MouseDownEvent, _w, cx| {
+                                            this.model.open_context_menu(
+                                                &path,
+                                                is_dir,
+                                                f32::from(ev.position.x),
+                                                f32::from(ev.position.y),
+                                            );
                                             cx.notify();
-                                        },
-                                    ))
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(4.))
-                                            .min_w_0()
-                                            .child(div().flex_none().w(px(14.)).children(
-                                                chevron.map(|c| {
-                                                    assets::icon(c, 14., theme::TEXT_DIM)
-                                                }),
-                                            ))
-                                            .child(if is_dir {
-                                                assets::icon("folder", 15., 0x7f9fbf)
-                                            } else {
-                                                assets::icon(
-                                                    "file",
-                                                    15.,
-                                                    assets::file_color(&e.name),
-                                                )
-                                            })
-                                            .child(
-                                                div()
-                                                    .whitespace_nowrap()
-                                                    .overflow_hidden()
-                                                    .child(SharedString::from(e.name.clone())),
-                                            ),
-                                    )
-                                    .children(decor.map(|d| {
-                                        div()
-                                            .flex_none()
-                                            .pl_2()
-                                            .text_size(px(11.))
-                                            .child(SharedString::from(d.letter.to_string()))
-                                    }))
-                            },
-                        ))
-                        .child(div().h(px((total - last) as f32 * EXPLORER_ROW_H)).flex_none())
-                        .into_any_element();
-                let list = self.scroll_box("explorer-list", list, &self.scrolls.explorer, cx);
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_h_0()
-                    .child(self.explorer_toolbar(cx))
-                    .child(list)
-                    .child(self.outline_section(cx))
-                    .into_any_element()
-            } else if self.model.activity == Activity::Search {
-                self.search_panel(window, cx)
-            } else if self.model.activity == Activity::SourceControl {
-                self.scm_panel(window, cx)
-            } else if self.model.activity == Activity::Run {
-                self.run_panel(cx)
-            } else {
-                self.extensions_panel(window, cx)
-            };
+                                        }
+                                    }),
+                                )
+                                .when(selected, |d| d.bg(rgb(theme::SELECTED)))
+                                .hover(|s| s.bg(rgb(theme::HOVER)))
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    this.model.select_entry(&path);
+                                    if is_dir {
+                                        this.model.toggle_dir(&path);
+                                    } else {
+                                        this.model.open_file(&path);
+                                        this.focus_editor(window);
+                                    }
+                                    cx.notify();
+                                }))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(4.))
+                                        .min_w_0()
+                                        .child(div().flex_none().w(px(14.)).children(
+                                            chevron.map(|c| assets::icon(c, 14., theme::TEXT_DIM)),
+                                        ))
+                                        .child(if is_dir {
+                                            assets::icon("folder", 15., 0x7f9fbf)
+                                        } else {
+                                            assets::icon("file", 15., assets::file_color(&e.name))
+                                        })
+                                        .child(
+                                            div()
+                                                .whitespace_nowrap()
+                                                .overflow_hidden()
+                                                .child(SharedString::from(e.name.clone())),
+                                        ),
+                                )
+                                .children(decor.map(|d| {
+                                    div()
+                                        .flex_none()
+                                        .pl_2()
+                                        .text_size(px(11.))
+                                        .child(SharedString::from(d.letter.to_string()))
+                                }))
+                        }),
+                )
+                .child(
+                    div()
+                        .h(px((total - last) as f32 * EXPLORER_ROW_H))
+                        .flex_none(),
+                )
+                .into_any_element();
+            let list = self.scroll_box("explorer-list", list, &self.scrolls.explorer, cx);
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_h_0()
+                .child(self.explorer_toolbar(cx))
+                .child(list)
+                .child(self.outline_section(cx))
+                .into_any_element()
+        } else if self.model.activity == Activity::Search {
+            self.search_panel(window, cx)
+        } else if self.model.activity == Activity::SourceControl {
+            self.scm_panel(window, cx)
+        } else if self.model.activity == Activity::Run {
+            self.run_panel(cx)
+        } else {
+            self.extensions_panel(window, cx)
+        };
         div()
             .flex()
             .flex_col()
@@ -1690,8 +1720,12 @@ impl Workbench {
             ))))
             .h_full()
             .bg(rgb(theme::SIDEBAR))
-            .when(self.model.layout.sidebar_side == Side::Left, |d| d.border_r_1())
-            .when(self.model.layout.sidebar_side == Side::Right, |d| d.border_l_1())
+            .when(self.model.layout.sidebar_side == Side::Left, |d| {
+                d.border_r_1()
+            })
+            .when(self.model.layout.sidebar_side == Side::Right, |d| {
+                d.border_l_1()
+            })
             .border_color(rgb(theme::BORDER))
             .child(
                 div()
@@ -1711,11 +1745,16 @@ impl Workbench {
             .flex()
             .flex_none()
             .h(px(35.))
-            .bg(rgb(if self.model.tabs.is_empty() && self.model.ext_detail.is_none() && !self.model.settings_open {
-                theme::EDITOR
-            } else {
-                theme::TAB_BAR
-            }))
+            .bg(rgb(
+                if self.model.tabs.is_empty()
+                    && self.model.ext_detail.is_none()
+                    && !self.model.settings_open
+                {
+                    theme::EDITOR
+                } else {
+                    theme::TAB_BAR
+                },
+            ))
             .when(
                 !self.model.tabs.is_empty()
                     || self.model.ext_detail.is_some()
@@ -1806,8 +1845,7 @@ impl Workbench {
                     .border_color(rgb(theme::BORDER))
                     .cursor_pointer()
                     .when(active, |d| {
-                        d.bg(rgb(theme::EDITOR))
-                            .text_color(rgb(0xffffff))
+                        d.bg(rgb(theme::EDITOR)).text_color(rgb(0xffffff))
                     })
                     .when(!active, |d| {
                         d.text_color(rgb(theme::TEXT_DIM))
@@ -2062,8 +2100,7 @@ impl Workbench {
                 let first = ((scrolled / LINE_HEIGHT) as usize)
                     .saturating_sub(OVERSCAN_ROWS)
                     .min(shown);
-                let last = (((scrolled + viewport) / LINE_HEIGHT).ceil() as usize
-                    + OVERSCAN_ROWS)
+                let last = (((scrolled + viewport) / LINE_HEIGHT).ceil() as usize + OVERSCAN_ROWS)
                     .min(shown)
                     .max(first);
                 let sel = editor.selection();
@@ -2131,7 +2168,8 @@ impl Workbench {
                             let col = d.col.min(text.chars().count());
                             let len = d.len.max(1);
                             let x1 = x_of_col(window, &text, col);
-                            let x2 = x_of_col(window, &text, (col + len).min(text.chars().count())).max(x1 + px(8.));
+                            let x2 = x_of_col(window, &text, (col + len).min(text.chars().count()))
+                                .max(x1 + px(8.));
                             row = row.child(
                                 div()
                                     .absolute()
@@ -2246,8 +2284,12 @@ impl Workbench {
             .flex()
             .flex_col()
             .when(maximized, |d| d.flex_1().min_h_0().min_w_0())
-            .when(!maximized && !pos.is_side(), |d| d.flex_none().h(px(panel_h)))
-            .when(!maximized && pos.is_side(), |d| d.flex_none().h_full().w(px(panel_w)))
+            .when(!maximized && !pos.is_side(), |d| {
+                d.flex_none().h(px(panel_h))
+            })
+            .when(!maximized && pos.is_side(), |d| {
+                d.flex_none().h_full().w(px(panel_w))
+            })
             .bg(rgb(theme::PANEL))
             .when(pos == PanelPos::Bottom, |d| d.border_t_1())
             .when(pos == PanelPos::Top, |d| d.border_b_1())
@@ -2313,9 +2355,11 @@ impl Workbench {
                             "panel-maximize",
                             if maximized { "restore" } else { "maximize" },
                         )
-                        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                            this.apply_command(Command::MaximizePanel, window, cx);
-                        })),
+                        .on_click(cx.listener(
+                            |this, _: &ClickEvent, window, cx| {
+                                this.apply_command(Command::MaximizePanel, window, cx);
+                            },
+                        )),
                     )
                     .child(
                         Self::panel_button("panel-hide", "close").on_click(cx.listener(
@@ -3100,7 +3144,11 @@ impl Workbench {
                             .items_center()
                             .gap_1()
                             .child(assets::icon(
-                                if collapsed { "chevron-right" } else { "chevron-down" },
+                                if collapsed {
+                                    "chevron-right"
+                                } else {
+                                    "chevron-down"
+                                },
                                 14.,
                                 theme::TEXT_DIM,
                             ))
@@ -3743,7 +3791,7 @@ impl EntityInputHandler for Workbench {
             return cx.notify();
         }
         if self.target() == Target::Editor && self.model.prompt.is_some() {
-            return;  // a confirmation is pending: the editor must not change underneath it
+            return; // a confirmation is pending: the editor must not change underneath it
         }
         if let Some(f) = self.field_mut() {
             let chars = range.map(|r| f.utf16_to_char(r.start)..f.utf16_to_char(r.end));
@@ -3863,8 +3911,15 @@ impl Render for Workbench {
             if right_shown {
                 let layout = &self.model.layout;
                 let outer = if layout.sidebar_side == Side::Right {
-                    (if layout.activity_bar { ACTIVITY_BAR_WIDTH } else { 0.0 })
-                        + if layout.sidebar { layout.effective_sidebar(vw) + SPLITTER } else { 0.0 }
+                    (if layout.activity_bar {
+                        ACTIVITY_BAR_WIDTH
+                    } else {
+                        0.0
+                    }) + if layout.sidebar {
+                        layout.effective_sidebar(vw) + SPLITTER
+                    } else {
+                        0.0
+                    }
                 } else {
                     0.0
                 };
@@ -3880,21 +3935,34 @@ impl Render for Workbench {
             window.focus(&self.root_focus);
         }
         let layout = self.model.layout.clone();
-        let sidebar = layout.sidebar.then(|| self.sidebar(window, cx).into_any_element());
-        let activity_bar = layout.activity_bar.then(|| self.activity_bar(cx).into_any_element());
-        let maximized = layout.panel && layout.panel_maximized;
-        let split_sidebar = layout
+        let sidebar = layout
             .sidebar
-            .then(|| self.splitter("split-sidebar", Drag::Sidebar, cx).into_any_element());
+            .then(|| self.sidebar(window, cx).into_any_element());
+        let activity_bar = layout
+            .activity_bar
+            .then(|| self.activity_bar(cx).into_any_element());
+        let maximized = layout.panel && layout.panel_maximized;
+        let split_sidebar = layout.sidebar.then(|| {
+            self.splitter("split-sidebar", Drag::Sidebar, cx)
+                .into_any_element()
+        });
         let right_open = layout.right && (self.panel.is_some() || self.force_right_panel);
         let split_right = right_open.then(|| self.splitter("split-right", Drag::Right, cx));
-        let panel_drag = if layout.panel_pos.is_side() { Drag::PanelSide } else { Drag::Panel };
-        let split_panel = (layout.panel && !maximized)
-            .then(|| self.splitter("split-panel", panel_drag, cx).into_any_element());
+        let panel_drag = if layout.panel_pos.is_side() {
+            Drag::PanelSide
+        } else {
+            Drag::Panel
+        };
+        let split_panel = (layout.panel && !maximized).then(|| {
+            self.splitter("split-panel", panel_drag, cx)
+                .into_any_element()
+        });
         let right_panel = right_open.then(|| self.ai_panel(window, cx));
         let tab_bar = (!maximized).then(|| self.tab_bar(cx).into_any_element());
         let prompt_bar = self.prompt_bar(cx).map(IntoElement::into_any_element);
-        let external_prompt_bar = self.external_prompt_bar(cx).map(IntoElement::into_any_element);
+        let external_prompt_bar = self
+            .external_prompt_bar(cx)
+            .map(IntoElement::into_any_element);
         let editor: Option<AnyElement> = (!maximized).then(|| {
             if self.model.settings_open {
                 self.settings_page(cx)
@@ -3905,7 +3973,9 @@ impl Render for Workbench {
                 }
             }
         });
-        let bottom_panel = layout.panel.then(|| self.bottom_panel(window, cx).into_any_element());
+        let bottom_panel = layout
+            .panel
+            .then(|| self.bottom_panel(window, cx).into_any_element());
         self.model.refresh_find();
         let find_bar = if maximized {
             None

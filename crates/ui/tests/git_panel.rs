@@ -1,4 +1,3 @@
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -352,7 +351,7 @@ fn outside_a_repository_the_panel_explains_instead_of_failing() {
     );
     assert_eq!(m.branch_label(), "no repository");
     assert!(m.scm.commit().is_err());
-    m.open_diff("x.txt", false);  // must not panic or hang
+    m.open_diff("x.txt", false); // must not panic or hang
     settle(&mut m);
 }
 

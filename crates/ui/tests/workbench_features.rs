@@ -1,4 +1,3 @@
-
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -389,7 +388,7 @@ fn problems_report_syntax_errors_of_open_files_after_a_pause_and_clear_when_fixe
     std::fs::write(t.0.join("bad.rs"), "fn ok() {}\nfn broken( {\n").unwrap();
     let mut m = Model::new(t.0.clone());
     m.open_file(&t.0.join("bad.rs"));
-    m.open_file(&t.0.join("a.txt"));  // plain text: never checked
+    m.open_file(&t.0.join("a.txt")); // plain text: never checked
     assert!(
         m.pump_problems(),
         "a file that was just opened is checked at once"
@@ -470,7 +469,10 @@ fn every_menu_command_runs_without_panicking() {
     for kind in MenuKind::ALL {
         for it in items(kind) {
             if let ui::menu::MenuItem::Command(c) = it {
-                if matches!(c, Command::Exit | Command::RevealInOs | Command::OpenFile | Command::OpenFolder) {
+                if matches!(
+                    c,
+                    Command::Exit | Command::RevealInOs | Command::OpenFile | Command::OpenFolder
+                ) {
                     continue;
                 }
                 m.close_palette();

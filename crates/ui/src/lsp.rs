@@ -1,4 +1,3 @@
-
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -162,11 +161,17 @@ impl LspServer {
                     Err(_) => continue,
                 };
                 let header = format!("Content-Length: {}\r\n\r\n", body.len());
-                if writer.write_all(header.as_bytes()).is_err() || writer.write_all(&body).is_err() || writer.flush().is_err() {
+                if writer.write_all(header.as_bytes()).is_err()
+                    || writer.write_all(&body).is_err()
+                    || writer.flush().is_err()
+                {
                     break;
                 }
 
-                if matches!(msg.get("method").and_then(|m| m.as_str()), Some("initialize")) {
+                if matches!(
+                    msg.get("method").and_then(|m| m.as_str()),
+                    Some("initialize")
+                ) {
                     let init_done = json!({
                         "jsonrpc": "2.0",
                         "method": "initialized",
@@ -213,18 +218,38 @@ impl LspServer {
                     Err(_) => continue,
                 };
 
-                if val.get("method").and_then(|m| m.as_str()) == Some("textDocument/publishDiagnostics") {
+                if val.get("method").and_then(|m| m.as_str())
+                    == Some("textDocument/publishDiagnostics")
+                {
                     if let Some(params) = val.get("params") {
                         if let Some(uri) = params.get("uri").and_then(|u| u.as_str()) {
                             if let Some(path) = uri_to_path(uri) {
                                 let mut items = Vec::new();
-                                if let Some(arr) = params.get("diagnostics").and_then(|d| d.as_array()) {
+                                if let Some(arr) =
+                                    params.get("diagnostics").and_then(|d| d.as_array())
+                                {
                                     for d in arr {
-                                        let line = d.pointer("/range/start/line").and_then(|l| l.as_u64()).unwrap_or(0) as usize;
-                                        let col = d.pointer("/range/start/character").and_then(|c| c.as_u64()).unwrap_or(0) as usize;
-                                        let end_col = d.pointer("/range/end/character").and_then(|c| c.as_u64()).unwrap_or(col as u64 + 1) as usize;
+                                        let line = d
+                                            .pointer("/range/start/line")
+                                            .and_then(|l| l.as_u64())
+                                            .unwrap_or(0)
+                                            as usize;
+                                        let col = d
+                                            .pointer("/range/start/character")
+                                            .and_then(|c| c.as_u64())
+                                            .unwrap_or(0)
+                                            as usize;
+                                        let end_col = d
+                                            .pointer("/range/end/character")
+                                            .and_then(|c| c.as_u64())
+                                            .unwrap_or(col as u64 + 1)
+                                            as usize;
                                         let len = end_col.saturating_sub(col).max(1);
-                                        let message = d.get("message").and_then(|m| m.as_str()).unwrap_or("Error").to_owned();
+                                        let message = d
+                                            .get("message")
+                                            .and_then(|m| m.as_str())
+                                            .unwrap_or("Error")
+                                            .to_owned();
 
                                         items.push(Diagnostic {
                                             line,

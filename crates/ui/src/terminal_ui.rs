@@ -1,4 +1,3 @@
-
 use std::cell::Cell;
 use std::ops::Range;
 use std::rc::Rc;
@@ -499,8 +498,7 @@ impl Workbench {
                     .px_2()
                     .cursor_pointer()
                     .when(active, |d| {
-                        d.bg(rgb(theme::SELECTED))
-                            .text_color(rgb(theme::TEXT))
+                        d.bg(rgb(theme::SELECTED)).text_color(rgb(theme::TEXT))
                     })
                     .when(!active, |d| {
                         d.text_color(rgb(theme::TEXT_DIM))

@@ -1,4 +1,3 @@
-
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,12 +133,15 @@ fn read_manifest(dir: &Path) -> Option<Extension> {
 }
 
 pub fn read_local_readme(dir: &Path) -> Option<String> {
-    let entry = std::fs::read_dir(dir).ok()?.filter_map(Result::ok).find(|e| {
-        e.file_name()
-            .to_string_lossy()
-            .to_ascii_lowercase()
-            .starts_with("readme")
-    })?;
+    let entry = std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .find(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .starts_with("readme")
+        })?;
     let bytes = std::fs::read(entry.path()).ok()?;
     Some(String::from_utf8_lossy(&bytes[..bytes.len().min(README_MAX)]).into_owned())
 }
@@ -189,7 +191,12 @@ pub fn download_icon(config_dir: &Path, id: &str, url: &str) -> Result<PathBuf, 
     let dest = dir.join(format!("{}.{ext}", icon_stem(id)));
     let part = dir.join(format!("{}.{ext}.part", icon_stem(id)));
     let mut cmd = std::process::Command::new("curl.exe");
-    cmd.arg("-sSL").arg("--max-time").arg("15").arg("-o").arg(&part).arg(url);
+    cmd.arg("-sSL")
+        .arg("--max-time")
+        .arg("15")
+        .arg("-o")
+        .arg(&part)
+        .arg(url);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -239,7 +246,11 @@ pub fn download_extra(publisher: &str, name: &str) -> Result<ExtExtra, String> {
         categories: v
             .get("categories")
             .and_then(|c| c.as_array())
-            .map(|a| a.iter().filter_map(|c| c.as_str().map(str::to_owned)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|c| c.as_str().map(str::to_owned))
+                    .collect()
+            })
             .unwrap_or_default(),
     })
 }
@@ -412,17 +423,36 @@ fn fetch_marketplace(url: &str) -> Result<Vec<MarketplaceExtension>, String> {
     let mut list = Vec::new();
     if let Some(items) = val.get("extensions").and_then(|e| e.as_array()) {
         for item in items {
-            let namespace = item.get("namespace").and_then(|n| n.as_str()).unwrap_or("unknown");
-            let name = item.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
+            let namespace = item
+                .get("namespace")
+                .and_then(|n| n.as_str())
+                .unwrap_or("unknown");
+            let name = item
+                .get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or("unknown");
             let id = format!("{namespace}.{name}");
-            let display_name = item.get("displayName").and_then(|d| d.as_str()).unwrap_or(name);
-            let version = item.get("version").and_then(|v| v.as_str()).unwrap_or("0.0.0");
-            let description = item.get("description").and_then(|d| d.as_str()).unwrap_or("");
+            let display_name = item
+                .get("displayName")
+                .and_then(|d| d.as_str())
+                .unwrap_or(name);
+            let version = item
+                .get("version")
+                .and_then(|v| v.as_str())
+                .unwrap_or("0.0.0");
+            let description = item
+                .get("description")
+                .and_then(|d| d.as_str())
+                .unwrap_or("");
             let download_url = item
                 .pointer("/files/download")
                 .and_then(|d| d.as_str())
                 .map(str::to_owned)
-                .or_else(|| item.get("downloadUrl").and_then(|d| d.as_str()).map(str::to_owned))
+                .or_else(|| {
+                    item.get("downloadUrl")
+                        .and_then(|d| d.as_str())
+                        .map(str::to_owned)
+                })
                 .unwrap_or_default();
 
             if !download_url.is_empty() {
@@ -442,9 +472,15 @@ fn fetch_marketplace(url: &str) -> Result<Vec<MarketplaceExtension>, String> {
                         .pointer("/files/readme")
                         .and_then(|v| v.as_str())
                         .map(str::to_owned),
-                    downloads: item.get("downloadCount").and_then(|v| v.as_u64()).unwrap_or(0),
+                    downloads: item
+                        .get("downloadCount")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0),
                     rating: item.get("averageRating").and_then(|v| v.as_f64()),
-                    rating_count: item.get("ratingCount").and_then(|v| v.as_u64()).unwrap_or(0),
+                    rating_count: item
+                        .get("ratingCount")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0),
                     updated: item
                         .get("timestamp")
                         .and_then(|v| v.as_str())
@@ -470,7 +506,11 @@ fn target_platform() -> &'static str {
     }
 }
 
-pub fn resolve_package(publisher: &str, name: &str, listed_url: &str) -> Result<(String, u64), String> {
+pub fn resolve_package(
+    publisher: &str,
+    name: &str,
+    listed_url: &str,
+) -> Result<(String, u64), String> {
     let plain = |s: &str| {
         !s.is_empty()
             && s.chars()
@@ -479,14 +519,19 @@ pub fn resolve_package(publisher: &str, name: &str, listed_url: &str) -> Result<
     if !plain(publisher) || !plain(name) {
         return Ok((listed_url.to_owned(), 0));
     }
-    let Ok(json) = fetch_text(&format!("https://open-vsx.org/api/{publisher}/{name}"), 4_000_000)
-    else {
+    let Ok(json) = fetch_text(
+        &format!("https://open-vsx.org/api/{publisher}/{name}"),
+        4_000_000,
+    ) else {
         return Ok((listed_url.to_owned(), 0));
     };
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) else {
         return Ok((listed_url.to_owned(), 0));
     };
-    let builds = v.get("downloads").and_then(|d| d.as_object()).filter(|d| !d.is_empty());
+    let builds = v
+        .get("downloads")
+        .and_then(|d| d.as_object())
+        .filter(|d| !d.is_empty());
     let Some(builds) = builds else {
         return Ok((listed_url.to_owned(), 0));
     };
@@ -528,13 +573,20 @@ pub fn download_and_install(
     let tmp = std::env::temp_dir().join(format!("nanti-ext-{}-{stamp}.vsix", std::process::id()));
     let mut cmd = std::process::Command::new("curl.exe");
     // --fail: an HTTP error must not be saved as if it were the package.
-    cmd.args(["-sSL", "--fail", "--connect-timeout", "15", "--max-time", "1800"])
-        .args(["--speed-limit", "2048", "--speed-time", "30"])
-        .arg("-o")
-        .arg(&tmp)
-        .arg(&url)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped());
+    cmd.args([
+        "-sSL",
+        "--fail",
+        "--connect-timeout",
+        "15",
+        "--max-time",
+        "1800",
+    ])
+    .args(["--speed-limit", "2048", "--speed-time", "30"])
+    .arg("-o")
+    .arg(&tmp)
+    .arg(&url)
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::piped());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -555,9 +607,10 @@ pub fn download_and_install(
             }
         }
     };
-    progress
-        .done
-        .store(std::fs::metadata(&tmp).map_or(0, |m| m.len()), Ordering::Relaxed);
+    progress.done.store(
+        std::fs::metadata(&tmp).map_or(0, |m| m.len()),
+        Ordering::Relaxed,
+    );
     if !status.success() {
         let mut why = String::new();
         if let Some(mut e) = child.stderr.take() {
@@ -628,13 +681,21 @@ mod tests {
                 Err(e) => failures.push(format!("{id}: {e}")),
             }
         }
-        assert!(failures.is_empty(), "failed installs:\n{}", failures.join("\n"));
+        assert!(
+            failures.is_empty(),
+            "failed installs:\n{}",
+            failures.join("\n")
+        );
     }
 
     #[test]
     fn icon_and_readme_downloads_are_limited_to_open_vsx() {
         let dir = tmp("ic");
-        for bad in ["https://evil.example/icon.png", "http://open-vsx.org/icon.png", ""] {
+        for bad in [
+            "https://evil.example/icon.png",
+            "http://open-vsx.org/icon.png",
+            "",
+        ] {
             assert!(download_icon(&dir.0, "a.b", bad).is_err(), "{bad:?}");
             assert!(download_readme(bad).is_err(), "{bad:?}");
         }
@@ -678,7 +739,8 @@ mod tests {
             "file:///C:/x.vsix",
             "",
         ] {
-            let err = download_and_install(&dir.0, "a", "b", bad, &Progress::default()).unwrap_err();
+            let err =
+                download_and_install(&dir.0, "a", "b", bad, &Progress::default()).unwrap_err();
             assert!(err.contains("Open VSX"), "{bad:?}: {err}");
         }
     }

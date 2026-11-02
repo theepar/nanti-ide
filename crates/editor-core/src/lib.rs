@@ -1,4 +1,3 @@
-
 use std::ops::Range;
 
 mod edit_ops;
@@ -827,7 +826,7 @@ mod tests {
         assert_eq!(b.to_string(), "");
         b.redo();
         b.mark_saved();
-        b.insert_coalescing(3, "d");  // must not merge into the saved step
+        b.insert_coalescing(3, "d"); // must not merge into the saved step
         assert!(b.is_dirty());
         b.undo();
         assert_eq!(b.to_string(), "abc");
@@ -967,7 +966,7 @@ mod tests {
         assert!(e.is_dirty());
         e.mark_saved();
         assert!(!e.is_dirty());
-        e.insert("b");  // typing right after a save must not merge into the saved step
+        e.insert("b"); // typing right after a save must not merge into the saved step
         assert!(e.is_dirty());
         e.undo();
         assert!(!e.is_dirty());

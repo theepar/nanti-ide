@@ -1,4 +1,3 @@
-
 use std::path::{Path, PathBuf};
 
 use gpui::{
@@ -88,7 +87,10 @@ fn shortcuts_and_palette_toggle_every_region_and_reset_restores_defaults(cx: &mu
     cx.simulate_keystrokes("ctrl-j");
     cx.simulate_keystrokes("ctrl-alt-b");
     let l = layout(window, cx);
-    assert!(!l.sidebar && l.panel && !l.right, "the panel starts hidden, so Ctrl+J shows it");
+    assert!(
+        !l.sidebar && l.panel && !l.right,
+        "the panel starts hidden, so Ctrl+J shows it"
+    );
     for query in ["toggle activity bar", "toggle status bar"] {
         cx.simulate_keystrokes("ctrl-shift-p");
         cx.simulate_input(query);
@@ -260,7 +262,10 @@ fn moving_the_sidebar_and_panel_is_saved_and_restored(cx: &mut TestAppContext) {
         assert_eq!((l.sidebar_side, l.panel_pos), (Side::Right, PanelPos::Left));
     }
     let saved = Layout::load(&file);
-    assert_eq!((saved.sidebar_side, saved.panel_pos), (Side::Right, PanelPos::Left));
+    assert_eq!(
+        (saved.sidebar_side, saved.panel_pos),
+        (Side::Right, PanelPos::Left)
+    );
     let (window, cx) = open(cx, &ws.0, Some(file));
     assert_eq!(layout(window, cx), saved);
     for pos in [Command::PanelTop, Command::PanelRight, Command::PanelBottom] {
@@ -288,7 +293,11 @@ fn the_settings_page_renders_and_layout_commands_still_apply(cx: &mut TestAppCon
         })
         .unwrap();
     cx.run_until_parked();
-    assert!(window.read_with(cx, |wb, _| wb.model().settings_open).unwrap());
+    assert!(
+        window
+            .read_with(cx, |wb, _| wb.model().settings_open)
+            .unwrap()
+    );
     window
         .update(cx, |wb, _, cx| {
             wb.model_mut().run_command(Command::SidebarRight);

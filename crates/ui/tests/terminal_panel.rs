@@ -1,4 +1,3 @@
-
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -297,7 +296,7 @@ fn new_terminal_exit_status_and_kill_command(cx: &mut TestAppContext) {
             .unwrap(),
         Some(3)
     );
-    cx.simulate_input("ignored");  // typing into an exited terminal must not panic or reach the editor
+    cx.simulate_input("ignored"); // typing into an exited terminal must not panic or reach the editor
     assert_eq!(editor_text(window, cx), "x");
     cx.simulate_keystrokes("ctrl-shift-p");
     cx.simulate_input("kill active");

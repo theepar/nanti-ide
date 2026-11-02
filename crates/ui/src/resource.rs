@@ -1,4 +1,3 @@
-
 use std::path::{Path, PathBuf};
 
 pub const ORIGIN: &str = "https://nanti-resource.localhost";

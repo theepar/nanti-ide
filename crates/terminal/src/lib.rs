@@ -1,4 +1,3 @@
-
 use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -889,7 +888,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(30));
         }
         assert_eq!(t.exit_code(), Some(7));
-        t.send_text("echo ignored\r");  // must not panic or hang
+        t.send_text("echo ignored\r"); // must not panic or hang
         assert!(t.take_dirty());
         let _ = std::fs::remove_dir_all(&dir);
     }

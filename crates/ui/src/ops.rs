@@ -1,4 +1,3 @@
-
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -504,7 +503,11 @@ impl Model {
     }
 
     fn market_ident(&self, download_url: &str) -> Option<(String, String)> {
-        if let Some(m) = self.marketplace_results.iter().find(|m| m.download_url == download_url) {
+        if let Some(m) = self
+            .marketplace_results
+            .iter()
+            .find(|m| m.download_url == download_url)
+        {
             return Some((m.publisher.clone(), m.name.clone()));
         }
         let d = self
@@ -528,9 +531,13 @@ impl Model {
         let url = download_url.to_owned();
         let progress = self.install_progress.clone();
         progress.done.store(0, std::sync::atomic::Ordering::Relaxed);
-        progress.total.store(0, std::sync::atomic::Ordering::Relaxed);
+        progress
+            .total
+            .store(0, std::sync::atomic::Ordering::Relaxed);
         std::thread::spawn(move || {
-            let _ = tx.send(extensions::download_and_install(&cfg, &publisher, &name, &url, &progress));
+            let _ = tx.send(extensions::download_and_install(
+                &cfg, &publisher, &name, &url, &progress,
+            ));
         });
         self.installing = Some(download_url.to_owned());
         self.install_rx = Some(rx);
@@ -684,7 +691,10 @@ impl Model {
         use std::sync::mpsc::TryRecvError;
         let mut changed = self.recommend_if_idle();
         if self.installing.is_some() {
-            let now = self.install_progress.done.load(std::sync::atomic::Ordering::Relaxed);
+            let now = self
+                .install_progress
+                .done
+                .load(std::sync::atomic::Ordering::Relaxed);
             if now != self.progress_seen {
                 self.progress_seen = now;
                 changed = true;
@@ -698,10 +708,12 @@ impl Model {
             use crate::extensions::Readme;
             let outcome = match polled {
                 Ok((id, res)) => Some((id, res)),
-                Err(TryRecvError::Disconnected) => self
-                    .ext_detail
-                    .as_ref()
-                    .map(|d| (d.id.clone(), Err("the download stopped unexpectedly".to_owned()))),
+                Err(TryRecvError::Disconnected) => self.ext_detail.as_ref().map(|d| {
+                    (
+                        d.id.clone(),
+                        Err("the download stopped unexpectedly".to_owned()),
+                    )
+                }),
                 Err(TryRecvError::Empty) => None,
             };
             if let Some((id, res)) = outcome {
@@ -745,7 +757,9 @@ impl Model {
         if let Some(polled) = self.install_rx.as_ref().map(|rx| rx.try_recv()) {
             let outcome = match polled {
                 Ok(res) => Some(res),
-                Err(TryRecvError::Disconnected) => Some(Err("the download stopped unexpectedly".to_owned())),
+                Err(TryRecvError::Disconnected) => {
+                    Some(Err("the download stopped unexpectedly".to_owned()))
+                }
                 Err(TryRecvError::Empty) => None,
             };
             if let Some(res) = outcome {

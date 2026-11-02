@@ -1,4 +1,3 @@
-
 use std::path::{Path, PathBuf};
 
 use gpui::{TestAppContext, VisualTestContext};

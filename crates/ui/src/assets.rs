@@ -1,39 +1,104 @@
-
 use std::borrow::Cow;
 
 use gpui::{AssetSource, Pixels, Result, SharedString, Styled, Svg, px, rgb, svg};
 
 const ASSETS: &[(&str, &str)] = &[
-    ("logo-mark.svg", include_str!("../../../assets/logo-mark.svg")),
+    (
+        "logo-mark.svg",
+        include_str!("../../../assets/logo-mark.svg"),
+    ),
     ("icons/file.svg", include_str!("../assets/icons/file.svg")),
-    ("icons/folder.svg", include_str!("../assets/icons/folder.svg")),
+    (
+        "icons/folder.svg",
+        include_str!("../assets/icons/folder.svg"),
+    ),
     ("icons/close.svg", include_str!("../assets/icons/close.svg")),
     ("icons/plus.svg", include_str!("../assets/icons/plus.svg")),
     ("icons/trash.svg", include_str!("../assets/icons/trash.svg")),
-    ("icons/maximize.svg", include_str!("../assets/icons/maximize.svg")),
-    ("icons/restore.svg", include_str!("../assets/icons/restore.svg")),
-    ("icons/layout-sidebar-on.svg", include_str!("../assets/icons/layout-sidebar-on.svg")),
-    ("icons/layout-panel-on.svg", include_str!("../assets/icons/layout-panel-on.svg")),
-    ("icons/layout-right-on.svg", include_str!("../assets/icons/layout-right-on.svg")),
-    ("icons/minimize.svg", include_str!("../assets/icons/minimize.svg")),
-    ("icons/settings.svg", include_str!("../assets/icons/settings.svg")),
+    (
+        "icons/maximize.svg",
+        include_str!("../assets/icons/maximize.svg"),
+    ),
+    (
+        "icons/restore.svg",
+        include_str!("../assets/icons/restore.svg"),
+    ),
+    (
+        "icons/layout-sidebar-on.svg",
+        include_str!("../assets/icons/layout-sidebar-on.svg"),
+    ),
+    (
+        "icons/layout-panel-on.svg",
+        include_str!("../assets/icons/layout-panel-on.svg"),
+    ),
+    (
+        "icons/layout-right-on.svg",
+        include_str!("../assets/icons/layout-right-on.svg"),
+    ),
+    (
+        "icons/minimize.svg",
+        include_str!("../assets/icons/minimize.svg"),
+    ),
+    (
+        "icons/settings.svg",
+        include_str!("../assets/icons/settings.svg"),
+    ),
     ("icons/files.svg", include_str!("../assets/icons/files.svg")),
-    ("icons/search.svg", include_str!("../assets/icons/search.svg")),
+    (
+        "icons/search.svg",
+        include_str!("../assets/icons/search.svg"),
+    ),
     ("icons/git.svg", include_str!("../assets/icons/git.svg")),
     ("icons/run.svg", include_str!("../assets/icons/run.svg")),
-    ("icons/extensions.svg", include_str!("../assets/icons/extensions.svg")),
-    ("icons/chevron-right.svg", include_str!("../assets/icons/chevron-right.svg")),
-    ("icons/chevron-down.svg", include_str!("../assets/icons/chevron-down.svg")),
-    ("icons/folder-open.svg", include_str!("../assets/icons/folder-open.svg")),
-    ("icons/file-plus.svg", include_str!("../assets/icons/file-plus.svg")),
-    ("icons/folder-plus.svg", include_str!("../assets/icons/folder-plus.svg")),
-    ("icons/refresh.svg", include_str!("../assets/icons/refresh.svg")),
-    ("icons/collapse.svg", include_str!("../assets/icons/collapse.svg")),
-    ("icons/layout-sidebar.svg", include_str!("../assets/icons/layout-sidebar.svg")),
-    ("icons/layout-panel.svg", include_str!("../assets/icons/layout-panel.svg")),
-    ("icons/layout-right.svg", include_str!("../assets/icons/layout-right.svg")),
+    (
+        "icons/extensions.svg",
+        include_str!("../assets/icons/extensions.svg"),
+    ),
+    (
+        "icons/chevron-right.svg",
+        include_str!("../assets/icons/chevron-right.svg"),
+    ),
+    (
+        "icons/chevron-down.svg",
+        include_str!("../assets/icons/chevron-down.svg"),
+    ),
+    (
+        "icons/folder-open.svg",
+        include_str!("../assets/icons/folder-open.svg"),
+    ),
+    (
+        "icons/file-plus.svg",
+        include_str!("../assets/icons/file-plus.svg"),
+    ),
+    (
+        "icons/folder-plus.svg",
+        include_str!("../assets/icons/folder-plus.svg"),
+    ),
+    (
+        "icons/refresh.svg",
+        include_str!("../assets/icons/refresh.svg"),
+    ),
+    (
+        "icons/collapse.svg",
+        include_str!("../assets/icons/collapse.svg"),
+    ),
+    (
+        "icons/layout-sidebar.svg",
+        include_str!("../assets/icons/layout-sidebar.svg"),
+    ),
+    (
+        "icons/layout-panel.svg",
+        include_str!("../assets/icons/layout-panel.svg"),
+    ),
+    (
+        "icons/layout-right.svg",
+        include_str!("../assets/icons/layout-right.svg"),
+    ),
     ("icons/file.svg", include_str!("../assets/icons/file.svg")),
-    ("icons/folder.svg", include_str!("../assets/icons/folder.svg")),
+    (
+        "icons/folder.svg",
+        include_str!("../assets/icons/folder.svg"),
+    ),
     ("icons/close.svg", include_str!("../assets/icons/close.svg")),
 ];
 

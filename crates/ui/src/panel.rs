@@ -1,4 +1,3 @@
-
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -53,7 +52,10 @@ pub enum UiEvent {
 #[derive(Debug)]
 pub enum HostCommand {
     WebviewMessage(Value),
-    ResolveExternal { id: String, approved: bool },
+    ResolveExternal {
+        id: String,
+        approved: bool,
+    },
     DocOpen {
         uri: String,
         language_id: String,
@@ -218,11 +220,9 @@ impl Panel {
     }
 
     pub fn doc_change(&self, uri: String, version: u64, text: String) {
-        let _ = self.to_host.send(HostCommand::DocChange {
-            uri,
-            version,
-            text,
-        });
+        let _ = self
+            .to_host
+            .send(HostCommand::DocChange { uri, version, text });
     }
 
     pub fn doc_save(&self, uri: String) {
@@ -253,9 +253,7 @@ impl Panel {
                 | UiEvent::TerminalCreate { .. }
                 | UiEvent::TerminalSendText { .. }
                 | UiEvent::TerminalShow { .. }
-                | UiEvent::TerminalDispose { .. }) => {
-                    ui.push(other)
-                }
+                | UiEvent::TerminalDispose { .. }) => ui.push(other),
             }
         }
         if self.html_version > 0 && self.loaded.load(Ordering::SeqCst) {
@@ -371,7 +369,8 @@ fn run_worker(
                     let _ = host.request("workspace.didSaveTextDocument", json!({ "uri": uri }))?;
                 }
                 HostCommand::DocClose { uri } => {
-                    let _ = host.request("workspace.didCloseTextDocument", json!({ "uri": uri }))?;
+                    let _ =
+                        host.request("workspace.didCloseTextDocument", json!({ "uri": uri }))?;
                 }
             }
         }
@@ -431,7 +430,9 @@ fn run_worker(
                 let name = n.params["name"].as_str().unwrap_or("Terminal").to_owned();
                 let shell_path = n.params["shellPath"].as_str().map(str::to_owned);
                 let shell_args = n.params["shellArgs"].as_array().map(|a| {
-                    a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect()
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_owned))
+                        .collect()
                 });
                 let cwd = n.params["cwd"].as_str().map(PathBuf::from);
                 let _ = ui.send(UiEvent::TerminalCreate {
@@ -455,10 +456,7 @@ fn run_worker(
             "terminal.show" => {
                 let id = n.params["id"].as_str().unwrap_or_default().to_owned();
                 let preserve_focus = n.params["preserveFocus"].as_bool().unwrap_or(false);
-                let _ = ui.send(UiEvent::TerminalShow {
-                    id,
-                    preserve_focus,
-                });
+                let _ = ui.send(UiEvent::TerminalShow { id, preserve_focus });
             }
             "terminal.dispose" => {
                 let id = n.params["id"].as_str().unwrap_or_default().to_owned();

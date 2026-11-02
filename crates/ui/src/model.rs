@@ -1,4 +1,3 @@
-
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -226,9 +225,8 @@ pub struct Model {
     pub(crate) icon_rx: std::sync::mpsc::Receiver<(String, PathBuf)>,
     pub ext_detail: Option<ExtDetail>,
     pub settings_open: bool,
-    pub(crate) readme_rx: Option<
-        std::sync::mpsc::Receiver<(String, Result<crate::extensions::ExtExtra, String>)>,
-    >,
+    pub(crate) readme_rx:
+        Option<std::sync::mpsc::Receiver<(String, Result<crate::extensions::ExtExtra, String>)>>,
     pub(crate) marketplace_rx:
         Option<std::sync::mpsc::Receiver<Result<Vec<MarketplaceExtension>, String>>>,
     pub(crate) install_rx: Option<std::sync::mpsc::Receiver<Result<Extension, String>>>,
@@ -460,7 +458,10 @@ impl Model {
 
     fn remove_tab(&mut self, index: usize) {
         let removed = self.tabs.remove(index);
-        let uri = format!("file:///{}", removed.path.to_string_lossy().replace('\\', "/"));
+        let uri = format!(
+            "file:///{}",
+            removed.path.to_string_lossy().replace('\\', "/")
+        );
         self.doc_sync_events.push(DocSyncEvent::Close { uri });
         self.active_tab = match self.active_tab {
             _ if self.tabs.is_empty() => None,
@@ -1298,7 +1299,10 @@ mod tests {
 
         m.marketplace_enabled = true;
         m.activity = Activity::Explorer;
-        assert!(!m.pump_marketplace(), "nothing to fetch outside the Extensions view");
+        assert!(
+            !m.pump_marketplace(),
+            "nothing to fetch outside the Extensions view"
+        );
         assert!(m.marketplace_rx.is_none());
 
         m.activity = Activity::Extensions;
@@ -1352,7 +1356,11 @@ mod tests {
         m.marketplace_rx = Some(rx);
         assert!(m.pump_marketplace());
         assert!(!m.marketplace_searching);
-        assert!(m.marketplace_message.as_deref().is_some_and(|t| t.contains("unexpectedly")));
+        assert!(
+            m.marketplace_message
+                .as_deref()
+                .is_some_and(|t| t.contains("unexpectedly"))
+        );
 
         m.search_marketplace("   ");
         assert!(m.marketplace_results.is_empty() && m.marketplace_query.is_none());
@@ -1394,9 +1402,15 @@ mod tests {
         let ws = workspace("gen");
         let mut m = Model::new(ws.0.clone());
         let g0 = m.explorer_gen;
-        m.submit_input(crate::palette::InputKind::NewFile(ws.0.clone()), "fresh.txt")
-            .unwrap();
-        assert!(m.explorer_gen > g0, "create must invalidate the cached listing");
+        m.submit_input(
+            crate::palette::InputKind::NewFile(ws.0.clone()),
+            "fresh.txt",
+        )
+        .unwrap();
+        assert!(
+            m.explorer_gen > g0,
+            "create must invalidate the cached listing"
+        );
         assert!(names(&m).contains(&"  fresh.txt".to_string()));
     }
 
@@ -1832,7 +1846,10 @@ mod tests {
     fn terminal_commands_raise_requests_and_manage_panel_state() {
         let ws = workspace("termcmd");
         let mut m = Model::new(ws.0.clone());
-        assert!(!m.layout.panel && !m.terminal_focused, "the terminal starts hidden");
+        assert!(
+            !m.layout.panel && !m.terminal_focused,
+            "the terminal starts hidden"
+        );
         m.run_command(Command::ToggleTerminal);
         assert_eq!(
             (m.layout.panel, m.terminal_focused, m.panel_tab),

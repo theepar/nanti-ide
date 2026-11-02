@@ -1,4 +1,3 @@
-
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
@@ -126,8 +125,16 @@ impl Layout {
     pub fn set_panel_width(&mut self, w: f32, window_width: f32) {
         let room = window_width
             - EDITOR_MIN_WIDTH
-            - if self.activity_bar { ACTIVITY_BAR_WIDTH } else { 0.0 }
-            - if self.sidebar { self.sidebar_width } else { 0.0 }
+            - if self.activity_bar {
+                ACTIVITY_BAR_WIDTH
+            } else {
+                0.0
+            }
+            - if self.sidebar {
+                self.sidebar_width
+            } else {
+                0.0
+            }
             - if self.right { self.right_width } else { 0.0 };
         self.panel_width = w.clamp(
             PANEL_WIDTH_MIN,
@@ -138,9 +145,21 @@ impl Layout {
     pub fn effective_panel_width(&self, window_width: f32) -> f32 {
         let room = window_width
             - EDITOR_MIN_WIDTH
-            - if self.activity_bar { ACTIVITY_BAR_WIDTH } else { 0.0 }
-            - if self.sidebar { self.effective_sidebar(window_width) } else { 0.0 }
-            - if self.right { self.right_width.min(RIGHT_MAX) } else { 0.0 };
+            - if self.activity_bar {
+                ACTIVITY_BAR_WIDTH
+            } else {
+                0.0
+            }
+            - if self.sidebar {
+                self.effective_sidebar(window_width)
+            } else {
+                0.0
+            }
+            - if self.right {
+                self.right_width.min(RIGHT_MAX)
+            } else {
+                0.0
+            };
         self.panel_width.min(room.max(PANEL_WIDTH_MIN))
     }
 
@@ -266,7 +285,12 @@ impl Layout {
             .unwrap_or(l.sidebar_side);
         l.panel = flag("panel", l.panel);
         l.panel_height = num("panelHeight", l.panel_height, PANEL_MIN, 4000.0);
-        l.panel_width = num("panelWidth", l.panel_width, PANEL_WIDTH_MIN, PANEL_WIDTH_MAX);
+        l.panel_width = num(
+            "panelWidth",
+            l.panel_width,
+            PANEL_WIDTH_MIN,
+            PANEL_WIDTH_MAX,
+        );
         l.panel_pos = v
             .get("panelPosition")
             .and_then(Value::as_str)
@@ -337,9 +361,15 @@ mod tests {
     #[test]
     fn positions_default_to_the_classic_layout_and_unknown_names_fall_back() {
         let d = Layout::default();
-        assert_eq!((d.sidebar_side, d.panel_pos), (Side::Left, PanelPos::Bottom));
+        assert_eq!(
+            (d.sidebar_side, d.panel_pos),
+            (Side::Left, PanelPos::Bottom)
+        );
         let l = Layout::from_json(r#"{"sidebarSide": "middle", "panelPosition": 7}"#);
-        assert_eq!((l.sidebar_side, l.panel_pos), (Side::Left, PanelPos::Bottom));
+        assert_eq!(
+            (l.sidebar_side, l.panel_pos),
+            (Side::Left, PanelPos::Bottom)
+        );
         let l = Layout::from_json(r#"{"sidebarSide": "right", "panelPosition": "top"}"#);
         assert_eq!((l.sidebar_side, l.panel_pos), (Side::Right, PanelPos::Top));
     }
@@ -349,7 +379,9 @@ mod tests {
         let mut l = Layout::default();
         l.panel_pos = PanelPos::Left;
         l.set_panel_width(5000.0, 1280.0);
-        assert!(l.panel_width <= 1280.0 - EDITOR_MIN_WIDTH - 48.0 - l.sidebar_width - l.right_width);
+        assert!(
+            l.panel_width <= 1280.0 - EDITOR_MIN_WIDTH - 48.0 - l.sidebar_width - l.right_width
+        );
         l.set_panel_width(1.0, 1280.0);
         assert_eq!(l.panel_width, PANEL_WIDTH_MIN);
         l.panel_width = 500.0;

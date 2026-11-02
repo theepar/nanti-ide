@@ -56,93 +56,95 @@ fn hide_console() {
 fn main() {
     #[cfg(all(windows, not(debug_assertions)))]
     hide_console();
-    Application::new().with_assets(ui::assets::Assets).run(|cx: &mut App| {
-        let bounds = Bounds::centered(None, size(px(1280.), px(800.)), cx);
-        let config_dir =
-            ui::layout::layout_path().and_then(|p| p.parent().map(std::path::Path::to_path_buf));
-        let config = host_config_from_env(config_dir.as_deref());
-        let panel_extension = config.as_ref().map(|c| c.extension_dir.clone());
-        let mut root = std::env::var_os("NANTI_WORKSPACE")
-            .map(PathBuf::from)
-            .or_else(|| std::env::current_dir().ok())
-            .unwrap_or_else(|| PathBuf::from("."));
-        if root.ends_with("target\\debug")
-            || root.ends_with("target/debug")
-            || root.ends_with("target\\release")
-            || root.ends_with("target/release")
-        {
-            if let Some(repo) = root.parent().and_then(|p| p.parent()) {
-                root = repo.to_path_buf();
-            }
-        }
-        let window = cx
-            .open_window(
-                WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    titlebar: Some(TitlebarOptions {
-                        title: Some("nanti.".into()),
-                        appears_transparent: true,
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                },
-                move |window, cx| {
-                    cx.new(|cx| {
-                        let mut workbench = Workbench::new(root, cx);
-                        workbench.enable_source_control();
-                        workbench.enable_native_dialogs();
-                        workbench.enable_marketplace();
-                        if let Some(dir) = config_dir.clone() {
-                            workbench.set_config_dir(dir, panel_extension.clone());
-                        }
-                        if let Some(path) = ui::layout::layout_path() {
-                            workbench.set_layout_path(path);
-                        }
-                        if let Some(cfg) = config {
-                            let diag_log = cfg.selftest_log.clone();
-                            let (events, to_host, _shutdown) = spawn_worker(cfg);
-                            match Panel::new(window, events, to_host, diag_log) {
-                                Ok(panel) => workbench.attach_panel(panel),
-                                Err(e) => eprintln!("cannot create WebView2 panel: {e}"),
-                            }
-                        }
-                        workbench
-                    })
-                },
-            )
-            .unwrap();
-
-        window
-            .update(cx, |_, window, cx| {
-                let entity = cx.entity();
-                window.on_window_should_close(cx, move |_window, cx| {
-                    entity.update(cx, |wb, cx| {
-                        let ok = wb.allow_window_close();
-                        cx.notify();
-                        ok
-                    })
-                });
-            })
-            .unwrap();
-
-        cx.spawn(async move |cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(30))
-                    .await;
-                let alive = window
-                    .update(cx, |workbench, _window, cx| {
-                        if workbench.pump() {
-                            cx.notify();
-                        }
-                    })
-                    .is_ok();
-                if !alive {
-                    break;
+    Application::new()
+        .with_assets(ui::assets::Assets)
+        .run(|cx: &mut App| {
+            let bounds = Bounds::centered(None, size(px(1280.), px(800.)), cx);
+            let config_dir = ui::layout::layout_path()
+                .and_then(|p| p.parent().map(std::path::Path::to_path_buf));
+            let config = host_config_from_env(config_dir.as_deref());
+            let panel_extension = config.as_ref().map(|c| c.extension_dir.clone());
+            let mut root = std::env::var_os("NANTI_WORKSPACE")
+                .map(PathBuf::from)
+                .or_else(|| std::env::current_dir().ok())
+                .unwrap_or_else(|| PathBuf::from("."));
+            if root.ends_with("target\\debug")
+                || root.ends_with("target/debug")
+                || root.ends_with("target\\release")
+                || root.ends_with("target/release")
+            {
+                if let Some(repo) = root.parent().and_then(|p| p.parent()) {
+                    root = repo.to_path_buf();
                 }
             }
-        })
-        .detach();
-        cx.activate(true);
-    });
+            let window = cx
+                .open_window(
+                    WindowOptions {
+                        window_bounds: Some(WindowBounds::Windowed(bounds)),
+                        titlebar: Some(TitlebarOptions {
+                            title: Some("nanti.".into()),
+                            appears_transparent: true,
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                    move |window, cx| {
+                        cx.new(|cx| {
+                            let mut workbench = Workbench::new(root, cx);
+                            workbench.enable_source_control();
+                            workbench.enable_native_dialogs();
+                            workbench.enable_marketplace();
+                            if let Some(dir) = config_dir.clone() {
+                                workbench.set_config_dir(dir, panel_extension.clone());
+                            }
+                            if let Some(path) = ui::layout::layout_path() {
+                                workbench.set_layout_path(path);
+                            }
+                            if let Some(cfg) = config {
+                                let diag_log = cfg.selftest_log.clone();
+                                let (events, to_host, _shutdown) = spawn_worker(cfg);
+                                match Panel::new(window, events, to_host, diag_log) {
+                                    Ok(panel) => workbench.attach_panel(panel),
+                                    Err(e) => eprintln!("cannot create WebView2 panel: {e}"),
+                                }
+                            }
+                            workbench
+                        })
+                    },
+                )
+                .unwrap();
+
+            window
+                .update(cx, |_, window, cx| {
+                    let entity = cx.entity();
+                    window.on_window_should_close(cx, move |_window, cx| {
+                        entity.update(cx, |wb, cx| {
+                            let ok = wb.allow_window_close();
+                            cx.notify();
+                            ok
+                        })
+                    });
+                })
+                .unwrap();
+
+            cx.spawn(async move |cx| {
+                loop {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(30))
+                        .await;
+                    let alive = window
+                        .update(cx, |workbench, _window, cx| {
+                            if workbench.pump() {
+                                cx.notify();
+                            }
+                        })
+                        .is_ok();
+                    if !alive {
+                        break;
+                    }
+                }
+            })
+            .detach();
+            cx.activate(true);
+        });
 }

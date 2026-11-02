@@ -1,8 +1,7 @@
-
 use gpui::{
-    AnyElement, Bounds, ClickEvent, Context, FontWeight, IntoElement, MouseButton, MouseDownEvent, Pixels,
-    ObjectFit, ScrollHandle, SharedString, Window, WindowControlArea, canvas, div, fill, img, point,
-    prelude::*, px, rgb, size,
+    AnyElement, Bounds, ClickEvent, Context, FontWeight, IntoElement, MouseButton, MouseDownEvent,
+    ObjectFit, Pixels, ScrollHandle, SharedString, Window, WindowControlArea, canvas, div, fill,
+    img, point, prelude::*, px, rgb, size,
 };
 
 use crate::assets;
@@ -133,7 +132,9 @@ fn readme_blocks(text: &str) -> Vec<AnyElement> {
                     .pb_1()
                     .text_size(px(size))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .when(level <= 2, |d| d.border_b_1().border_color(rgb(theme::BORDER)))
+                    .when(level <= 2, |d| {
+                        d.border_b_1().border_color(rgb(theme::BORDER))
+                    })
                     .child(SharedString::from(t[level..].trim().to_owned()))
                     .into_any_element(),
             );
@@ -424,7 +425,11 @@ impl Workbench {
             .child(Self::caption_button(
                 "win-max",
                 WindowControlArea::Max,
-                if window.is_maximized() { "restore" } else { "maximize" },
+                if window.is_maximized() {
+                    "restore"
+                } else {
+                    "maximize"
+                },
                 false,
             ))
             .child(Self::caption_button(
@@ -791,8 +796,16 @@ impl Workbench {
             .into_any_element()
     }
 
-    fn ext_icon(&self, id: &str, own: Option<&std::path::PathBuf>, label: &str, size: f32) -> AnyElement {
-        let path = own.cloned().or_else(|| self.model.ext_icons.get(id).cloned());
+    fn ext_icon(
+        &self,
+        id: &str,
+        own: Option<&std::path::PathBuf>,
+        label: &str,
+        size: f32,
+    ) -> AnyElement {
+        let path = own
+            .cloned()
+            .or_else(|| self.model.ext_icons.get(id).cloned());
         match path {
             Some(p) => img(p)
                 .size(px(size))
@@ -820,7 +833,6 @@ impl Workbench {
                 .into_any_element(),
         }
     }
-
 
     fn setting_row(title: &'static str, hint: &'static str, control: AnyElement) -> AnyElement {
         div()
@@ -861,29 +873,34 @@ impl Workbench {
             .border_1()
             .border_color(rgb(theme::BORDER))
             .overflow_hidden()
-            .children(options.into_iter().enumerate().map(|(i, (label, on, command))| {
-                div()
-                    .id((id, i))
-                    .flex()
-                    .items_center()
-                    .h(px(28.))
-                    .px_3()
-                    .text_size(px(12.))
-                    .cursor_pointer()
-                    .when(on, |d| {
-                        d.bg(rgb(theme::ACCENT))
-                            .text_color(rgb(0x1e1e1e))
-                            .font_weight(FontWeight::MEDIUM)
-                    })
-                    .when(!on, |d| {
-                        d.text_color(rgb(theme::TEXT))
-                            .hover(|s| s.bg(rgb(theme::HOVER)))
-                    })
-                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                        this.apply_command(command, window, cx);
-                    }))
-                    .child(label)
-            }))
+            .children(
+                options
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, (label, on, command))| {
+                        div()
+                            .id((id, i))
+                            .flex()
+                            .items_center()
+                            .h(px(28.))
+                            .px_3()
+                            .text_size(px(12.))
+                            .cursor_pointer()
+                            .when(on, |d| {
+                                d.bg(rgb(theme::ACCENT))
+                                    .text_color(rgb(0x1e1e1e))
+                                    .font_weight(FontWeight::MEDIUM)
+                            })
+                            .when(!on, |d| {
+                                d.text_color(rgb(theme::TEXT))
+                                    .hover(|s| s.bg(rgb(theme::HOVER)))
+                            })
+                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                this.apply_command(command, window, cx);
+                            }))
+                            .child(label)
+                    }),
+            )
             .into_any_element()
     }
 
@@ -933,14 +950,22 @@ impl Workbench {
             "set-sidebar-side",
             vec![
                 ("Left", l.sidebar_side == Side::Left, Command::SidebarLeft),
-                ("Right", l.sidebar_side == Side::Right, Command::SidebarRight),
+                (
+                    "Right",
+                    l.sidebar_side == Side::Right,
+                    Command::SidebarRight,
+                ),
             ],
             cx,
         );
         let panel_pos = self.segmented(
             "set-panel-pos",
             vec![
-                ("Bottom", l.panel_pos == PanelPos::Bottom, Command::PanelBottom),
+                (
+                    "Bottom",
+                    l.panel_pos == PanelPos::Bottom,
+                    Command::PanelBottom,
+                ),
                 ("Top", l.panel_pos == PanelPos::Top, Command::PanelTop),
                 ("Left", l.panel_pos == PanelPos::Left, Command::PanelLeft),
                 ("Right", l.panel_pos == PanelPos::Right, Command::PanelRight),
@@ -990,7 +1015,12 @@ impl Workbench {
                     .child(Self::setting_row(
                         "Activity bar",
                         "The icon strip next to the sidebar.",
-                        self.switch("set-activity", l.activity_bar, Command::ToggleActivityBar, cx),
+                        self.switch(
+                            "set-activity",
+                            l.activity_bar,
+                            Command::ToggleActivityBar,
+                            cx,
+                        ),
                     ))
                     .child(Self::setting_row(
                         "Sidebar",
@@ -1028,13 +1058,11 @@ impl Workbench {
                                     .overflow_hidden()
                                     .child(SharedString::from(format!("Saved in {saved_in}"))),
                             )
-                            .child(
-                                Self::flat_button("set-reset", "Reset layout").on_click(
-                                    cx.listener(|this, _: &ClickEvent, window, cx| {
-                                        this.apply_command(Command::ResetLayout, window, cx);
-                                    }),
-                                ),
-                            ),
+                            .child(Self::flat_button("set-reset", "Reset layout").on_click(
+                                cx.listener(|this, _: &ClickEvent, window, cx| {
+                                    this.apply_command(Command::ResetLayout, window, cx);
+                                }),
+                            )),
                     ),
             );
         div()
@@ -1043,7 +1071,12 @@ impl Workbench {
             .flex_1()
             .min_h_0()
             .bg(rgb(theme::EDITOR))
-            .child(self.scroll_box("settings", page.into_any_element(), &self.scrolls.settings, cx))
+            .child(self.scroll_box(
+                "settings",
+                page.into_any_element(),
+                &self.scrolls.settings,
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -1423,7 +1456,9 @@ impl Workbench {
                                                 .flex_none()
                                                 .text_size(px(11.))
                                                 .text_color(rgb(theme::TEXT_DIM))
-                                                .child(SharedString::from(self.model.install_label()))
+                                                .child(SharedString::from(
+                                                    self.model.install_label(),
+                                                ))
                                                 .into_any_element()
                                         } else {
                                             Self::flat_button(("mkt-install-btn", i), "Install")
@@ -1433,8 +1468,9 @@ impl Workbench {
                                                 .on_click(cx.listener(
                                                     move |this, _: &ClickEvent, _w, cx| {
                                                         cx.stop_propagation();
-                                                        this.model
-                                                            .install_from_marketplace(&download_url);
+                                                        this.model.install_from_marketplace(
+                                                            &download_url,
+                                                        );
                                                         cx.notify();
                                                     },
                                                 ))
@@ -1538,53 +1574,57 @@ impl Workbench {
                         }))
                         .child(self.ext_icon(&x.id, x.icon.as_ref(), &x.display_name, 40.))
                         .child(
-                            div().flex().flex_col().flex_1().min_w_0()
-                        .child(
                             div()
                                 .flex()
-                                .justify_between()
-                                .text_size(px(13.))
-                                .child(SharedString::from(x.display_name.clone()))
+                                .flex_col()
+                                .flex_1()
+                                .min_w_0()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .justify_between()
+                                        .text_size(px(13.))
+                                        .child(SharedString::from(x.display_name.clone()))
+                                        .child(
+                                            div()
+                                                .text_size(px(11.))
+                                                .text_color(rgb(theme::TEXT_DIM))
+                                                .child(SharedString::from(x.version.clone())),
+                                        ),
+                                )
                                 .child(
                                     div()
                                         .text_size(px(11.))
                                         .text_color(rgb(theme::TEXT_DIM))
-                                        .child(SharedString::from(x.version.clone())),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(11.))
-                                .text_color(rgb(theme::TEXT_DIM))
-                                .child(SharedString::from(format!(
-                                    "{}{}{}",
-                                    x.id,
-                                    if x.commands > 0 {
-                                        format!("  ·  {} commands", x.commands)
-                                    } else {
-                                        String::new()
-                                    },
-                                    if x.engine.is_empty() {
-                                        String::new()
-                                    } else {
-                                        format!("  ·  vscode {}", x.engine)
-                                    }
-                                ))),
-                        )
-                        .children((!x.description.is_empty()).then(|| {
-                            div()
-                                .pt_1()
-                                .text_size(px(12.))
-                                .child(SharedString::from(x.description.clone()))
-                        }))
-                        .children(active.then(|| {
-                            div()
-                                .pt_1()
-                                .text_size(px(11.))
-                                .text_color(rgb(0x81b88b))
-                                .child("● running in the right panel")
-                        }))
-                        .child(actions)
+                                        .child(SharedString::from(format!(
+                                            "{}{}{}",
+                                            x.id,
+                                            if x.commands > 0 {
+                                                format!("  ·  {} commands", x.commands)
+                                            } else {
+                                                String::new()
+                                            },
+                                            if x.engine.is_empty() {
+                                                String::new()
+                                            } else {
+                                                format!("  ·  vscode {}", x.engine)
+                                            }
+                                        ))),
+                                )
+                                .children((!x.description.is_empty()).then(|| {
+                                    div()
+                                        .pt_1()
+                                        .text_size(px(12.))
+                                        .child(SharedString::from(x.description.clone()))
+                                }))
+                                .children(active.then(|| {
+                                    div()
+                                        .pt_1()
+                                        .text_size(px(11.))
+                                        .text_color(rgb(0x81b88b))
+                                        .child("● running in the right panel")
+                                }))
+                                .child(actions),
                         )
                         .into_any_element(),
                 );
@@ -1612,29 +1652,28 @@ impl Workbench {
             .flex_col()
             .flex_1()
             .min_h_0()
-            .child(
-                div()
-                    .px_2()
-                    .pb_2()
-                    .child(search_field),
-            )
+            .child(div().px_2().pb_2().child(search_field))
             .child(
                 div()
                     .flex()
                     .gap_1()
                     .px_2()
                     .pb_1()
-                    .child(Self::flat_button("ext-install", "Install from VSIX...").on_click(
-                        cx.listener(|this, _: &ClickEvent, window, cx| {
-                            this.apply_command(Command::InstallVsix, window, cx)
-                        }),
-                    ))
-                    .child(Self::flat_button("ext-refresh", "Refresh").on_click(
-                        cx.listener(|this, _: &ClickEvent, _w, cx| {
-                            this.model.refresh_extensions();
-                            cx.notify();
-                        }),
-                    )),
+                    .child(
+                        Self::flat_button("ext-install", "Install from VSIX...").on_click(
+                            cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.apply_command(Command::InstallVsix, window, cx)
+                            }),
+                        ),
+                    )
+                    .child(
+                        Self::flat_button("ext-refresh", "Refresh").on_click(cx.listener(
+                            |this, _: &ClickEvent, _w, cx| {
+                                this.model.refresh_extensions();
+                                cx.notify();
+                            },
+                        )),
+                    ),
             )
             .child(self.scroll_list("ext-list", &self.scrolls.ext, list_rows, None, cx))
             .child(
@@ -1810,9 +1849,7 @@ impl Workbench {
             .items_center()
             .gap_1()
             .font_family("Segoe UI")
-            .child(
-                div().mb_3().child(assets::logo_mark(72., 0xffffff)),
-            )
+            .child(div().mb_3().child(assets::logo_mark(72., 0xffffff)))
             .child(
                 div()
                     .text_size(px(32.))

@@ -1,4 +1,3 @@
-
 use tree_sitter::{Node, Parser};
 
 use crate::{Language, MAX_BYTES};

@@ -1,4 +1,3 @@
-
 use crate::Editor;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
