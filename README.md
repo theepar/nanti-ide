@@ -213,10 +213,7 @@ All bundled components and dependencies are open source and used in compliance w
 
 ### Trademark Notice & Disclaimers
 - "Visual Studio Code" and "VS Code" are registered trademarks of **Microsoft Corporation**.
-- "Zed" is a trademark of **Zed Industries, Inc.**
-- "Claude" and "Claude Code" are trademarks of **Anthropic PBC**.
-- "OpenAI" and "Codex" are trademarks of **OpenAI, Inc.**
 
-`nanti.` is an independent open-source project and is **not affiliated with, sponsored by, or endorsed by Microsoft, Zed Industries, Anthropic, OpenAI, or Google**. Any references to "Visual Studio Code", "VS Code", or extension APIs are made strictly for technical compatibility and identification purposes under the legal doctrine of **Nominative Fair Use**. `nanti.` connects exclusively to the Eclipse Foundation's **Open VSX Registry** and does not access or redistribute software from the Microsoft Visual Studio Marketplace.
+`nanti.` is an independent open-source project and is **not affiliated with, sponsored by, or endorsed by Microsoft**. Any references to "Visual Studio Code", "VS Code", or extension APIs are made strictly for technical compatibility and identification purposes under the legal doctrine of **Nominative Fair Use**. `nanti.` connects exclusively to the Eclipse Foundation's **Open VSX Registry** and does not access or redistribute software from the Microsoft Visual Studio Marketplace.
 
 For DMCA inquiries or copyright notifications, please consult [LEGAL.md](LEGAL.md) or contact `legal@nanti.dev`.
