@@ -912,7 +912,14 @@ impl Workbench {
         }
     }
 
+    fn reclaim_focus(&self) {
+        if let Some(panel) = self.panel.as_ref() {
+            panel.focus_parent();
+        }
+    }
+
     fn focus_target(&mut self, target: Target, window: &mut Window) {
+        self.reclaim_focus();
         match target {
             Target::FindQuery | Target::FindReplace => {
                 if let Some(f) = self.model.find.as_mut() {
@@ -4562,7 +4569,10 @@ impl Render for Workbench {
                     panel.set_area(x, y, w, h);
                     panel.set_visible(true);
                 }
-                None => panel.set_visible(false),
+                None => {
+                    panel.set_visible(false);
+                    panel.focus_parent();
+                }
             }
             self.webview_applied = webview_target;
         }
@@ -4671,6 +4681,10 @@ impl Render for Workbench {
             .track_focus(&self.root_focus)
             .on_key_down(cx.listener(Self::on_key_down))
             .on_mouse_move(cx.listener(Self::on_root_mouse_move))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _: &MouseDownEvent, _w, _cx| this.reclaim_focus()),
+            )
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_root_mouse_up))
             .text_color(rgb(theme::TEXT))
             .child(menu_bar)

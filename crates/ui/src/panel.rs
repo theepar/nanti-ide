@@ -205,6 +205,10 @@ impl Panel {
         })
     }
 
+    pub fn focus_parent(&self) {
+        let _ = self.webview.focus_parent();
+    }
+
     pub fn set_visible(&self, visible: bool) {
         let _ = self.webview.set_visible(visible);
     }
