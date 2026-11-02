@@ -746,7 +746,6 @@ impl Model {
                 self.doc_sync_events.push(DocSyncEvent::Save { uri });
                 let saved = format!("Saved {}", tab.title);
                 self.output.push("Files", &saved);
-                self.message = Some(saved);
                 self.scm.request(Job::Refresh);
                 self.reload_diff_tabs();
                 SaveOutcome::Saved

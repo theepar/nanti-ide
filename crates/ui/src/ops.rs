@@ -506,10 +506,27 @@ impl Model {
     }
 
     pub fn extension_title(&self) -> String {
-        self.panel_extension
-            .as_deref()
-            .and_then(|dir| self.extensions.iter().find(|e| e.dir == dir))
-            .map_or_else(|| "Extension".to_owned(), |e| e.display_name.clone())
+        let Some(dir) = self.panel_extension.as_deref() else {
+            return "Extension".to_owned();
+        };
+        let from_manifest = std::fs::read_to_string(dir.join("package.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            .and_then(|v| {
+                v.pointer("/contributes/views")?
+                    .as_object()?
+                    .values()
+                    .flat_map(|list| list.as_array().into_iter().flatten())
+                    .filter_map(|view| view.get("name")?.as_str())
+                    .find(|n| !n.trim().is_empty() && !n.starts_with('%'))
+                    .map(str::to_owned)
+            });
+        from_manifest.unwrap_or_else(|| {
+            self.extensions
+                .iter()
+                .find(|e| e.dir == dir)
+                .map_or_else(|| "Extension".to_owned(), |e| e.display_name.clone())
+        })
     }
 
     pub fn open_extension_tab(&mut self) {

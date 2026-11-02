@@ -8,9 +8,9 @@ use editor_core::Editor;
 use gpui::{
     AnyElement, Bounds, ClickEvent, ClipboardItem, Context, ElementInputHandler,
     EntityInputHandler, FocusHandle, FontWeight, HighlightStyle, IntoElement, KeyDownEvent,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, ScrollHandle,
-    ShapedLine, SharedString, StyledText, TextRun, UTF16Selection, Window, canvas, div, font,
-    point, prelude::*, px, rgb, rgba, size,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, ScrollDelta,
+    ScrollHandle, ScrollWheelEvent, ShapedLine, SharedString, StyledText, TextRun, UTF16Selection,
+    Window, canvas, div, font, point, prelude::*, px, relative, rgb, rgba, size,
 };
 use syntax::{Language, LineSpan, SyntaxHighlighter, Token};
 use terminal_ui::{GridMetrics, TerminalSession};
@@ -284,6 +284,8 @@ pub struct Workbench {
     external_prompt: Option<(String, String)>,
     focus: FocusHandle,
     palette_focus: FocusHandle,
+    palette_top: std::cell::Cell<usize>,
+    palette_follow: RefCell<(usize, String)>,
     root_focus: FocusHandle,
     find_query_focus: FocusHandle,
     find_replace_focus: FocusHandle,
@@ -330,6 +332,8 @@ impl Workbench {
             external_prompt: None,
             focus: cx.focus_handle(),
             palette_focus: cx.focus_handle(),
+            palette_top: std::cell::Cell::new(0),
+            palette_follow: RefCell::new((0, String::new())),
             root_focus: cx.focus_handle(),
             find_query_focus: cx.focus_handle(),
             find_replace_focus: cx.focus_handle(),
@@ -1657,6 +1661,18 @@ impl Workbench {
                     .rounded_md()
                     .cursor_pointer()
                     .hover(|s| s.bg(rgb(theme::HOVER)))
+                    .when(selected, |d| {
+                        d.bg(rgb(theme::SELECTED)).child(
+                            div()
+                                .absolute()
+                                .left(px(-4.))
+                                .top(px(8.))
+                                .w(px(2.))
+                                .h(px(24.))
+                                .rounded_sm()
+                                .bg(rgb(theme::ACCENT)),
+                        )
+                    })
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         this.model.select_activity(a);
                         if this.model.activity == a && this.model.layout.sidebar {
@@ -1832,9 +1848,9 @@ impl Workbench {
                                             chevron.map(|c| assets::icon(c, 14., theme::TEXT_DIM)),
                                         ))
                                         .child(if is_dir {
-                                            assets::icon("folder", 15., 0x7f9fbf)
+                                            assets::icon("folder", 15., 0x7f9fbf).into_any_element()
                                         } else {
-                                            assets::icon("file", 15., assets::file_color(&e.name))
+                                            Self::file_icon(&e.name, 15.)
                                         })
                                         .child(
                                             div()
@@ -2011,7 +2027,15 @@ impl Workbench {
                     .border_color(rgb(theme::BORDER))
                     .cursor_pointer()
                     .when(active, |d| {
-                        d.bg(rgb(theme::EDITOR)).text_color(rgb(0xffffff))
+                        d.bg(rgb(theme::EDITOR)).text_color(rgb(0xffffff)).child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .right_0()
+                                .h(px(2.))
+                                .bg(rgb(theme::ACCENT)),
+                        )
                     })
                     .when(!active, |d| {
                         d.text_color(rgb(theme::TEXT_DIM))
@@ -2022,7 +2046,10 @@ impl Workbench {
                         this.focus_editor(window);
                         cx.notify();
                     }))
-                    .child(assets::icon("file", 14., assets::file_color(&t.title)))
+                    .child(match &t.content {
+                        TabContent::Webview => self.extension_icon(14.),
+                        _ => Self::file_icon(&t.title, 14.),
+                    })
                     .child(SharedString::from(t.title.clone()))
                     .child(
                         div()
@@ -2686,7 +2713,9 @@ impl Workbench {
                                 theme::TEXT_DIM
                             }))
                             .when(selected, |d| {
-                                d.border_b_1().border_color(rgb(theme::ACCENT))
+                                d.bg(rgb(theme::SELECTED))
+                                    .border_b_1()
+                                    .border_color(rgb(theme::ACCENT))
                             })
                             .hover(|s| s.bg(rgb(theme::HOVER)))
                             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
@@ -2740,6 +2769,40 @@ impl Workbench {
             .child(body)
     }
 
+    fn file_icon(name: &str, size: f32) -> AnyElement {
+        let color = assets::file_color(name);
+        match assets::file_badge(name) {
+            Some(badge) => div()
+                .flex_none()
+                .w(px(size + 4.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(px(if badge.len() > 2 { 8. } else { 10. }))
+                .font_weight(FontWeight::BOLD)
+                .text_color(rgb(color))
+                .child(badge)
+                .into_any_element(),
+            None => assets::icon("file", size, color).into_any_element(),
+        }
+    }
+
+    fn extension_icon(&self, size: f32) -> AnyElement {
+        let icon = self
+            .model
+            .panel_extension
+            .as_deref()
+            .and_then(|dir| self.model.extensions.iter().find(|e| e.dir == dir))
+            .and_then(|e| e.icon.clone());
+        match icon {
+            Some(path) => gpui::img(path)
+                .flex_none()
+                .size(px(size))
+                .into_any_element(),
+            None => assets::icon("extensions", size, theme::ICON).into_any_element(),
+        }
+    }
+
     fn panel_button(id: &'static str, icon_name: &'static str) -> gpui::Stateful<gpui::Div> {
         div()
             .id(id)
@@ -2770,7 +2833,8 @@ impl Workbench {
             .h(px(20.))
             .rounded_sm()
             .cursor_pointer()
-            .hover(|s| s.bg(rgb(theme::HOVER)))
+            .when(on, |d| d.bg(rgb(theme::SELECTED)))
+            .hover(|s| s.bg(rgb(theme::HOVER_STRONG)))
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 this.apply_command(command, window, cx);
             }))
@@ -2810,7 +2874,9 @@ impl Workbench {
                         (None, None)
                     }
                 };
-                (pos, eol, Some(model::tab_language(t)))
+                let lang =
+                    (!matches!(t.content, TabContent::Webview)).then(|| model::tab_language(t));
+                (pos, eol, lang)
             }
             None => (None, None, None),
         };
@@ -2950,6 +3016,11 @@ impl Workbench {
 }
 
 impl Workbench {
+    #[doc(hidden)]
+    pub fn palette_top_for_tests(&self) -> usize {
+        self.palette_top.get()
+    }
+
     pub fn active_highlights(&self) -> Option<Rc<Vec<Vec<LineSpan>>>> {
         let tab = self.model.active()?;
         match &tab.content {
@@ -3993,7 +4064,22 @@ impl Workbench {
         .left_0()
         .size_full();
 
-        let start = (p.selected + 1).saturating_sub(PALETTE_ROWS);
+        let count = p.result_count();
+        let max_top = count.saturating_sub(PALETTE_ROWS);
+        {
+            let mut follow = self.palette_follow.borrow_mut();
+            if follow.0 != p.selected || follow.1 != query {
+                *follow = (p.selected, query.clone());
+                let top = self.palette_top.get();
+                if p.selected < top {
+                    self.palette_top.set(p.selected);
+                } else if p.selected >= top + PALETTE_ROWS {
+                    self.palette_top.set(p.selected + 1 - PALETTE_ROWS);
+                }
+            }
+        }
+        let start = self.palette_top.get().min(max_top);
+        self.palette_top.set(start);
         let is_lang_mode = matches!(p.mode, palette::PaletteMode::LanguageMode);
         let mut rows: Vec<AnyElement> = Vec::new();
         for (i, item) in p.results().enumerate().skip(start).take(PALETTE_ROWS) {
@@ -4170,7 +4256,40 @@ impl Workbench {
                                 }))
                                 .child(input_canvas),
                         )
-                        .children(rows)
+                        .child(
+                            div()
+                                .id("palette-rows")
+                                .relative()
+                                .on_scroll_wheel(cx.listener(
+                                    move |this, ev: &ScrollWheelEvent, _w, cx| {
+                                        let lines = match ev.delta {
+                                            ScrollDelta::Lines(l) => l.y.round() as i32,
+                                            ScrollDelta::Pixels(d) => {
+                                                (f32::from(d.y) / 20.0).round() as i32
+                                            }
+                                        };
+                                        let top = this.palette_top.get() as i32 - lines;
+                                        let top = top.clamp(0, max_top as i32) as usize;
+                                        if top != this.palette_top.get() {
+                                            this.palette_top.set(top);
+                                            cx.notify();
+                                        }
+                                        cx.stop_propagation();
+                                    },
+                                ))
+                                .children(rows)
+                                .children((count > PALETTE_ROWS).then(|| {
+                                    let frac = |n: usize| n as f32 / count as f32;
+                                    div()
+                                        .absolute()
+                                        .right(px(2.))
+                                        .top(relative(frac(start)))
+                                        .h(relative(frac(PALETTE_ROWS).max(0.06)))
+                                        .w(px(3.))
+                                        .rounded_sm()
+                                        .bg(rgb(theme::SCROLL_THUMB))
+                                })),
+                        )
                         .children(empty)
                         .children(error),
                 ),

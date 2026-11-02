@@ -311,3 +311,43 @@ fn ctrl_p_switches_between_the_two_palettes_and_ignores_other_shortcuts(cx: &mut
         .unwrap();
     assert_eq!(mode, "Files");
 }
+
+#[gpui::test]
+fn the_palette_list_scrolls_with_the_mouse_wheel(cx: &mut TestAppContext) {
+    let ws = workspace("palwheel", &[("a.txt", "A")]);
+    let (window, cx) = open(cx, &ws.0, "a.txt");
+    cx.simulate_keystrokes("ctrl-shift-p");
+    cx.run_until_parked();
+    assert_eq!(
+        window
+            .read_with(cx, |wb, _| wb.palette_top_for_tests())
+            .unwrap(),
+        0
+    );
+    let wheel = |cx: &mut VisualTestContext, y: f32| {
+        cx.simulate_mouse_move(
+            gpui::point(gpui::px(960.0), gpui::px(120.0)),
+            None,
+            gpui::Modifiers::default(),
+        );
+        cx.run_until_parked();
+        cx.simulate_event(gpui::ScrollWheelEvent {
+            position: gpui::point(gpui::px(960.0), gpui::px(120.0)),
+            delta: gpui::ScrollDelta::Lines(gpui::point(0.0, y)),
+            modifiers: gpui::Modifiers::default(),
+            touch_phase: gpui::TouchPhase::Moved,
+        });
+    };
+    wheel(cx, -3.0);
+    let down = window
+        .read_with(cx, |wb, _| wb.palette_top_for_tests())
+        .unwrap();
+    assert!(down > 0, "wheel down moves the window of rows: {down}");
+    wheel(cx, 30.0);
+    assert_eq!(
+        window
+            .read_with(cx, |wb, _| wb.palette_top_for_tests())
+            .unwrap(),
+        0
+    );
+}

@@ -136,9 +136,55 @@ pub fn logo_mark(width: f32, color: u32) -> Svg {
         .text_color(rgb(color))
 }
 
+pub fn file_badge(name: &str) -> Option<&'static str> {
+    let ext = name.rsplit_once('.').map_or("", |(_, e)| e);
+    Some(match ext.to_ascii_lowercase().as_str() {
+        "rs" => "RS",
+        "js" | "mjs" | "cjs" => "JS",
+        "jsx" => "JSX",
+        "ts" => "TS",
+        "tsx" => "TSX",
+        "json" | "jsonc" => "{}",
+        "md" | "markdown" => "MD",
+        "toml" => "TM",
+        "yaml" | "yml" => "YML",
+        "go" => "GO",
+        "dart" => "DT",
+        "py" => "PY",
+        "html" | "htm" => "<>",
+        "css" => "#",
+        "scss" | "sass" => "SC",
+        "sh" | "bash" | "zsh" => ">_",
+        "ps1" | "bat" | "cmd" => ">_",
+        "c" | "h" => "C",
+        "cpp" | "cc" | "cxx" | "hpp" => "C++",
+        "cs" => "C#",
+        "java" => "J",
+        "kt" | "kts" => "KT",
+        "php" => "PHP",
+        "rb" => "RB",
+        "swift" => "SW",
+        "lua" => "LUA",
+        "sql" => "SQL",
+        "xml" => "XML",
+        "lock" => "LK",
+        "txt" => "TXT",
+        _ => return None,
+    })
+}
+
 pub fn file_color(name: &str) -> u32 {
     let ext = name.rsplit_once('.').map_or("", |(_, e)| e);
     match ext.to_ascii_lowercase().as_str() {
+        "py" => 0x4b8bbe,
+        "c" | "h" | "cpp" | "cc" | "cxx" | "hpp" => 0x519aba,
+        "cs" => 0x6fb26f,
+        "java" | "kt" | "kts" => 0xe76f00,
+        "php" => 0x8993be,
+        "rb" => 0xcc3e44,
+        "swift" => 0xf05138,
+        "lua" => 0x51a0cf,
+        "sql" | "xml" => 0xdad8d8,
         "rs" => 0xde7f57,
         "js" | "mjs" | "cjs" | "jsx" => 0xe5c07b,
         "ts" | "tsx" => 0x4f9fe8,
