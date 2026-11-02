@@ -8,6 +8,8 @@
 AppId={{5B2A3D18-7F4E-4390-B8A6-3E2C96C36154}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+AppVerName={#MyAppName}
+UninstallDisplayName={#MyAppName}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}/issues
@@ -18,7 +20,7 @@ AllowNoIcons=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=commandline dialog
 OutputDir=..\..\target\release
-OutputBaseFilename=nanti-setup-1.0.0
+OutputBaseFilename=setup
 SetupIconFile=..\..\crates\ui\assets\nanti.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2/ultra64
