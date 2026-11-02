@@ -67,6 +67,9 @@ Root: HKCU; Subkey: "Software\Classes\Directory\Background\shell\nanti\command";
 ; Add to PATH
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Tasks: addtopath; Check: NeedsAddPath(ExpandConstant('{app}'))
 
+[UninstallDelete]
+Type: filesandordirs; Name: "{app}"
+
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
@@ -81,4 +84,59 @@ begin
     exit;
   end;
   Result := Pos(';' + UpperCase(Param) + ';', ';' + UpperCase(OrigPath) + ';') = 0;
+end;
+
+function CmdLineParamExists(Name: string): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), Name) = 0 then
+    begin
+      Result := True;
+      exit;
+    end;
+end;
+
+procedure RemoveFromPath(Dir: string);
+var
+  OrigPath: string;
+  P: Integer;
+begin
+  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', OrigPath) then
+    exit;
+  P := Pos(';' + UpperCase(Dir) + ';', ';' + UpperCase(OrigPath) + ';');
+  if P = 0 then
+    exit;
+  if P = 1 then
+    Delete(OrigPath, 1, Length(Dir) + 1)
+  else
+    Delete(OrigPath, P - 1, Length(Dir) + 1);
+  RegWriteExpandStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', OrigPath);
+end;
+
+function WantsDataRemoved(): Boolean;
+begin
+  if UninstallSilent then
+    Result := CmdLineParamExists('/DELETEDATA')
+  else
+    Result := MsgBox('Also delete all nanti data on this computer?' + #13#10 + #13#10 +
+      'This removes your settings, installed extensions, caches and the data folder:' + #13#10 +
+      ExpandConstant('{userappdata}\nanti') + #13#10 + #13#10 +
+      'Your own projects and files are never touched.', mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  DataDir: string;
+begin
+  if CurUninstallStep = usUninstall then
+    RemoveFromPath(ExpandConstant('{app}'));
+  if CurUninstallStep = usPostUninstall then
+  begin
+    DataDir := ExpandConstant('{userappdata}\nanti');
+    if DirExists(DataDir) and WantsDataRemoved() then
+      DelTree(DataDir, True, True, True);
+  end;
 end;
