@@ -26,20 +26,28 @@ and what still needs a person (ideally a lawyer) before a public release.
 
 ## Checked on 2026-11-02
 
-| Item | Result |
-|---|---|
+| Item                                                | Result                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Dependency licenses (`cargo metadata`, 800+ crates) | All permissive or dual-licensed with a permissive option. 7 MPL-2.0 crates (file-level copyleft; used unmodified: `cbindgen`, `cssparser`, `cssparser-macros`, `dtoa-short`, `dwrote`, `option-ext`, `selectors`). `r-efi` (MIT OR Apache-2.0 OR LGPL) and `self_cell` (Apache-2.0 OR GPL-2.0) are used under the permissive choice. No GPL-only/proprietary crate. |
-| Vendor files tracked in git | None (`.vsix`, vendor, extracted extension: no matches). The probe extracted the Claude Code VSIX outside the repo. |
-| Copied third-party text/code | None known. Source comments only mention other products to describe behavior ("as in VS Code's terminal"). The VS Code API shim is written from the public API behavior and the PRD matrix, not from Microsoft source. |
-| Branding in the product | UI shows `nanti.`; `appName` is `Nanti`. Docs say "VS Code-style" only as a description of the layout. |
-| Notice file | `THIRD_PARTY_NOTICES.md` generated (needed when distributing a binary: Apache-2.0 and MIT require the notice and license text to travel with it). |
+| Vendor files tracked in git                         | None (`.vsix`, vendor, extracted extension: no matches). The probe extracted the Claude Code VSIX outside the repo.                                                                                                                                                                                                                                                 |
+| Copied third-party text/code                        | None known. Source comments only mention other products to describe behavior ("as in VS Code's terminal"). The VS Code API shim is written from the public API behavior and the PRD matrix, not from Microsoft source.                                                                                                                                              |
+| Branding in the product                             | UI shows `nanti.`; `appName` is `Nanti`. Docs say "VS Code-style" only as a description of the layout.                                                                                                                                                                                                                                                              |
+| Notice file                                         | `THIRD_PARTY_NOTICES.md` generated (needed when distributing a binary: Apache-2.0 and MIT require the notice and license text to travel with it).                                                                                                                                                                                                                   |
 
 ## Project License and Status
 
 - **Project license:** Licensed under the [MIT License](../LICENSE). All code developed natively for `nanti.` is distributed under MIT.
+- **Legal & Trademark Policy:** Formalized in [LEGAL.md](../LEGAL.md) (nominative fair use doctrine, marketplace boundaries, clean-room defense, DMCA 512 notice procedure).
 - **Third-party notices:** Recorded in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) and [THIRD_PARTY_LICENSES.txt](../THIRD_PARTY_LICENSES.txt).
 
+## Pre-Release Legal Verification
+
+- **Marketplace ToS Isolation:** `nanti.` connects strictly to Open VSX (`open-vsx.org`); no requests are sent to Microsoft Visual Studio Marketplace.
+- **Vendor Packages:** No proprietary extension packages (e.g. Claude Code, Codex, Copilot) are bundled or redistributed.
+- **DMCA Takedown Contact:** Formal Designated Agent notification protocol established in [LEGAL.md](../LEGAL.md).
+
 ## Still open (needs a decision or a lawyer)
+
 - **Name "nanti.":** no trademark search done. Check local (DJKI) and international registers and domain
   availability before launch. The pronoun-less name is generic Indonesian ("later"), which may be hard to protect.
 - **Full license texts:** `THIRD_PARTY_NOTICES.md` lists license names and sources. For a release build, bundle the

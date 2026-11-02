@@ -190,13 +190,22 @@ The repository is organized as a Cargo workspace with distinct responsibilities:
 
 ---
 
-## License & Credits
+## Legal, Trademarks & DMCA Compliance
 
 `nanti.` is licensed under the [MIT License](LICENSE).
 
-All bundled components and dependencies are open source and used in compliance with their respective licenses. Complete dependency notices and license texts:
-- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) — Comprehensive dependency catalog (800+ crates).
+All bundled components and dependencies are open source and used in compliance with their respective licenses:
+- [LEGAL.md](LEGAL.md) — Comprehensive trademark policy, nominative fair use doctrine, marketplace compliance, and DMCA takedown procedures.
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) — Dependency license catalog (800+ crates).
 - [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt) — Verbatim third-party license texts.
-- [docs/legal-compliance.md](docs/legal-compliance.md) — Legal compliance policies and originality verification.
+- [docs/legal-compliance.md](docs/legal-compliance.md) — Contributor originality guidelines and clean-room implementation records.
 
-*Disclaimer: `nanti.` is an independent project and is not affiliated with or endorsed by Microsoft, Zed Industries, Anthropic, or OpenAI. "Visual Studio Code" is a registered trademark of Microsoft Corporation.*
+### Trademark Notice & Disclaimers
+- "Visual Studio Code" and "VS Code" are registered trademarks of **Microsoft Corporation**.
+- "Zed" is a trademark of **Zed Industries, Inc.**
+- "Claude" and "Claude Code" are trademarks of **Anthropic PBC**.
+- "OpenAI" and "Codex" are trademarks of **OpenAI, Inc.**
+
+`nanti.` is an independent open-source project and is **not affiliated with, sponsored by, or endorsed by Microsoft, Zed Industries, Anthropic, OpenAI, or Google**. Any references to "Visual Studio Code", "VS Code", or extension APIs are made strictly for technical compatibility and identification purposes under the legal doctrine of **Nominative Fair Use**. `nanti.` connects exclusively to the Eclipse Foundation's **Open VSX Registry** and does not access or redistribute software from the Microsoft Visual Studio Marketplace.
+
+For DMCA inquiries or copyright notifications, please consult [LEGAL.md](LEGAL.md) or contact `legal@nanti.dev`.
