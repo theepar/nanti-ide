@@ -39,6 +39,12 @@ pub enum Command {
     TogglePanel,
     MaximizePanel,
     ToggleRightPanel,
+    SidebarLeft,
+    SidebarRight,
+    PanelBottom,
+    PanelTop,
+    PanelLeft,
+    PanelRight,
     ToggleActivityBar,
     ToggleStatusBar,
     ResetLayout,
@@ -78,7 +84,7 @@ pub enum Command {
 
 impl Command {
     /// Every command shown in the palette. Only things that really work are listed.
-    pub const ALL: [Command; 61] = [
+    pub const ALL: [Command; 67] = [
         Command::CommandPalette,
         Command::QuickOpen,
         Command::Save,
@@ -105,6 +111,12 @@ impl Command {
         Command::TogglePanel,
         Command::MaximizePanel,
         Command::ToggleRightPanel,
+        Command::SidebarLeft,
+        Command::SidebarRight,
+        Command::PanelBottom,
+        Command::PanelTop,
+        Command::PanelLeft,
+        Command::PanelRight,
         Command::ToggleActivityBar,
         Command::ToggleStatusBar,
         Command::ResetLayout,
@@ -170,6 +182,12 @@ impl Command {
             Command::TogglePanel => "View: Toggle Panel",
             Command::MaximizePanel => "View: Maximize / Restore Panel",
             Command::ToggleRightPanel => "View: Toggle Right Panel",
+            Command::SidebarLeft => "View: Move Sidebar to the Left",
+            Command::SidebarRight => "View: Move Sidebar to the Right",
+            Command::PanelBottom => "View: Move Panel to the Bottom",
+            Command::PanelTop => "View: Move Panel to the Top",
+            Command::PanelLeft => "View: Move Panel to the Left",
+            Command::PanelRight => "View: Move Panel to the Right",
             Command::ToggleActivityBar => "View: Toggle Activity Bar",
             Command::ToggleStatusBar => "View: Toggle Status Bar",
             Command::ResetLayout => "View: Reset Layout",

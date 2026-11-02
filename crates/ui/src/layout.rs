@@ -17,16 +17,77 @@ pub const PANEL_DEFAULT: f32 = 240.0;
 pub const EDITOR_MIN_WIDTH: f32 = 240.0;
 pub const EDITOR_MIN_HEIGHT: f32 = 120.0;
 const ACTIVITY_BAR_WIDTH: f32 = 48.0;
+pub const PANEL_WIDTH_MIN: f32 = 200.0;
+pub const PANEL_WIDTH_MAX: f32 = 1200.0;
+pub const PANEL_WIDTH_DEFAULT: f32 = 420.0;
 const VERSION: u64 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Side {
+    Left,
+    Right,
+}
+
+impl Side {
+    fn name(self) -> &'static str {
+        match self {
+            Side::Left => "left",
+            Side::Right => "right",
+        }
+    }
+
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "left" => Some(Side::Left),
+            "right" => Some(Side::Right),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanelPos {
+    Bottom,
+    Top,
+    Left,
+    Right,
+}
+
+impl PanelPos {
+    pub fn is_side(self) -> bool {
+        matches!(self, PanelPos::Left | PanelPos::Right)
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            PanelPos::Bottom => "bottom",
+            PanelPos::Top => "top",
+            PanelPos::Left => "left",
+            PanelPos::Right => "right",
+        }
+    }
+
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "bottom" => Some(PanelPos::Bottom),
+            "top" => Some(PanelPos::Top),
+            "left" => Some(PanelPos::Left),
+            "right" => Some(PanelPos::Right),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layout {
     pub activity_bar: bool,
     pub sidebar: bool,
     pub sidebar_width: f32,
-    /// The bottom panel (terminal, problems, output).
+    pub sidebar_side: Side,
     pub panel: bool,
     pub panel_height: f32,
+    pub panel_width: f32,
+    pub panel_pos: PanelPos,
     /// The bottom panel fills the whole editor column.
     pub panel_maximized: bool,
     /// The right-hand extension panel (AI chat, webviews).
@@ -41,8 +102,11 @@ impl Default for Layout {
             activity_bar: true,
             sidebar: true,
             sidebar_width: SIDEBAR_DEFAULT,
-            panel: true,
+            sidebar_side: Side::Left,
+            panel: false,
             panel_height: PANEL_DEFAULT,
+            panel_width: PANEL_WIDTH_DEFAULT,
+            panel_pos: PanelPos::Bottom,
             panel_maximized: false,
             right: true,
             right_width: RIGHT_DEFAULT,
@@ -56,9 +120,39 @@ impl Layout {
         *self = Self::default();
     }
 
+    fn side_panel_width(&self) -> f32 {
+        if self.panel && self.panel_pos.is_side() && !self.panel_maximized {
+            self.panel_width
+        } else {
+            0.0
+        }
+    }
+
+    pub fn set_panel_width(&mut self, w: f32, window_width: f32) {
+        let room = window_width
+            - EDITOR_MIN_WIDTH
+            - if self.activity_bar { ACTIVITY_BAR_WIDTH } else { 0.0 }
+            - if self.sidebar { self.sidebar_width } else { 0.0 }
+            - if self.right { self.right_width } else { 0.0 };
+        self.panel_width = w.clamp(
+            PANEL_WIDTH_MIN,
+            PANEL_WIDTH_MAX.min(room.max(PANEL_WIDTH_MIN)),
+        );
+    }
+
+    pub fn effective_panel_width(&self, window_width: f32) -> f32 {
+        let room = window_width
+            - EDITOR_MIN_WIDTH
+            - if self.activity_bar { ACTIVITY_BAR_WIDTH } else { 0.0 }
+            - if self.sidebar { self.effective_sidebar(window_width) } else { 0.0 }
+            - if self.right { self.right_width.min(RIGHT_MAX) } else { 0.0 };
+        self.panel_width.min(room.max(PANEL_WIDTH_MIN))
+    }
+
     pub fn set_sidebar_width(&mut self, w: f32, window_width: f32) {
         let room = window_width
             - EDITOR_MIN_WIDTH
+            - self.side_panel_width()
             - if self.activity_bar {
                 ACTIVITY_BAR_WIDTH
             } else {
@@ -71,6 +165,7 @@ impl Layout {
     pub fn set_right_width(&mut self, w: f32, window_width: f32) {
         let room = window_width
             - EDITOR_MIN_WIDTH
+            - self.side_panel_width()
             - if self.activity_bar {
                 ACTIVITY_BAR_WIDTH
             } else {
@@ -94,6 +189,7 @@ impl Layout {
     pub fn effective_sidebar(&self, window_width: f32) -> f32 {
         let room = window_width
             - EDITOR_MIN_WIDTH
+            - self.side_panel_width()
             - if self.activity_bar {
                 ACTIVITY_BAR_WIDTH
             } else {
@@ -112,6 +208,7 @@ impl Layout {
     pub fn effective_right(&self, window_width: f32) -> f32 {
         let room = window_width
             - EDITOR_MIN_WIDTH
+            - self.side_panel_width()
             - if self.activity_bar {
                 ACTIVITY_BAR_WIDTH
             } else {
@@ -141,8 +238,11 @@ impl Layout {
             "activityBar": self.activity_bar,
             "sidebar": self.sidebar,
             "sidebarWidth": self.sidebar_width,
+            "sidebarSide": self.sidebar_side.name(),
             "panel": self.panel,
             "panelHeight": self.panel_height,
+            "panelWidth": self.panel_width,
+            "panelPosition": self.panel_pos.name(),
             "panelMaximized": self.panel_maximized,
             "right": self.right,
             "rightWidth": self.right_width,
@@ -155,7 +255,7 @@ impl Layout {
     /// the defaults, and sizes are clamped, so a hand-edited or corrupt file can never break the UI.
     pub fn from_json(text: &str) -> Self {
         let mut l = Self::default();
-        let Ok(v) = serde_json::from_str::<Value>(text) else {
+        let Ok(v) = serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')) else {
             return l;
         };
         let flag = |k: &str, d: bool| v.get(k).and_then(Value::as_bool).unwrap_or(d);
@@ -168,8 +268,19 @@ impl Layout {
         l.activity_bar = flag("activityBar", l.activity_bar);
         l.sidebar = flag("sidebar", l.sidebar);
         l.sidebar_width = num("sidebarWidth", l.sidebar_width, SIDEBAR_MIN, SIDEBAR_MAX);
+        l.sidebar_side = v
+            .get("sidebarSide")
+            .and_then(Value::as_str)
+            .and_then(Side::parse)
+            .unwrap_or(l.sidebar_side);
         l.panel = flag("panel", l.panel);
         l.panel_height = num("panelHeight", l.panel_height, PANEL_MIN, 4000.0);
+        l.panel_width = num("panelWidth", l.panel_width, PANEL_WIDTH_MIN, PANEL_WIDTH_MAX);
+        l.panel_pos = v
+            .get("panelPosition")
+            .and_then(Value::as_str)
+            .and_then(PanelPos::parse)
+            .unwrap_or(l.panel_pos);
         l.panel_maximized = flag("panelMaximized", l.panel_maximized);
         l.right = flag("right", l.right);
         l.right_width = num("rightWidth", l.right_width, RIGHT_MIN, RIGHT_MAX);
@@ -221,14 +332,52 @@ mod tests {
             activity_bar: false,
             sidebar: false,
             sidebar_width: 333.0,
+            sidebar_side: Side::Right,
             panel: true,
             panel_height: 150.0,
+            panel_width: 555.0,
+            panel_pos: PanelPos::Left,
             panel_maximized: true,
             right: false,
             right_width: 410.0,
             status_bar: false,
         };
         assert_eq!(Layout::from_json(&l.to_json()), l);
+    }
+
+    #[test]
+    fn positions_default_to_the_classic_layout_and_unknown_names_fall_back() {
+        let d = Layout::default();
+        assert_eq!((d.sidebar_side, d.panel_pos), (Side::Left, PanelPos::Bottom));
+        let l = Layout::from_json(r#"{"sidebarSide": "middle", "panelPosition": 7}"#);
+        assert_eq!((l.sidebar_side, l.panel_pos), (Side::Left, PanelPos::Bottom));
+        let l = Layout::from_json(r#"{"sidebarSide": "right", "panelPosition": "top"}"#);
+        assert_eq!((l.sidebar_side, l.panel_pos), (Side::Right, PanelPos::Top));
+    }
+
+    #[test]
+    fn a_docked_side_panel_is_clamped_and_leaves_room_for_the_editor() {
+        let mut l = Layout::default();
+        l.panel_pos = PanelPos::Left;
+        l.set_panel_width(5000.0, 1280.0);
+        assert!(l.panel_width <= 1280.0 - EDITOR_MIN_WIDTH - 48.0 - l.sidebar_width - l.right_width);
+        l.set_panel_width(1.0, 1280.0);
+        assert_eq!(l.panel_width, PANEL_WIDTH_MIN);
+        l.panel_width = 500.0;
+        let with_panel = l.effective_sidebar(1280.0);
+        l.panel_pos = PanelPos::Bottom;
+        assert!(with_panel <= l.effective_sidebar(1280.0));
+    }
+
+    #[test]
+    fn a_byte_order_mark_from_a_text_editor_is_ignored() {
+        let l = Layout::from_json("\u{feff}{\"sidebarSide\": \"right\"}");
+        assert_eq!(l.sidebar_side, Side::Right);
+    }
+
+    #[test]
+    fn the_panel_starts_hidden() {
+        assert!(!Layout::default().panel);
     }
 
     #[test]

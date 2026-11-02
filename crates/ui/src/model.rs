@@ -8,7 +8,7 @@ use editor_core::Editor;
 
 use crate::extensions::{ExtDetail, Extension, MarketplaceExtension};
 use crate::find::{FindFocus, FindState};
-use crate::layout::Layout;
+use crate::layout::{Layout, PanelPos, Side};
 use crate::menu::MenuKind;
 use crate::output::OutputLog;
 use crate::palette::{Command, Palette, PaletteAction, PaletteMode, TextField};
@@ -1005,6 +1005,23 @@ impl Model {
                 }
             }
             Command::ToggleRightPanel => self.layout.right = !self.layout.right,
+            Command::SidebarLeft | Command::SidebarRight => {
+                self.layout.sidebar_side = if command == Command::SidebarLeft {
+                    Side::Left
+                } else {
+                    Side::Right
+                };
+                self.layout.sidebar = true;
+            }
+            Command::PanelBottom | Command::PanelTop | Command::PanelLeft | Command::PanelRight => {
+                self.layout.panel_pos = match command {
+                    Command::PanelTop => PanelPos::Top,
+                    Command::PanelLeft => PanelPos::Left,
+                    Command::PanelRight => PanelPos::Right,
+                    _ => PanelPos::Bottom,
+                };
+                self.layout.panel = true;
+            }
             Command::ToggleActivityBar => self.layout.activity_bar = !self.layout.activity_bar,
             Command::ToggleStatusBar => self.layout.status_bar = !self.layout.status_bar,
             Command::ResetLayout => self.layout.reset(),
@@ -1884,7 +1901,7 @@ mod tests {
     fn terminal_commands_raise_requests_and_manage_panel_state() {
         let ws = workspace("termcmd");
         let mut m = Model::new(ws.0.clone());
-        assert!(m.layout.panel && !m.terminal_focused);
+        assert!(!m.layout.panel && !m.terminal_focused, "the terminal starts hidden");
         m.run_command(Command::ToggleTerminal);
         assert_eq!(
             (m.layout.panel, m.terminal_focused, m.panel_tab),
@@ -1915,7 +1932,7 @@ mod tests {
         let mut m = Model::new(ws.0.clone());
         assert!(
             m.layout.sidebar
-                && m.layout.panel
+                && !m.layout.panel
                 && m.layout.right
                 && m.layout.activity_bar
                 && m.layout.status_bar

@@ -112,6 +112,13 @@ pub fn items(kind: MenuKind) -> Vec<MenuItem> {
             Cmd(C::ToggleStatusBar),
             Cmd(C::MaximizePanel),
             Sep,
+            Cmd(C::SidebarLeft),
+            Cmd(C::SidebarRight),
+            Cmd(C::PanelBottom),
+            Cmd(C::PanelTop),
+            Cmd(C::PanelLeft),
+            Cmd(C::PanelRight),
+            Sep,
             Cmd(C::ResetLayout),
         ],
         MenuKind::Go => vec![

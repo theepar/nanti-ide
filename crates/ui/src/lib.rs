@@ -43,7 +43,7 @@ mod views;
 pub mod workspace_ops;
 
 use find::FindFocus;
-use layout::Layout;
+use layout::{Layout, PanelPos, Side};
 use model::{Activity, Model, PanelTab, Prompt, SaveOutcome, TabContent, language_of};
 use palette::{Command, TextField};
 
@@ -244,6 +244,7 @@ enum Drag {
     Sidebar,
     Right,
     Panel,
+    PanelSide,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1441,22 +1442,39 @@ impl Workbench {
         let vp = window.viewport_size();
         let (vw, vh) = (f32::from(vp.width), f32::from(vp.height));
         let (x, y) = (f32::from(ev.position.x), f32::from(ev.position.y));
+        let right_open = self.model.layout.right && (self.panel.is_some() || self.force_right_panel);
         let l = &mut self.model.layout;
         let status = if l.status_bar { STATUS_BAR_HEIGHT } else { 0.0 };
+        let activity = if l.activity_bar { ACTIVITY_BAR_WIDTH } else { 0.0 };
+        let sidebar_w = if l.sidebar { l.effective_sidebar(vw) + SPLITTER } else { 0.0 };
+        let right_w = if right_open { l.effective_right(vw) + SPLITTER } else { 0.0 };
+        let (left_edge, right_edge) = match l.sidebar_side {
+            Side::Left => (activity + sidebar_w, 0.0),
+            Side::Right => (0.0, activity + sidebar_w),
+        };
+        let column_h = vh - status - TAB_BAR_HEIGHT - MENU_BAR_HEIGHT;
         match drag {
-            Drag::Sidebar => {
-                let left = if l.activity_bar {
-                    ACTIVITY_BAR_WIDTH
+            Drag::Sidebar => match l.sidebar_side {
+                Side::Left => l.set_sidebar_width(x - activity, vw),
+                Side::Right => l.set_sidebar_width(vw - x - activity, vw),
+            },
+            Drag::Right => l.set_right_width(vw - right_edge - x, vw),
+            Drag::Panel => {
+                let height = if l.panel_pos == PanelPos::Top {
+                    y - MENU_BAR_HEIGHT
                 } else {
-                    0.0
+                    vh - status - y
                 };
-                l.set_sidebar_width(x - left, vw);
+                l.set_panel_height(height, column_h);
             }
-            Drag::Right => l.set_right_width(vw - x, vw),
-            Drag::Panel => l.set_panel_height(
-                vh - status - y,
-                vh - status - TAB_BAR_HEIGHT - MENU_BAR_HEIGHT,
-            ),
+            Drag::PanelSide => {
+                let width = if l.panel_pos == PanelPos::Left {
+                    x - left_edge
+                } else {
+                    vw - right_edge - right_w - x
+                };
+                l.set_panel_width(width, vw);
+            }
         }
         cx.notify();
     }
@@ -1503,6 +1521,7 @@ impl Workbench {
                             Drag::Sidebar => this.model.layout.sidebar_width = d.sidebar_width,
                             Drag::Right => this.model.layout.right_width = d.right_width,
                             Drag::Panel => this.model.layout.panel_height = d.panel_height,
+                            Drag::PanelSide => this.model.layout.panel_width = d.panel_width,
                         }
                         this.drag = None;
                     } else {
@@ -1524,7 +1543,8 @@ impl Workbench {
             .w(px(48.))
             .h_full()
             .bg(rgb(theme::ACTIVITY_BAR))
-            .border_r_1()
+            .when(self.model.layout.sidebar_side == Side::Left, |d| d.border_r_1())
+            .when(self.model.layout.sidebar_side == Side::Right, |d| d.border_l_1())
             .border_color(rgb(theme::BORDER))
             .items_center()
             .pt_2()
@@ -1738,7 +1758,8 @@ impl Workbench {
             ))))
             .h_full()
             .bg(rgb(theme::SIDEBAR))
-            .border_r_1()
+            .when(self.model.layout.sidebar_side == Side::Left, |d| d.border_r_1())
+            .when(self.model.layout.sidebar_side == Side::Right, |d| d.border_l_1())
             .border_color(rgb(theme::BORDER))
             .child(
                 div()
@@ -2254,19 +2275,22 @@ impl Workbench {
         } else {
             0.0
         };
-        let panel_h = self
-            .model
-            .layout
-            .effective_panel(vh - status - TAB_BAR_HEIGHT - MENU_BAR_HEIGHT);
-        let maximized = self.model.layout.panel_maximized;
+        let layout = &self.model.layout;
+        let panel_h = layout.effective_panel(vh - status - TAB_BAR_HEIGHT - MENU_BAR_HEIGHT);
+        let panel_w = layout.effective_panel_width(f32::from(window.viewport_size().width));
+        let (maximized, pos) = (layout.panel_maximized, layout.panel_pos);
         let body: AnyElement = self.panel_body(window, cx);
         div()
             .flex()
             .flex_col()
-            .when(maximized, |d| d.flex_1().min_h_0())
-            .when(!maximized, |d| d.flex_none().h(px(panel_h)))
+            .when(maximized, |d| d.flex_1().min_h_0().min_w_0())
+            .when(!maximized && !pos.is_side(), |d| d.flex_none().h(px(panel_h)))
+            .when(!maximized && pos.is_side(), |d| d.flex_none().h_full().w(px(panel_w)))
             .bg(rgb(theme::PANEL))
-            .border_t_1()
+            .when(pos == PanelPos::Bottom, |d| d.border_t_1())
+            .when(pos == PanelPos::Top, |d| d.border_b_1())
+            .when(pos == PanelPos::Left, |d| d.border_r_1())
+            .when(pos == PanelPos::Right, |d| d.border_l_1())
             .border_color(rgb(theme::BORDER))
             .child(
                 div()
@@ -3894,8 +3918,15 @@ impl Render for Workbench {
                 self.right_applied = Some(right_shown);
             }
             if right_shown {
+                let layout = &self.model.layout;
+                let outer = if layout.sidebar_side == Side::Right {
+                    (if layout.activity_bar { ACTIVITY_BAR_WIDTH } else { 0.0 })
+                        + if layout.sidebar { layout.effective_sidebar(vw) + SPLITTER } else { 0.0 }
+                } else {
+                    0.0
+                };
                 panel.set_area(
-                    (vw - right_w + 1.0) as i32,
+                    (vw - outer - right_w + 1.0) as i32,
                     (AI_PANEL_HEADER + MENU_BAR_HEIGHT) as i32,
                     (right_w - 1.0) as i32,
                     (vh - status_h - AI_PANEL_HEADER - MENU_BAR_HEIGHT) as i32,
@@ -3906,45 +3937,88 @@ impl Render for Workbench {
             window.focus(&self.root_focus);
         }
         let layout = self.model.layout.clone();
-        let sidebar = if layout.sidebar {
-            Some(self.sidebar(window, cx))
-        } else {
-            None
-        };
-        let activity_bar = layout.activity_bar.then(|| self.activity_bar(cx));
+        let sidebar = layout.sidebar.then(|| self.sidebar(window, cx).into_any_element());
+        let activity_bar = layout.activity_bar.then(|| self.activity_bar(cx).into_any_element());
         let maximized = layout.panel && layout.panel_maximized;
         let split_sidebar = layout
             .sidebar
-            .then(|| self.splitter("split-sidebar", Drag::Sidebar, cx));
+            .then(|| self.splitter("split-sidebar", Drag::Sidebar, cx).into_any_element());
         // No extension fills the right panel: show nothing (the saved `layout.right` is kept).
         let right_open = layout.right && (self.panel.is_some() || self.force_right_panel);
         let split_right = right_open.then(|| self.splitter("split-right", Drag::Right, cx));
-        let split_panel =
-            (layout.panel && !maximized).then(|| self.splitter("split-panel", Drag::Panel, cx));
+        let panel_drag = if layout.panel_pos.is_side() { Drag::PanelSide } else { Drag::Panel };
+        let split_panel = (layout.panel && !maximized)
+            .then(|| self.splitter("split-panel", panel_drag, cx).into_any_element());
         let right_panel = right_open.then(|| self.ai_panel(window, cx));
-        let tab_bar = (!maximized).then(|| self.tab_bar(cx));
-        let prompt_bar = self.prompt_bar(cx);
-        let external_prompt_bar = self.external_prompt_bar(cx);
+        let tab_bar = (!maximized).then(|| self.tab_bar(cx).into_any_element());
+        let prompt_bar = self.prompt_bar(cx).map(IntoElement::into_any_element);
+        let external_prompt_bar = self.external_prompt_bar(cx).map(IntoElement::into_any_element);
         // The extension detail page takes the place of the editor until a file or tab is chosen.
         let editor: Option<AnyElement> = (!maximized).then(|| match &self.model.ext_detail {
             Some(detail) => self.ext_detail_page(detail, cx),
             None => self.editor(window, cx).into_any_element(),
         });
-        let bottom_panel = self
-            .model
-            .layout
-            .panel
-            .then(|| self.bottom_panel(window, cx));
+        let bottom_panel = layout.panel.then(|| self.bottom_panel(window, cx).into_any_element());
         self.model.refresh_find();
         let find_bar = if maximized {
             None
         } else {
-            self.find_bar(window, cx)
+            self.find_bar(window, cx).map(IntoElement::into_any_element)
         };
         let palette = self.palette_overlay(window, cx);
         let menu_bar = self.menu_bar(window, cx);
         let menus = self.menus_overlay(window, cx);
         let status_bar = layout.status_bar.then(|| self.status_bar(cx));
+        let group = |a: Option<AnyElement>, b: Option<AnyElement>, c: Option<AnyElement>| {
+            [a, b, c].into_iter().flatten().collect::<Vec<_>>()
+        };
+        let (sidebar_left, sidebar_right) = match layout.sidebar_side {
+            Side::Left => (group(activity_bar, sidebar, split_sidebar), Vec::new()),
+            Side::Right => (Vec::new(), group(split_sidebar, sidebar, activity_bar)),
+        };
+        let editor_column = div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .children(tab_bar)
+            .children(prompt_bar)
+            .children(external_prompt_bar)
+            .children(find_bar)
+            .children(editor);
+        let center = match layout.panel_pos {
+            PanelPos::Bottom => div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_w_0()
+                .child(editor_column)
+                .children(split_panel)
+                .children(bottom_panel),
+            PanelPos::Top => div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_w_0()
+                .children(bottom_panel)
+                .children(split_panel)
+                .child(editor_column),
+            PanelPos::Left => div()
+                .flex()
+                .flex_1()
+                .min_w_0()
+                .children(bottom_panel)
+                .children(split_panel)
+                .when(!maximized, |d| d.child(editor_column)),
+            PanelPos::Right => div()
+                .flex()
+                .flex_1()
+                .min_w_0()
+                .when(!maximized, |d| d.child(editor_column))
+                .children(split_panel)
+                .children(bottom_panel),
+        };
         div()
             .relative()
             .flex()
@@ -3962,25 +4036,11 @@ impl Render for Workbench {
                     .flex()
                     .flex_1()
                     .min_h_0()
-                    .children(activity_bar)
-                    .children(sidebar)
-                    .children(split_sidebar)
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .flex_1()
-                            .min_w_0()
-                            .children(tab_bar)
-                            .children(prompt_bar)
-                            .children(external_prompt_bar)
-                            .children(find_bar)
-                            .children(editor)
-                            .children(split_panel)
-                            .children(bottom_panel),
-                    )
+                    .children(sidebar_left)
+                    .child(center)
                     .children(split_right)
-                    .children(right_panel),
+                    .children(right_panel)
+                    .children(sidebar_right),
             )
             .children(status_bar)
             .children(menus)

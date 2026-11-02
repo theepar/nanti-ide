@@ -247,6 +247,42 @@ fn layout_is_saved_and_restored_across_instances(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn moving_the_sidebar_and_panel_is_saved_and_restored(cx: &mut TestAppContext) {
+    use ui::layout::{PanelPos, Side};
+    use ui::palette::Command;
+    let ws = workspace("move");
+    let file = ws.0.join("cfg").join("layout.json");
+    {
+        let (window, cx) = open(cx, &ws.0, Some(file.clone()));
+        window
+            .update(cx, |wb, _, cx| {
+                wb.model_mut().run_command(Command::SidebarRight);
+                wb.model_mut().run_command(Command::PanelLeft);
+                cx.notify();
+                wb.save_layout_now();
+            })
+            .unwrap();
+        cx.run_until_parked();
+        let l = layout(window, cx);
+        assert_eq!((l.sidebar_side, l.panel_pos), (Side::Right, PanelPos::Left));
+    }
+    let saved = Layout::load(&file);
+    assert_eq!((saved.sidebar_side, saved.panel_pos), (Side::Right, PanelPos::Left));
+    let (window, cx) = open(cx, &ws.0, Some(file));
+    assert_eq!(layout(window, cx), saved);
+    for pos in [Command::PanelTop, Command::PanelRight, Command::PanelBottom] {
+        window
+            .update(cx, |wb, _, cx| {
+                wb.model_mut().run_command(pos);
+                cx.notify();
+            })
+            .unwrap();
+        cx.run_until_parked();
+    }
+    assert_eq!(layout(window, cx).panel_pos, PanelPos::Bottom);
+}
+
+#[gpui::test]
 fn pump_saves_after_a_drag_ends_but_not_in_the_middle_of_one(cx: &mut TestAppContext) {
     let ws = workspace("pump");
     let file = ws.0.join("layout.json");

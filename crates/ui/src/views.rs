@@ -331,6 +331,8 @@ impl Workbench {
         div()
             .id(id)
             .window_control_area(area)
+            // the focus-tracking root would prevent_default() this press and the platform would skip the button
+            .occlude()
             .flex()
             .flex_none()
             .items_center()
