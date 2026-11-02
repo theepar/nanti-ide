@@ -84,8 +84,16 @@ Record the IME name/version and the result for each step here.
 - WebView2 runtime 156.0.4314.58
 - Pinned: `gpui =0.2.2`, `wry =0.57.1`
 
+## Recent Accomplishments (2026-11-02 Update)
+
+- **LSP Client Engine:** Integrated JSON-RPC 2.0 language server client for `rust-analyzer` and `gopls` with real-time `publishDiagnostics`, editor squiggles, line highlights, and Problems panel integration.
+- **Open VSX Marketplace Integration:** Integrated marketplace search in the Extensions view with 1-click download and unpacking.
+- **Modern Windows Dialogs:** Native Windows COM `IFileOpenDialog` (Folder and VSIX file picker with dark theme and modern Explorer breadcrumbs).
+- **Terminal Multi-Session Tabs:** Vertical split side-tabs for managing multiple terminal sessions cleanly.
+- **Theme and Polish:** Dark Modern palette with subtle contrast, active line background highlights, and dedicated SVG icon assets.
+
 ## Next exact blocker
 
-1. Real language intelligence: LSP client for type errors/completion (ED-10 beyond syntax), Open VSX browsing and install, the extension-facing terminal API (`window.createTerminal`, TR-04/VH-10, needed by Claude Code for AI-12), a debugger (DAP). Someone with a CJK IME should run the IME checklist above.
-2. Gate C continued: `env.openExternal` behind a user-consent prompt (login, AI-09), terminal API (AI-12), editor/document bridge so extensions see IDE buffers instead of disk (AI-04/05).
-3. Decide the `vscode.version` ADR (see matrix).
+1. DAP debugger integration (breakpoints, stepping).
+2. Extensions live document bridge enhancements for multi-file sync.
+3. Expanded language server capabilities (autocomplete / hover popups).

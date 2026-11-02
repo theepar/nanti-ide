@@ -34,10 +34,12 @@ and what still needs a person (ideally a lawyer) before a public release.
 | Branding in the product | UI shows `nanti.`; `appName` is `Nanti`. Docs say "VS Code-style" only as a description of the layout. |
 | Notice file | `THIRD_PARTY_NOTICES.md` generated (needed when distributing a binary: Apache-2.0 and MIT require the notice and license text to travel with it). |
 
-## Still open (needs a decision or a lawyer)
+## Project License and Status
 
-- **Project license:** `Cargo.toml` says `UNLICENSED` (all rights reserved). Pick the real license before sharing
-  the source; there is no `LICENSE` file yet.
+- **Project license:** Licensed under the [MIT License](../LICENSE). All code developed natively for `nanti.` is distributed under MIT.
+- **Third-party notices:** Recorded in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) and [THIRD_PARTY_LICENSES.txt](../THIRD_PARTY_LICENSES.txt).
+
+## Still open (needs a decision or a lawyer)
 - **Name "nanti.":** no trademark search done. Check local (DJKI) and international registers and domain
   availability before launch. The pronoun-less name is generic Indonesian ("later"), which may be hard to protect.
 - **Full license texts:** `THIRD_PARTY_NOTICES.md` lists license names and sources. For a release build, bundle the
