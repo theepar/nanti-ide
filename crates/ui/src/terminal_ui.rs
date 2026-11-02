@@ -5,8 +5,8 @@ use std::rc::Rc;
 use gpui::{
     AnyElement, Bounds, ClickEvent, ClipboardItem, Context, ElementInputHandler, FontWeight,
     IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
-    Point, ScrollDelta, ScrollWheelEvent, SharedString, Window, canvas, div, point, prelude::*,
-    px, rgb, rgba, size,
+    Point, ScrollDelta, ScrollWheelEvent, SharedString, Window, canvas, div, point, prelude::*, px,
+    rgb, rgba, size,
 };
 use terminal::{CursorShape, KeyMods, SelectKind, Terminal, TerminalOptions, encode_key};
 

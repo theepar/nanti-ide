@@ -1355,29 +1355,66 @@ pub fn language_of(path: &Path) -> &'static str {
         .as_deref()
     {
         Some("rs") => "Rust",
+        Some("py" | "pyw") => "Python",
         Some("js" | "mjs" | "cjs") => "JavaScript",
-        Some("ts") => "TypeScript",
+        Some("ts" | "mts") => "TypeScript",
         Some("tsx") => "TypeScript React",
         Some("jsx") => "JavaScript React",
-        Some("json") => "JSON",
+        Some("java") => "Java",
+        Some("kt" | "kts") => "Kotlin",
+        Some("swift") => "Swift",
+        Some("dart") => "Dart",
+        Some("go") => "Go",
+        Some("c" | "h") => "C",
+        Some("cpp" | "hpp" | "cc" | "cxx") => "C++",
+        Some("cs") => "C#",
+        Some("php") => "PHP",
+        Some("rb") => "Ruby",
+        Some("pl" | "pm") => "Perl",
+        Some("lua") => "Lua",
+        Some("r") => "R",
+        Some("jl") => "Julia",
+        Some("scala") => "Scala",
+        Some("groovy") => "Groovy",
+        Some("clj") => "Clojure",
+        Some("ex" | "exs") => "Elixir",
+        Some("erl" | "hrl") => "Erlang",
+        Some("hs") => "Haskell",
+        Some("ml") => "OCaml",
+        Some("fs") => "F#",
+        Some("elm") => "Elm",
+        Some("zig") => "Zig",
+        Some("nim") => "Nim",
+        Some("cr") => "Crystal",
+        Some("d") => "D",
+        Some("v") => "V",
+        Some("json" | "jsonl") => "JSON",
+        Some("jsonc") => "JSON with Comments",
         Some("md") => "Markdown",
         Some("toml") => "TOML",
         Some("yml" | "yaml") => "YAML",
-        Some("go") => "Go",
-        Some("dart") => "Dart",
-        Some("html") => "HTML",
+        Some("html" | "htm") => "HTML",
         Some("css") => "CSS",
+        Some("scss") => "SCSS",
+        Some("sass") => "Sass",
+        Some("less") => "Less",
+        Some("sql") => "SQL",
+        Some("sh" | "bash" | "zsh") => "Shell Script",
+        Some("ps1" | "psm1") => "PowerShell",
+        Some("bat" | "cmd") => "Batch",
+        Some("vue") => "Vue",
+        Some("svelte") => "Svelte",
+        Some("sol") => "Solidity",
+        Some("wat") => "WebAssembly Text",
+        Some("xml") => "XML",
         _ => "Plain Text",
     }
 }
 
 pub fn tab_language(tab: &Tab) -> String {
     if let Some(id) = &tab.language_override {
-        if let Some((name, _, _)) = crate::palette::LANGUAGE_LIST
-            .iter()
-            .find(|(_, i, _)| *i == id)
-        {
-            return (*name).to_string();
+        if let Some(entry) = crate::palette::find_language_by_id(id) {
+            return entry.name.to_string();
         }
         return id.clone();
     }

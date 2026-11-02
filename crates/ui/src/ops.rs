@@ -483,7 +483,7 @@ impl Model {
             Some(dir) => extensions::list_installed(dir, self.panel_extension.as_deref()),
             None => Vec::new(),
         };
-        if self.marketplace_results.is_empty() && self.marketplace_query.is_none() {
+        if self.extensions.is_empty() {
             self.recommend_tried = false;
         }
     }

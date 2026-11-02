@@ -1995,173 +1995,344 @@ impl Workbench {
             }))
     }
 
-    fn prompt_bar(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
-        let prompt = self.model.prompt.clone()?;
-        let (text, primary, secondary) = match &prompt {
-            Prompt::CloseDirty(i) => (
-                format!(
-                    "{} has unsaved changes.",
-                    self.model
-                        .tabs
-                        .get(*i)
-                        .map_or("This file", |t| t.title.as_str())
+    fn prompt_modal_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if let Some(prompt) = self.model.prompt.clone() {
+            let (title, text, primary, secondary, destructive) = match &prompt {
+                Prompt::CloseDirty(i) => (
+                    "Save Changes",
+                    format!(
+                        "Do you want to save the changes made to {}? Your changes will be lost if you don't save them.",
+                        self.model
+                            .tabs
+                            .get(*i)
+                            .map_or("this file", |t| t.title.as_str())
+                    ),
+                    "Save",
+                    "Don't Save",
+                    false,
                 ),
-                "Save",
-                "Don't Save",
-            ),
-            Prompt::SaveConflict {
-                reason, then_close, ..
-            } => (
-                format!("{reason} Overwrite it with your version?"),
-                "Overwrite",
-                if *then_close {
-                    "Discard mine"
-                } else {
-                    "Reload from disk"
-                },
-            ),
-            Prompt::QuitDirty => (
-                format!("{} file(s) have unsaved changes.", self.model.dirty_count()),
-                "Save All & Quit",
-                "Discard & Quit",
-            ),
-            Prompt::DeleteItem(p) => (
-                format!(
-                    "Move {} to the Recycle Bin? You can restore it from there.",
-                    p.file_name()
-                        .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+                Prompt::SaveConflict {
+                    reason, then_close, ..
+                } => (
+                    "File Save Conflict",
+                    format!("{reason}\n\nOverwrite it with your version?"),
+                    "Overwrite",
+                    if *then_close {
+                        "Discard Mine"
+                    } else {
+                        "Reload from Disk"
+                    },
+                    true,
                 ),
-                "Move to Recycle Bin",
-                "Keep",
-            ),
-            Prompt::DiscardChanges { rel, untracked } => (
-                if *untracked {
-                    format!("Move the new file {rel} to the Recycle Bin?")
-                } else {
-                    format!("Discard all unstaged changes to {rel}? This cannot be undone.")
-                },
-                if *untracked {
-                    "Move to Recycle Bin"
-                } else {
-                    "Discard"
-                },
-                "Keep",
-            ),
-            Prompt::RemoveExtension(p) => (
-                format!(
-                    "Remove the extension {}? Its files are deleted.",
-                    p.file_name()
-                        .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+                Prompt::QuitDirty => (
+                    "Unsaved Files",
+                    format!(
+                        "{} file(s) have unsaved changes. Do you want to save before closing?",
+                        self.model.dirty_count()
+                    ),
+                    "Save All & Quit",
+                    "Discard & Quit",
+                    false,
                 ),
-                "Remove",
-                "Keep",
-            ),
-        };
-        let button = |id: &'static str, label: &'static str| {
-            div()
-                .id(id)
-                .px_3()
-                .py(px(2.))
-                .rounded_sm()
-                .cursor_pointer()
-                .bg(rgb(theme::SELECTED))
-                .hover(|s| s.bg(rgb(theme::HOVER)))
-                .child(label)
-        };
-        Some(
-            div()
-                .flex()
-                .flex_none()
-                .items_center()
-                .gap_3()
-                .px_3()
-                .py(px(6.))
-                .bg(rgb(theme::BANNER))
-                .border_b_1()
-                .border_color(rgb(theme::BORDER))
-                .text_size(px(13.))
-                .text_color(rgb(theme::WARN))
-                .child(div().flex_1().child(SharedString::from(text)))
-                .child(button("prompt-primary", primary).on_click(cx.listener(
-                    |this, _: &ClickEvent, window, cx| {
-                        if this.model.resolve_save() {
-                            return this.finish_quit(window, cx);
-                        }
-                        cx.notify();
+                Prompt::DeleteItem(p) => (
+                    "Delete Item",
+                    format!(
+                        "Are you sure you want to move '{}' to the Recycle Bin?",
+                        p.file_name()
+                            .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+                    ),
+                    "Move to Recycle Bin",
+                    "Keep",
+                    true,
+                ),
+                Prompt::DiscardChanges { rel, untracked } => (
+                    if *untracked {
+                        "Delete Untracked File"
+                    } else {
+                        "Discard Changes"
                     },
-                )))
-                .child(button("prompt-secondary", secondary).on_click(cx.listener(
-                    |this, _: &ClickEvent, window, cx| {
-                        if this.model.resolve_discard() {
-                            return this.finish_quit(window, cx);
-                        }
-                        cx.notify();
+                    if *untracked {
+                        format!(
+                            "Are you sure you want to move the untracked file '{rel}' to the Recycle Bin?"
+                        )
+                    } else {
+                        format!(
+                            "Are you sure you want to discard all unstaged changes to '{rel}'? This action cannot be undone."
+                        )
                     },
-                )))
-                .child(button("prompt-cancel", "Cancel").on_click(cx.listener(
-                    |this, _: &ClickEvent, _w, cx| {
-                        this.model.resolve_cancel();
-                        cx.notify();
+                    if *untracked {
+                        "Move to Recycle Bin"
+                    } else {
+                        "Discard Changes"
                     },
-                ))),
-        )
-    }
+                    "Keep",
+                    true,
+                ),
+                Prompt::RemoveExtension(p) => (
+                    "Uninstall Extension",
+                    format!(
+                        "Remove the extension {}? Its files are deleted.",
+                        p.file_name()
+                            .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+                    ),
+                    "Remove",
+                    "Keep",
+                    true,
+                ),
+            };
 
-    fn external_prompt_bar(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
-        let (_, url) = self.external_prompt.as_ref()?;
-        Some(
-            div()
+            let primary_btn = div()
+                .id("prompt-primary")
                 .flex()
-                .flex_none()
                 .items_center()
-                .gap_3()
-                .px_3()
-                .py(px(8.))
-                .bg(rgb(theme::BANNER))
-                .border_b_1()
-                .border_color(rgb(theme::BORDER))
+                .h(px(30.))
+                .px_4()
+                .rounded_md()
+                .cursor_pointer()
                 .text_size(px(12.))
-                .text_color(rgb(theme::WARN))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .overflow_hidden()
-                        .child(SharedString::from(format!(
-                            "Extension wants to open in your browser: {url}"
-                        ))),
-                )
-                .child(
-                    div()
-                        .id("external-open")
-                        .flex_none()
-                        .px_3()
-                        .py(px(3.))
-                        .rounded_sm()
-                        .bg(rgb(theme::SELECTED))
-                        .cursor_pointer()
-                        .hover(|s| s.bg(rgb(theme::HOVER)))
-                        .on_click(cx.listener(|this, _: &ClickEvent, _window, cx| {
-                            this.resolve_external_prompt(true, cx);
-                        }))
-                        .child("Open"),
-                )
-                .child(
-                    div()
-                        .id("external-cancel")
-                        .flex_none()
-                        .px_3()
-                        .py(px(3.))
-                        .rounded_sm()
-                        .bg(rgb(theme::SELECTED))
-                        .cursor_pointer()
-                        .hover(|s| s.bg(rgb(theme::HOVER)))
-                        .on_click(cx.listener(|this, _: &ClickEvent, _window, cx| {
-                            this.resolve_external_prompt(false, cx);
-                        }))
-                        .child("Cancel"),
-                ),
-        )
+                .font_weight(FontWeight::MEDIUM)
+                .when(destructive, |d| {
+                    d.bg(rgb(0x9a2b2b))
+                        .text_color(rgb(0xffffff))
+                        .hover(|s| s.bg(rgb(0xba3636)))
+                })
+                .when(!destructive, |d| {
+                    d.bg(rgb(theme::ACCENT))
+                        .text_color(rgb(0x1e1e1e))
+                        .hover(|s| s.bg(rgb(0xffffff)))
+                })
+                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                    if this.model.resolve_save() {
+                        return this.finish_quit(window, cx);
+                    }
+                    cx.notify();
+                }))
+                .child(primary);
+
+            let secondary_btn = div()
+                .id("prompt-secondary")
+                .flex()
+                .items_center()
+                .h(px(30.))
+                .px_3()
+                .rounded_md()
+                .cursor_pointer()
+                .bg(rgb(0x333333))
+                .text_color(rgb(0xd0d0d0))
+                .text_size(px(12.))
+                .hover(|s| s.bg(rgb(0x404040)).text_color(rgb(0xffffff)))
+                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                    if this.model.resolve_discard() {
+                        return this.finish_quit(window, cx);
+                    }
+                    cx.notify();
+                }))
+                .child(secondary);
+
+            let cancel_btn = div()
+                .id("prompt-cancel")
+                .flex()
+                .items_center()
+                .h(px(30.))
+                .px_3()
+                .rounded_md()
+                .cursor_pointer()
+                .bg(rgb(0x282828))
+                .text_color(rgb(theme::TEXT_DIM))
+                .text_size(px(12.))
+                .hover(|s| s.bg(rgb(0x363636)).text_color(rgb(0xffffff)))
+                .on_click(cx.listener(|this, _: &ClickEvent, _w, cx| {
+                    this.model.resolve_cancel();
+                    cx.notify();
+                }))
+                .child("Cancel");
+
+            return Some(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        div()
+                            .id("modal-backdrop")
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .size_full()
+                            .bg(rgba(0x000000a0))
+                            .on_click(cx.listener(|this, _: &ClickEvent, _w, cx| {
+                                this.model.resolve_cancel();
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        div()
+                            .relative()
+                            .flex()
+                            .flex_col()
+                            .w(px(460.))
+                            .max_w(px(520.))
+                            .rounded_lg()
+                            .bg(rgb(theme::MENU_BG))
+                            .border_1()
+                            .border_color(rgb(theme::BORDER))
+                            .shadow_2xl()
+                            .p_5()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(div().text_size(px(16.)).child(if destructive {
+                                        "⚠️"
+                                    } else {
+                                        "ℹ️"
+                                    }))
+                                    .child(
+                                        div()
+                                            .text_size(px(14.))
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(rgb(0xffffff))
+                                            .child(title),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(13.))
+                                    .text_color(rgb(0xc0c0c0))
+                                    .child(SharedString::from(text)),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .justify_end()
+                                    .gap_2()
+                                    .pt_3()
+                                    .child(primary_btn)
+                                    .child(secondary_btn)
+                                    .child(cancel_btn),
+                            ),
+                    )
+                    .into_any_element(),
+            );
+        }
+
+        if let Some((_, url)) = self.external_prompt.as_ref() {
+            let url = url.clone();
+            let primary_btn = div()
+                .id("external-open")
+                .flex()
+                .items_center()
+                .h(px(30.))
+                .px_4()
+                .rounded_md()
+                .cursor_pointer()
+                .text_size(px(12.))
+                .font_weight(FontWeight::MEDIUM)
+                .bg(rgb(theme::ACCENT))
+                .text_color(rgb(0x1e1e1e))
+                .hover(|s| s.bg(rgb(0xffffff)))
+                .on_click(cx.listener(|this, _: &ClickEvent, _w, cx| {
+                    this.resolve_external_prompt(true, cx);
+                }))
+                .child("Open");
+
+            let cancel_btn = div()
+                .id("external-cancel")
+                .flex()
+                .items_center()
+                .h(px(30.))
+                .px_3()
+                .rounded_md()
+                .cursor_pointer()
+                .bg(rgb(0x282828))
+                .text_color(rgb(theme::TEXT_DIM))
+                .text_size(px(12.))
+                .hover(|s| s.bg(rgb(0x363636)).text_color(rgb(0xffffff)))
+                .on_click(cx.listener(|this, _: &ClickEvent, _w, cx| {
+                    this.resolve_external_prompt(false, cx);
+                }))
+                .child("Cancel");
+
+            return Some(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        div()
+                            .id("modal-backdrop")
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .size_full()
+                            .bg(rgba(0x000000a0))
+                            .on_click(cx.listener(|this, _: &ClickEvent, _w, cx| {
+                                this.resolve_external_prompt(false, cx);
+                            })),
+                    )
+                    .child(
+                        div()
+                            .relative()
+                            .flex()
+                            .flex_col()
+                            .w(px(460.))
+                            .max_w(px(520.))
+                            .rounded_lg()
+                            .bg(rgb(theme::MENU_BG))
+                            .border_1()
+                            .border_color(rgb(theme::BORDER))
+                            .shadow_2xl()
+                            .p_5()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(div().text_size(px(16.)).child("🌐"))
+                                    .child(
+                                        div()
+                                            .text_size(px(14.))
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(rgb(0xffffff))
+                                            .child("Open External Website"),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(13.))
+                                    .text_color(rgb(0xc0c0c0))
+                                    .child(SharedString::from(format!(
+                                        "An extension wants to open an external link in your browser:\n\n{url}"
+                                    ))),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .justify_end()
+                                    .gap_2()
+                                    .pt_3()
+                                    .child(primary_btn)
+                                    .child(cancel_btn),
+                            ),
+                    )
+                    .into_any_element(),
+            );
+        }
+
+        None
     }
 
     fn editor(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -3702,40 +3873,85 @@ impl Workbench {
         .size_full();
 
         let start = (p.selected + 1).saturating_sub(PALETTE_ROWS);
-        let rows: Vec<AnyElement> = p
-            .results()
-            .enumerate()
-            .skip(start)
-            .take(PALETTE_ROWS)
-            .map(|(i, item)| {
-                div()
-                    .id(("palette-item", i))
-                    .flex()
-                    .justify_between()
-                    .gap_4()
-                    .px_3()
-                    .py(px(3.))
-                    .text_size(px(13.))
-                    .cursor_pointer()
-                    .when(i == p.selected, |d| {
-                        d.bg(rgb(theme::SELECTED)).text_color(rgb(0xffffff))
-                    })
-                    .hover(|s| s.bg(rgb(theme::HOVER)))
-                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                        if let Some(p) = this.model.palette.as_mut() {
-                            p.select(i);
-                        }
-                        this.accept_palette(window, cx);
-                    }))
-                    .child(SharedString::from(item.label.clone()))
-                    .child(
-                        div()
-                            .text_color(rgb(theme::TEXT_DIM))
-                            .child(SharedString::from(item.detail.clone().unwrap_or_default())),
-                    )
-                    .into_any_element()
-            })
-            .collect();
+        let is_lang_mode = matches!(p.mode, palette::PaletteMode::LanguageMode);
+        let mut rows: Vec<AnyElement> = Vec::new();
+        for (i, item) in p.results().enumerate().skip(start).take(PALETTE_ROWS) {
+            let row = div()
+                .id(("palette-item", i))
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_4()
+                .px_3()
+                .py(px(4.))
+                .text_size(px(13.))
+                .cursor_pointer()
+                .when(i == p.selected, |d| {
+                    d.bg(rgb(theme::SELECTED)).text_color(rgb(0xffffff))
+                })
+                .hover(|s| s.bg(rgb(theme::HOVER)))
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    if let Some(p) = this.model.palette.as_mut() {
+                        p.select(i);
+                    }
+                    this.accept_palette(window, cx);
+                }))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .min_w_0()
+                        .children(item.badge.map(|b| {
+                            div()
+                                .flex_none()
+                                .w(px(26.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .text_size(px(11.))
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(rgb(b.color))
+                                .child(b.glyph)
+                        }))
+                        .child(
+                            div()
+                                .whitespace_nowrap()
+                                .overflow_hidden()
+                                .child(SharedString::from(item.label.clone())),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(px(11.))
+                        .text_color(rgb(theme::TEXT_DIM))
+                        .child(SharedString::from(item.detail.clone().unwrap_or_default())),
+                )
+                .into_any_element();
+            rows.push(row);
+
+            if is_lang_mode && i == 0 && query.is_empty() {
+                rows.push(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .px_3()
+                        .py(px(3.))
+                        .border_b_1()
+                        .border_color(rgb(theme::BORDER))
+                        .text_size(px(11.))
+                        .child("")
+                        .child(
+                            div()
+                                .text_color(rgb(0x3794ff))
+                                .child("languages (identifier)"),
+                        )
+                        .into_any_element(),
+                );
+            }
+        }
         let is_input = matches!(p.mode, palette::PaletteMode::Input(_));
         let error = p.error.clone().map(|e| {
             div()
@@ -4135,10 +4351,6 @@ impl Render for Workbench {
         });
         let right_panel = right_open.then(|| self.ai_panel(window, cx));
         let tab_bar = (!maximized).then(|| self.tab_bar(cx).into_any_element());
-        let prompt_bar = self.prompt_bar(cx).map(IntoElement::into_any_element);
-        let external_prompt_bar = self
-            .external_prompt_bar(cx)
-            .map(IntoElement::into_any_element);
         let editor: Option<AnyElement> = (!maximized).then(|| {
             if self.model.settings_open {
                 self.settings_page(cx)
@@ -4176,8 +4388,6 @@ impl Render for Workbench {
             .min_w_0()
             .min_h_0()
             .children(tab_bar)
-            .children(prompt_bar)
-            .children(external_prompt_bar)
             .children(find_bar)
             .children(editor);
         let center = match layout.panel_pos {
@@ -4238,6 +4448,7 @@ impl Render for Workbench {
             .children(status_bar)
             .children(menus)
             .children(palette)
+            .children(self.prompt_modal_overlay(cx))
     }
 }
 

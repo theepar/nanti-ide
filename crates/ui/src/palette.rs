@@ -480,71 +480,687 @@ impl TextField {
     }
 }
 
-pub const LANGUAGE_LIST: &[(&str, &str, &str)] = &[
-    ("Python", "python", ".py, .pyw"),
-    ("JavaScript", "javascript", ".js, .mjs, .cjs"),
-    ("TypeScript", "typescript", ".ts, .mts"),
-    ("TypeScript React", "typescriptreact", ".tsx"),
-    ("JavaScript React", "javascriptreact", ".jsx"),
-    ("Java", "java", ".java"),
-    ("Kotlin", "kotlin", ".kt, .kts"),
-    ("Swift", "swift", ".swift"),
-    ("Dart", "dart", ".dart"),
-    ("Go", "go", ".go"),
-    ("Rust", "rust", ".rs"),
-    ("C", "c", ".c, .h"),
-    ("C++", "cpp", ".cpp, .hpp, .cc"),
-    ("C#", "csharp", ".cs"),
-    ("PHP", "php", ".php"),
-    ("Ruby", "ruby", ".rb"),
-    ("Perl", "perl", ".pl, .pm"),
-    ("Lua", "lua", ".lua"),
-    ("R", "r", ".r, .R"),
-    ("Julia", "julia", ".jl"),
-    ("MATLAB", "matlab", ".m"),
-    ("Octave", "octave", ".m"),
-    ("Scala", "scala", ".scala"),
-    ("Groovy", "groovy", ".groovy"),
-    ("Clojure", "clojure", ".clj"),
-    ("Elixir", "elixir", ".ex, .exs"),
-    ("Erlang", "erlang", ".erl, .hrl"),
-    ("Haskell", "haskell", ".hs"),
-    ("OCaml", "ocaml", ".ml"),
-    ("F#", "fsharp", ".fs"),
-    ("Elm", "elm", ".elm"),
-    ("PureScript", "purescript", ".purs"),
-    ("Zig", "zig", ".zig"),
-    ("Nim", "nim", ".nim"),
-    ("Crystal", "crystal", ".cr"),
-    ("D", "d", ".d"),
-    ("V", "v", ".v"),
-    ("Objective-C", "objective-c", ".m, .mm"),
-    ("Assembly", "assembly", ".asm, .s"),
-    ("Fortran", "fortran", ".f90, .f95"),
-    ("COBOL", "cobol", ".cob, .cbl"),
-    ("Pascal", "pascal", ".pas"),
-    ("Delphi / Object Pascal", "delphi", ".pas, .dpr"),
-    ("Ada", "ada", ".adb, .ads"),
-    ("Lisp", "lisp", ".lisp, .lsp"),
-    ("Scheme", "scheme", ".scm"),
-    ("Racket", "racket", ".rkt"),
-    ("Prolog", "prolog", ".pl"),
-    ("Smalltalk", "smalltalk", ".st"),
-    ("Solidity", "solidity", ".sol"),
-    ("Move", "move", ".move"),
-    ("WebAssembly Text", "wat", ".wat"),
-    ("HTML", "html", ".html, .htm"),
-    ("CSS", "css", ".css"),
-    ("JSON", "json", ".json"),
-    ("YAML", "yaml", ".yaml, .yml"),
-    ("TOML", "toml", ".toml"),
-    ("SQL", "sql", ".sql"),
-    ("Markdown", "markdown", ".md"),
-    ("Shell Script", "bash", ".sh, .bash"),
-    ("PowerShell", "powershell", ".ps1"),
-    ("Batch", "bat", ".bat, .cmd"),
-    ("Plain Text", "plaintext", ".txt"),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LanguageBadge {
+    pub glyph: &'static str,
+    pub color: u32,
+    pub is_bracket: bool,
+}
+
+impl LanguageBadge {
+    pub const fn bracket(color: u32) -> Self {
+        Self {
+            glyph: "{ }",
+            color,
+            is_bracket: true,
+        }
+    }
+
+    pub const fn text(glyph: &'static str, color: u32) -> Self {
+        Self {
+            glyph,
+            color,
+            is_bracket: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LanguageEntry {
+    pub name: &'static str,
+    pub id: &'static str,
+    pub exts: &'static str,
+    pub badge: LanguageBadge,
+}
+
+pub const LANGUAGE_LIST: &[LanguageEntry] = &[
+    LanguageEntry {
+        name: "Ada",
+        id: "ada",
+        exts: ".adb, .ads",
+        badge: LanguageBadge::text("ADA", 0x02f88c),
+    },
+    LanguageEntry {
+        name: "Agent",
+        id: "chatagent",
+        exts: ".agent",
+        badge: LanguageBadge::text("📄", 0x888888),
+    },
+    LanguageEntry {
+        name: "Assembly",
+        id: "assembly",
+        exts: ".asm, .s",
+        badge: LanguageBadge::text("ASM", 0x6e4c13),
+    },
+    LanguageEntry {
+        name: "Batch",
+        id: "bat",
+        exts: ".bat, .cmd",
+        badge: LanguageBadge::text(">_", 0x4bc589),
+    },
+    LanguageEntry {
+        name: "BibTeX",
+        id: "bibtex",
+        exts: ".bib",
+        badge: LanguageBadge::text("📄", 0x888888),
+    },
+    LanguageEntry {
+        name: "Binary",
+        id: "code-text-binary",
+        exts: ".bin",
+        badge: LanguageBadge::text("📄", 0x888888),
+    },
+    LanguageEntry {
+        name: "Blade",
+        id: "blade",
+        exts: ".blade.php",
+        badge: LanguageBadge::text("📄", 0xf05340),
+    },
+    LanguageEntry {
+        name: "C",
+        id: "c",
+        exts: ".c, .h",
+        badge: LanguageBadge::text("C", 0x00599c),
+    },
+    LanguageEntry {
+        name: "C#",
+        id: "csharp",
+        exts: ".cs",
+        badge: LanguageBadge::text("C#", 0x178600),
+    },
+    LanguageEntry {
+        name: "C++",
+        id: "cpp",
+        exts: ".cpp, .hpp, .cc",
+        badge: LanguageBadge::text("C++", 0x00599c),
+    },
+    LanguageEntry {
+        name: "Clojure",
+        id: "clojure",
+        exts: ".clj",
+        badge: LanguageBadge::text("λ", 0x5881d8),
+    },
+    LanguageEntry {
+        name: "CMake",
+        id: "cmake",
+        exts: "CMakeLists.txt, .cmake",
+        badge: LanguageBadge::text("📄", 0x064f8c),
+    },
+    LanguageEntry {
+        name: "COBOL",
+        id: "cobol",
+        exts: ".cob, .cbl",
+        badge: LanguageBadge::text("COB", 0x2b3269),
+    },
+    LanguageEntry {
+        name: "Code Snippets",
+        id: "snippets",
+        exts: ".code-snippets",
+        badge: LanguageBadge::text("📄", 0x888888),
+    },
+    LanguageEntry {
+        name: "Codex Rules",
+        id: "codex-rules",
+        exts: ".codexrules",
+        badge: LanguageBadge::text("📄", 0x888888),
+    },
+    LanguageEntry {
+        name: "CoffeeScript",
+        id: "coffeescript",
+        exts: ".coffee",
+        badge: LanguageBadge::text("☕", 0x244776),
+    },
+    LanguageEntry {
+        name: "Compose",
+        id: "dockercompose",
+        exts: "docker-compose.yml",
+        badge: LanguageBadge::text("🐳", 0x2496ed),
+    },
+    LanguageEntry {
+        name: "Crystal",
+        id: "crystal",
+        exts: ".cr",
+        badge: LanguageBadge::text("CR", 0x000100),
+    },
+    LanguageEntry {
+        name: "CSS",
+        id: "css",
+        exts: ".css",
+        badge: LanguageBadge::bracket(0x42a5f5),
+    },
+    LanguageEntry {
+        name: "CUDA C++",
+        id: "cuda-cpp",
+        exts: ".cu, .cuh",
+        badge: LanguageBadge::text("📄", 0x3a4e3a),
+    },
+    LanguageEntry {
+        name: "D",
+        id: "d",
+        exts: ".d",
+        badge: LanguageBadge::text("D", 0xba595e),
+    },
+    LanguageEntry {
+        name: "Dart",
+        id: "dart",
+        exts: ".dart",
+        badge: LanguageBadge::text("◈", 0x00b4ab),
+    },
+    LanguageEntry {
+        name: "Delphi / Object Pascal",
+        id: "delphi",
+        exts: ".pas, .dpr",
+        badge: LanguageBadge::text("D", 0xb0ce4e),
+    },
+    LanguageEntry {
+        name: "Diff",
+        id: "diff",
+        exts: ".diff, .patch",
+        badge: LanguageBadge::text("📄", 0x888888),
+    },
+    LanguageEntry {
+        name: "Docker",
+        id: "dockerfile",
+        exts: "Dockerfile, .dockerfile",
+        badge: LanguageBadge::text("🐳", 0x2496ed),
+    },
+    LanguageEntry {
+        name: "Dotenv",
+        id: "dotenv",
+        exts: ".env",
+        badge: LanguageBadge::text("📄", 0x888888),
+    },
+    LanguageEntry {
+        name: "Elixir",
+        id: "elixir",
+        exts: ".ex, .exs",
+        badge: LanguageBadge::text("💧", 0x6e4a7e),
+    },
+    LanguageEntry {
+        name: "Elm",
+        id: "elm",
+        exts: ".elm",
+        badge: LanguageBadge::text("◈", 0x60b5cc),
+    },
+    LanguageEntry {
+        name: "Erlang",
+        id: "erlang",
+        exts: ".erl, .hrl",
+        badge: LanguageBadge::text("◈", 0xb83998),
+    },
+    LanguageEntry {
+        name: "F#",
+        id: "fsharp",
+        exts: ".fs",
+        badge: LanguageBadge::text("F#", 0x30b980),
+    },
+    LanguageEntry {
+        name: "Fortran",
+        id: "fortran",
+        exts: ".f90, .f95",
+        badge: LanguageBadge::text("F", 0x4d41b1),
+    },
+    LanguageEntry {
+        name: "Git Commit Message",
+        id: "git-commit",
+        exts: "COMMIT_EDITMSG",
+        badge: LanguageBadge::text("⑂", 0xf05033),
+    },
+    LanguageEntry {
+        name: "Git Rebase Message",
+        id: "git-rebase",
+        exts: "git-rebase-todo",
+        badge: LanguageBadge::text("⑂", 0xf05033),
+    },
+    LanguageEntry {
+        name: "GitHub Actions Workflow",
+        id: "github-actions-workflow",
+        exts: ".github/workflows/*.yml",
+        badge: LanguageBadge::text("⑂", 0x2088ff),
+    },
+    LanguageEntry {
+        name: "Go",
+        id: "go",
+        exts: ".go",
+        badge: LanguageBadge::text("GO", 0x00add8),
+    },
+    LanguageEntry {
+        name: "Go Assembly",
+        id: "go.asm",
+        exts: ".s",
+        badge: LanguageBadge::text("📄", 0x00add8),
+    },
+    LanguageEntry {
+        name: "Go Checksum File",
+        id: "go.sum",
+        exts: "go.sum",
+        badge: LanguageBadge::text("📄", 0x00add8),
+    },
+    LanguageEntry {
+        name: "Go Module File",
+        id: "go.mod",
+        exts: "go.mod",
+        badge: LanguageBadge::text("📄", 0x00add8),
+    },
+    LanguageEntry {
+        name: "Go Template File",
+        id: "gotmpl",
+        exts: ".gotmpl, .tmpl",
+        badge: LanguageBadge::text("📄", 0x00add8),
+    },
+    LanguageEntry {
+        name: "Go Work File",
+        id: "go.work",
+        exts: "go.work",
+        badge: LanguageBadge::text("📄", 0x00add8),
+    },
+    LanguageEntry {
+        name: "Gradle",
+        id: "gradle",
+        exts: ".gradle",
+        badge: LanguageBadge::text("📄", 0x02303a),
+    },
+    LanguageEntry {
+        name: "gradle-build",
+        id: "gradle-build",
+        exts: "build.gradle",
+        badge: LanguageBadge::text("📄", 0x02303a),
+    },
+    LanguageEntry {
+        name: "GraphQL",
+        id: "graphql",
+        exts: ".graphql, .gql",
+        badge: LanguageBadge::text("⬡", 0xe10098),
+    },
+    LanguageEntry {
+        name: "Groovy",
+        id: "groovy",
+        exts: ".groovy",
+        badge: LanguageBadge::text("📄", 0x4298b8),
+    },
+    LanguageEntry {
+        name: "Handlebars",
+        id: "handlebars",
+        exts: ".hbs, .handlebars",
+        badge: LanguageBadge::bracket(0xf0772b),
+    },
+    LanguageEntry {
+        name: "Haskell",
+        id: "haskell",
+        exts: ".hs",
+        badge: LanguageBadge::text("λ", 0x5e5086),
+    },
+    LanguageEntry {
+        name: "HLSL",
+        id: "hlsl",
+        exts: ".hlsl",
+        badge: LanguageBadge::bracket(0x6c5ce7),
+    },
+    LanguageEntry {
+        name: "HTML",
+        id: "html",
+        exts: ".html, .htm",
+        badge: LanguageBadge::bracket(0xe44d26),
+    },
+    LanguageEntry {
+        name: "Ignore",
+        id: "ignore",
+        exts: ".gitignore, .dockerignore",
+        badge: LanguageBadge::text("📄", 0x888888),
+    },
+    LanguageEntry {
+        name: "Ini",
+        id: "ini",
+        exts: ".ini, .cfg",
+        badge: LanguageBadge::text("📄", 0x888888),
+    },
+    LanguageEntry {
+        name: "Instructions",
+        id: "instructions",
+        exts: ".instructions",
+        badge: LanguageBadge::text("📄", 0x888888),
+    },
+    LanguageEntry {
+        name: "Java",
+        id: "java",
+        exts: ".java",
+        badge: LanguageBadge::text("☕", 0xb07219),
+    },
+    LanguageEntry {
+        name: "JavaScript",
+        id: "javascript",
+        exts: ".js, .mjs, .cjs",
+        badge: LanguageBadge::text("JS", 0xf7df1e),
+    },
+    LanguageEntry {
+        name: "JavaScript JSX",
+        id: "javascriptreact",
+        exts: ".jsx",
+        badge: LanguageBadge::text("⚛", 0x61dafb),
+    },
+    LanguageEntry {
+        name: "Jinja",
+        id: "jinja",
+        exts: ".jinja, .j2",
+        badge: LanguageBadge::bracket(0xb41717),
+    },
+    LanguageEntry {
+        name: "JSON",
+        id: "json",
+        exts: ".json",
+        badge: LanguageBadge::bracket(0xcbcb41),
+    },
+    LanguageEntry {
+        name: "JSON Lines",
+        id: "jsonl",
+        exts: ".jsonl",
+        badge: LanguageBadge::text("📄", 0xcbcb41),
+    },
+    LanguageEntry {
+        name: "JSON with Comments",
+        id: "jsonc",
+        exts: ".jsonc",
+        badge: LanguageBadge::bracket(0xcbcb41),
+    },
+    LanguageEntry {
+        name: "Julia",
+        id: "julia",
+        exts: ".jl",
+        badge: LanguageBadge::text("JL", 0xa270ba),
+    },
+    LanguageEntry {
+        name: "Julia Markdown",
+        id: "juliamarkdown",
+        exts: ".jmd",
+        badge: LanguageBadge::text("📄", 0xa270ba),
+    },
+    LanguageEntry {
+        name: "Kotlin",
+        id: "kotlin",
+        exts: ".kt, .kts",
+        badge: LanguageBadge::text("KT", 0xa97bff),
+    },
+    LanguageEntry {
+        name: "LaTeX",
+        id: "latex",
+        exts: ".tex, .latex",
+        badge: LanguageBadge::text("T", 0x008080),
+    },
+    LanguageEntry {
+        name: "Less",
+        id: "less",
+        exts: ".less",
+        badge: LanguageBadge::bracket(0x1d365d),
+    },
+    LanguageEntry {
+        name: "Lisp",
+        id: "lisp",
+        exts: ".lisp, .lsp",
+        badge: LanguageBadge::text("λ", 0x3fb68b),
+    },
+    LanguageEntry {
+        name: "Lua",
+        id: "lua",
+        exts: ".lua",
+        badge: LanguageBadge::text("Lua", 0x000080),
+    },
+    LanguageEntry {
+        name: "Makefile",
+        id: "makefile",
+        exts: "Makefile, .mk",
+        badge: LanguageBadge::text("📄", 0x427819),
+    },
+    LanguageEntry {
+        name: "Markdown",
+        id: "markdown",
+        exts: ".md",
+        badge: LanguageBadge::text("M↓", 0x083fa1),
+    },
+    LanguageEntry {
+        name: "MATLAB",
+        id: "matlab",
+        exts: ".m",
+        badge: LanguageBadge::text("M", 0xe16737),
+    },
+    LanguageEntry {
+        name: "Move",
+        id: "move",
+        exts: ".move",
+        badge: LanguageBadge::text("◈", 0x4a90e2),
+    },
+    LanguageEntry {
+        name: "Nim",
+        id: "nim",
+        exts: ".nim",
+        badge: LanguageBadge::text("NIM", 0xffc200),
+    },
+    LanguageEntry {
+        name: "Nix",
+        id: "nix",
+        exts: ".nix",
+        badge: LanguageBadge::text("❄", 0x7e7eff),
+    },
+    LanguageEntry {
+        name: "Objective-C",
+        id: "objective-c",
+        exts: ".m, .mm",
+        badge: LanguageBadge::text("M", 0x438eff),
+    },
+    LanguageEntry {
+        name: "OCaml",
+        id: "ocaml",
+        exts: ".ml",
+        badge: LanguageBadge::text("◈", 0x3be133),
+    },
+    LanguageEntry {
+        name: "Octave",
+        id: "octave",
+        exts: ".m",
+        badge: LanguageBadge::text("M", 0x0794bc),
+    },
+    LanguageEntry {
+        name: "Pascal",
+        id: "pascal",
+        exts: ".pas",
+        badge: LanguageBadge::text("P", 0xe3f171),
+    },
+    LanguageEntry {
+        name: "Perl",
+        id: "perl",
+        exts: ".pl, .pm",
+        badge: LanguageBadge::text("PL", 0x0298c3),
+    },
+    LanguageEntry {
+        name: "PHP",
+        id: "php",
+        exts: ".php",
+        badge: LanguageBadge::text("PHP", 0x4f5d95),
+    },
+    LanguageEntry {
+        name: "Plain Text",
+        id: "plaintext",
+        exts: ".txt",
+        badge: LanguageBadge::text("📄", 0x888888),
+    },
+    LanguageEntry {
+        name: "PowerShell",
+        id: "powershell",
+        exts: ".ps1",
+        badge: LanguageBadge::text("PS", 0x012456),
+    },
+    LanguageEntry {
+        name: "Prolog",
+        id: "prolog",
+        exts: ".pl",
+        badge: LanguageBadge::text("◈", 0x74283c),
+    },
+    LanguageEntry {
+        name: "Protocol Buffer",
+        id: "proto",
+        exts: ".proto",
+        badge: LanguageBadge::text("📄", 0x438eff),
+    },
+    LanguageEntry {
+        name: "PureScript",
+        id: "purescript",
+        exts: ".purs",
+        badge: LanguageBadge::text("◈", 0x1d222d),
+    },
+    LanguageEntry {
+        name: "Python",
+        id: "python",
+        exts: ".py, .pyw",
+        badge: LanguageBadge::text("PY", 0x3572a5),
+    },
+    LanguageEntry {
+        name: "R",
+        id: "r",
+        exts: ".r, .R",
+        badge: LanguageBadge::text("R", 0x198ce7),
+    },
+    LanguageEntry {
+        name: "Racket",
+        id: "racket",
+        exts: ".rkt",
+        badge: LanguageBadge::text("λ", 0x3c5caa),
+    },
+    LanguageEntry {
+        name: "Ruby",
+        id: "ruby",
+        exts: ".rb",
+        badge: LanguageBadge::text("RB", 0x701516),
+    },
+    LanguageEntry {
+        name: "Rust",
+        id: "rust",
+        exts: ".rs",
+        badge: LanguageBadge::text("RS", 0xdea584),
+    },
+    LanguageEntry {
+        name: "Sass",
+        id: "sass",
+        exts: ".sass",
+        badge: LanguageBadge::bracket(0xa53b70),
+    },
+    LanguageEntry {
+        name: "SCSS",
+        id: "scss",
+        exts: ".scss",
+        badge: LanguageBadge::bracket(0xc6538c),
+    },
+    LanguageEntry {
+        name: "Scala",
+        id: "scala",
+        exts: ".scala",
+        badge: LanguageBadge::text("S", 0xc22d40),
+    },
+    LanguageEntry {
+        name: "Scheme",
+        id: "scheme",
+        exts: ".scm",
+        badge: LanguageBadge::text("λ", 0x1e4aec),
+    },
+    LanguageEntry {
+        name: "Shell Script",
+        id: "bash",
+        exts: ".sh, .bash",
+        badge: LanguageBadge::text(">_", 0x89e051),
+    },
+    LanguageEntry {
+        name: "Smalltalk",
+        id: "smalltalk",
+        exts: ".st",
+        badge: LanguageBadge::text("◈", 0x596706),
+    },
+    LanguageEntry {
+        name: "Solidity",
+        id: "solidity",
+        exts: ".sol",
+        badge: LanguageBadge::text("◈", 0xaa6746),
+    },
+    LanguageEntry {
+        name: "SQL",
+        id: "sql",
+        exts: ".sql",
+        badge: LanguageBadge::text("🗄", 0xe38c00),
+    },
+    LanguageEntry {
+        name: "Svelte",
+        id: "svelte",
+        exts: ".svelte",
+        badge: LanguageBadge::text("S", 0xff3e00),
+    },
+    LanguageEntry {
+        name: "Swift",
+        id: "swift",
+        exts: ".swift",
+        badge: LanguageBadge::text("SW", 0xf05138),
+    },
+    LanguageEntry {
+        name: "TOML",
+        id: "toml",
+        exts: ".toml",
+        badge: LanguageBadge::bracket(0x9c4221),
+    },
+    LanguageEntry {
+        name: "TypeScript",
+        id: "typescript",
+        exts: ".ts, .mts",
+        badge: LanguageBadge::text("TS", 0x3178c6),
+    },
+    LanguageEntry {
+        name: "TypeScript React",
+        id: "typescriptreact",
+        exts: ".tsx",
+        badge: LanguageBadge::text("⚛", 0x3178c6),
+    },
+    LanguageEntry {
+        name: "V",
+        id: "v",
+        exts: ".v",
+        badge: LanguageBadge::text("V", 0x4f87c4),
+    },
+    LanguageEntry {
+        name: "Visual Basic",
+        id: "vb",
+        exts: ".vb",
+        badge: LanguageBadge::text("VB", 0x945db7),
+    },
+    LanguageEntry {
+        name: "Vue",
+        id: "vue",
+        exts: ".vue",
+        badge: LanguageBadge::text("V", 0x41b883),
+    },
+    LanguageEntry {
+        name: "WebAssembly Text",
+        id: "wat",
+        exts: ".wat",
+        badge: LanguageBadge::text("WAT", 0x654ff0),
+    },
+    LanguageEntry {
+        name: "XML",
+        id: "xml",
+        exts: ".xml",
+        badge: LanguageBadge::bracket(0x0060aa),
+    },
+    LanguageEntry {
+        name: "YAML",
+        id: "yaml",
+        exts: ".yaml, .yml",
+        badge: LanguageBadge::bracket(0xcb171e),
+    },
+    LanguageEntry {
+        name: "Zig",
+        id: "zig",
+        exts: ".zig",
+        badge: LanguageBadge::text("ZIG", 0xec915c),
+    },
 ];
+
+pub fn find_language_by_id(id: &str) -> Option<&'static LanguageEntry> {
+    LANGUAGE_LIST.iter().find(|e| e.id.eq_ignore_ascii_case(id))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PaletteMode {
@@ -599,6 +1215,7 @@ pub struct PaletteItem {
     pub label: String,
     pub detail: Option<String>,
     pub action: PaletteAction,
+    pub badge: Option<LanguageBadge>,
 }
 
 pub struct Palette {
@@ -618,6 +1235,7 @@ impl Palette {
                 label: c.title().to_owned(),
                 detail: c.keybinding().map(str::to_owned),
                 action: PaletteAction::Command(*c),
+                badge: None,
             })
             .collect();
 
@@ -632,6 +1250,7 @@ impl Palette {
                         ext_dir: Some(ext.dir.clone()),
                         view_type: ext.view_type.clone(),
                     },
+                    badge: None,
                 });
             }
         }
@@ -644,12 +1263,14 @@ impl Palette {
             label: "Auto Detect".to_owned(),
             detail: Some("Auto detect from file extension".to_owned()),
             action: PaletteAction::SetLanguageMode(None),
+            badge: Some(LanguageBadge::text("✨", 0x888888)),
         }];
-        for (name, id, exts) in LANGUAGE_LIST {
+        for entry in LANGUAGE_LIST {
             items.push(PaletteItem {
-                label: format!("{name} ({id})"),
-                detail: Some(exts.to_string()),
-                action: PaletteAction::SetLanguageMode(Some(id.to_string())),
+                label: format!("{} ({})", entry.name, entry.id),
+                detail: Some(entry.exts.to_string()),
+                action: PaletteAction::SetLanguageMode(Some(entry.id.to_string())),
+                badge: Some(entry.badge),
             });
         }
         Self::build(PaletteMode::LanguageMode, items)
@@ -662,6 +1283,7 @@ impl Palette {
                 label: rel,
                 detail: None,
                 action: PaletteAction::OpenFile(abs),
+                badge: None,
             })
             .collect();
         Self::build(PaletteMode::Files, items)
@@ -685,11 +1307,13 @@ impl Palette {
             label: "Create new branch...".to_owned(),
             detail: None,
             action: PaletteAction::NewBranchPrompt,
+            badge: None,
         }];
         items.extend(list.iter().map(|b| PaletteItem {
             label: b.name.clone(),
             detail: b.current.then(|| "current".to_owned()),
             action: PaletteAction::Checkout(b.name.clone()),
+            badge: None,
         }));
         Self::build(PaletteMode::Branches, items)
     }
@@ -706,6 +1330,11 @@ impl Palette {
             return;
         }
         let q = self.field.text().trim().to_owned();
+        if q.is_empty() {
+            self.filtered = (0..self.items.len()).take(MAX_RESULTS).collect();
+            self.selected = 0;
+            return;
+        }
         let mut scored: Vec<(i32, usize)> = self
             .items
             .iter()
