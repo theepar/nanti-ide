@@ -444,19 +444,18 @@ impl Workbench {
                         .child("Installed"),
                 )
                 .children(view.filter(|_| !in_panel).map(|view| {
-                    Self::detail_button("ext-detail-panel", "Use in right panel", false).on_click(
-                        cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    Self::detail_button("ext-detail-panel", "Use as extension panel", false)
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                             this.model.use_as_panel_extension(&panel_dir, &view);
                             this.drain_requests(window, cx);
                             cx.notify();
-                        }),
-                    )
+                        }))
                 }))
                 .children(in_panel.then(|| {
                     div()
                         .text_size(px(12.))
                         .text_color(rgb(0x8fd19e))
-                        .child("Showing in the right panel")
+                        .child("Showing as the extension panel")
                 }))
                 .children(removable.then(|| {
                     Self::detail_button("ext-detail-remove", "Uninstall", true).on_click(

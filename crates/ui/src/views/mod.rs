@@ -12,7 +12,7 @@ use crate::assets;
 use crate::model::PanelTab;
 use crate::{MENU_BAR_HEIGHT, Workbench, theme};
 
-pub(crate) const SCROLLBAR_W: f32 = 12.0;
+pub(crate) const SCROLLBAR_W: f32 = 8.0;
 pub(crate) const SCROLLBAR_MIN_THUMB: f32 = 30.0;
 
 pub(crate) fn thumb_geometry(handle: &ScrollHandle, track: Bounds<Pixels>) -> Option<(f32, f32)> {
@@ -74,13 +74,13 @@ impl Workbench {
                         let Some((top, height)) = thumb_geometry(&paint, track) else {
                             return;
                         };
-                        window.paint_quad(fill(track, rgb(theme::SCROLL_TRACK)));
                         let thumb = Bounds {
-                            origin: point(track.origin.x + px(2.), px(top)),
-                            size: size(px(SCROLLBAR_W - 4.), px(height)),
+                            origin: point(track.origin.x + px(3.), px(top)),
+                            size: size(px(SCROLLBAR_W - 5.), px(height)),
                         };
-                        window
-                            .paint_quad(fill(thumb, rgb(theme::SCROLL_THUMB)).corner_radii(px(4.)));
+                        window.paint_quad(
+                            fill(thumb, rgb(theme::SCROLL_THUMB)).corner_radii(px(1.5)),
+                        );
                     },
                 )
                 .absolute()

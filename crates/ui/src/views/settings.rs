@@ -210,11 +210,6 @@ impl Workbench {
                         self.switch("set-panel", l.panel, Command::TogglePanel, cx),
                     ))
                     .child(Self::setting_row(
-                        "Extension panel",
-                        "The side panel an extension can fill (appears when one does).",
-                        self.switch("set-right", l.right, Command::ToggleRightPanel, cx),
-                    ))
-                    .child(Self::setting_row(
                         "Status bar",
                         "The bar at the bottom of the window.",
                         self.switch("set-status", l.status_bar, Command::ToggleStatusBar, cx),

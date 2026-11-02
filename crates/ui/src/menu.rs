@@ -107,7 +107,7 @@ pub fn items(kind: MenuKind) -> Vec<MenuItem> {
             Sep,
             Cmd(C::ToggleSidebar),
             Cmd(C::TogglePanel),
-            Cmd(C::ToggleRightPanel),
+            Cmd(C::OpenExtensionPanel),
             Cmd(C::ToggleActivityBar),
             Cmd(C::ToggleStatusBar),
             Cmd(C::MaximizePanel),

@@ -5,9 +5,6 @@ use serde_json::{Value, json};
 pub const SIDEBAR_MIN: f32 = 160.0;
 pub const SIDEBAR_MAX: f32 = 700.0;
 pub const SIDEBAR_DEFAULT: f32 = 260.0;
-pub const RIGHT_MIN: f32 = 200.0;
-pub const RIGHT_MAX: f32 = 900.0;
-pub const RIGHT_DEFAULT: f32 = 320.0;
 pub const PANEL_MIN: f32 = 80.0;
 pub const PANEL_DEFAULT: f32 = 240.0;
 pub const EDITOR_MIN_WIDTH: f32 = 240.0;
@@ -85,8 +82,6 @@ pub struct Layout {
     pub panel_width: f32,
     pub panel_pos: PanelPos,
     pub panel_maximized: bool,
-    pub right: bool,
-    pub right_width: f32,
     pub status_bar: bool,
 }
 
@@ -102,8 +97,6 @@ impl Default for Layout {
             panel_width: PANEL_WIDTH_DEFAULT,
             panel_pos: PanelPos::Bottom,
             panel_maximized: false,
-            right: true,
-            right_width: RIGHT_DEFAULT,
             status_bar: true,
         }
     }
@@ -134,8 +127,7 @@ impl Layout {
                 self.sidebar_width
             } else {
                 0.0
-            }
-            - if self.right { self.right_width } else { 0.0 };
+            };
         self.panel_width = w.clamp(
             PANEL_WIDTH_MIN,
             PANEL_WIDTH_MAX.min(room.max(PANEL_WIDTH_MIN)),
@@ -154,11 +146,6 @@ impl Layout {
                 self.effective_sidebar(window_width)
             } else {
                 0.0
-            }
-            - if self.right {
-                self.right_width.min(RIGHT_MAX)
-            } else {
-                0.0
             };
         self.panel_width.min(room.max(PANEL_WIDTH_MIN))
     }
@@ -171,26 +158,8 @@ impl Layout {
                 ACTIVITY_BAR_WIDTH
             } else {
                 0.0
-            }
-            - if self.right { self.right_width } else { 0.0 };
-        self.sidebar_width = w.clamp(SIDEBAR_MIN, SIDEBAR_MAX.min(room.max(SIDEBAR_MIN)));
-    }
-
-    pub fn set_right_width(&mut self, w: f32, window_width: f32) {
-        let room = window_width
-            - EDITOR_MIN_WIDTH
-            - self.side_panel_width()
-            - if self.activity_bar {
-                ACTIVITY_BAR_WIDTH
-            } else {
-                0.0
-            }
-            - if self.sidebar {
-                self.sidebar_width
-            } else {
-                0.0
             };
-        self.right_width = w.clamp(RIGHT_MIN, RIGHT_MAX.min(room.max(RIGHT_MIN)));
+        self.sidebar_width = w.clamp(SIDEBAR_MIN, SIDEBAR_MAX.min(room.max(SIDEBAR_MIN)));
     }
 
     pub fn set_panel_height(&mut self, h: f32, window_height: f32) {
@@ -206,34 +175,10 @@ impl Layout {
                 ACTIVITY_BAR_WIDTH
             } else {
                 0.0
-            }
-            - if self.right {
-                self.right_width.min(RIGHT_MAX)
-            } else {
-                0.0
             };
         self.sidebar_width
             .min(room.max(SIDEBAR_MIN))
             .max(SIDEBAR_MIN.min(self.sidebar_width))
-    }
-
-    pub fn effective_right(&self, window_width: f32) -> f32 {
-        let room = window_width
-            - EDITOR_MIN_WIDTH
-            - self.side_panel_width()
-            - if self.activity_bar {
-                ACTIVITY_BAR_WIDTH
-            } else {
-                0.0
-            }
-            - if self.sidebar {
-                self.effective_sidebar(window_width)
-            } else {
-                0.0
-            };
-        self.right_width
-            .min(room.max(RIGHT_MIN))
-            .max(RIGHT_MIN.min(self.right_width))
     }
 
     pub fn effective_panel(&self, column_height: f32) -> f32 {
@@ -256,8 +201,6 @@ impl Layout {
             "panelWidth": self.panel_width,
             "panelPosition": self.panel_pos.name(),
             "panelMaximized": self.panel_maximized,
-            "right": self.right,
-            "rightWidth": self.right_width,
             "statusBar": self.status_bar,
         }))
         .unwrap_or_default()
@@ -297,8 +240,6 @@ impl Layout {
             .and_then(PanelPos::parse)
             .unwrap_or(l.panel_pos);
         l.panel_maximized = flag("panelMaximized", l.panel_maximized);
-        l.right = flag("right", l.right);
-        l.right_width = num("rightWidth", l.right_width, RIGHT_MIN, RIGHT_MAX);
         l.status_bar = flag("statusBar", l.status_bar);
         l
     }
@@ -351,8 +292,6 @@ mod tests {
             panel_width: 555.0,
             panel_pos: PanelPos::Left,
             panel_maximized: true,
-            right: false,
-            right_width: 410.0,
             status_bar: false,
         };
         assert_eq!(Layout::from_json(&l.to_json()), l);
@@ -381,9 +320,7 @@ mod tests {
             ..Layout::default()
         };
         l.set_panel_width(5000.0, 1280.0);
-        assert!(
-            l.panel_width <= 1280.0 - EDITOR_MIN_WIDTH - 48.0 - l.sidebar_width - l.right_width
-        );
+        assert!(l.panel_width <= 1280.0 - EDITOR_MIN_WIDTH - 48.0 - l.sidebar_width);
         l.set_panel_width(1.0, 1280.0);
         assert_eq!(l.panel_width, PANEL_WIDTH_MIN);
         l.panel_width = 500.0;
@@ -409,10 +346,9 @@ mod tests {
         assert_eq!(Layout::from_json(""), Layout::default());
         assert_eq!(Layout::from_json("[1,2,3]"), Layout::default());
         let hostile = Layout::from_json(
-            r#"{"sidebarWidth": 99999, "rightWidth": -5, "panelHeight": "tall", "sidebar": "yes", "extra": 1}"#,
+            r#"{"sidebarWidth": 99999, "panelHeight": "tall", "sidebar": "yes", "extra": 1}"#,
         );
         assert_eq!(hostile.sidebar_width, SIDEBAR_MAX);
-        assert_eq!(hostile.right_width, RIGHT_MIN);
         assert_eq!(
             hostile.panel_height, PANEL_DEFAULT,
             "wrong type uses the default"
@@ -428,10 +364,7 @@ mod tests {
         l.set_sidebar_width(10.0, 1280.0);
         assert_eq!(l.sidebar_width, SIDEBAR_MIN);
         l.set_sidebar_width(5000.0, 1280.0);
-        assert_eq!(l.sidebar_width, 672.0);
-        l.set_right_width(5000.0, 1280.0);
-        // 1280 - 240 - 48 - 672 = 320, never below the minimum
-        assert_eq!(l.right_width, 320.0);
+        assert_eq!(l.sidebar_width, SIDEBAR_MAX);
         let mut tiny = Layout::default();
         tiny.set_sidebar_width(400.0, 300.0);
         assert_eq!(
@@ -449,7 +382,6 @@ mod tests {
         let l = Layout::default();
         assert_eq!(l.effective_sidebar(1280.0), 260.0);
         assert!(l.effective_sidebar(700.0) < 260.0 + 1.0);
-        assert!(l.effective_right(600.0) >= RIGHT_MIN);
         assert_eq!(l.sidebar_width, 260.0, "stored size untouched");
         assert_eq!(l.effective_panel(800.0), 240.0);
         assert_eq!(
@@ -469,7 +401,7 @@ mod tests {
         let path = dir.join("sub").join("layout.json");
         let l = Layout {
             sidebar_width: 301.0,
-            right: false,
+            sidebar: false,
             ..Layout::default()
         };
         l.save(&path).unwrap();

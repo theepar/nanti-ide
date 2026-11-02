@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 use std::path::PathBuf;
@@ -46,10 +46,10 @@ const PALETTE_INPUT_PAD: f32 = 12.0;
 const FIELD_PAD: f32 = 8.0;
 use panel::{Panel, UiEvent};
 
-const AI_PANEL_HEADER: f32 = 30.0;
 const STATUS_BAR_HEIGHT: f32 = 22.0;
 const MENU_BAR_HEIGHT: f32 = 30.0;
-const SPLITTER: f32 = 5.0;
+const SPLITTER: f32 = 1.0;
+const SPLITTER_GRAB: f32 = 4.0;
 const ACTIVITY_BAR_WIDTH: f32 = 48.0;
 const TAB_BAR_HEIGHT: f32 = 35.0;
 const MAX_RENDERED_LINES: usize = 2000;
@@ -210,7 +210,6 @@ fn char_range_to_bytes(s: &str, r: Range<usize>) -> Range<usize> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Drag {
     Sidebar,
-    Right,
     Panel,
     PanelSide,
 }
@@ -295,8 +294,8 @@ pub struct Workbench {
     drag: Option<Drag>,
     layout_path: Option<PathBuf>,
     layout_saved: Layout,
-    right_applied: Option<bool>,
-    force_right_panel: bool,
+    webview_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    webview_applied: Option<(i32, i32, i32, i32)>,
     terminals: Vec<TerminalSession>,
     active_terminal: usize,
     term_counter: usize,
@@ -341,8 +340,8 @@ impl Workbench {
             drag: None,
             layout_path: None,
             layout_saved: Layout::default(),
-            right_applied: None,
-            force_right_panel: false,
+            webview_bounds: Rc::new(Cell::new(None)),
+            webview_applied: Some((-1, -1, 0, 0)),
             terminals: Vec::new(),
             active_terminal: 0,
             term_counter: 0,
@@ -498,7 +497,6 @@ impl Workbench {
         self.model.layout.panel_maximized = false;
         if !self.model.folder_open {
             self.model.layout.sidebar = false;
-            self.model.layout.right = false;
         }
         self.layout_saved = self.model.layout.clone();
         self.layout_path = Some(path);
@@ -520,13 +518,11 @@ impl Workbench {
         }
     }
 
-    #[doc(hidden)]
-    pub fn show_empty_right_panel_for_tests(&mut self) {
-        self.force_right_panel = true;
-    }
-
     pub fn attach_panel(&mut self, panel: Panel) {
         self.panel = Some(panel);
+        if self.model.panel_extension.is_some() {
+            self.model.open_extension_tab();
+        }
     }
 
     pub fn pump_ui(&mut self, window: &mut Window) -> bool {
@@ -549,9 +545,9 @@ impl Workbench {
         match Panel::new(window, events, to_host, diag_log) {
             Ok(panel) => {
                 self.panel = Some(panel);
-                self.right_applied = None;
-                self.model.layout.right = true;
                 self.model.panel_extension = Some(dir);
+                self.model.refresh_extensions();
+                self.model.open_extension_tab();
             }
             Err(e) => self.model.say(
                 "Extensions",
@@ -1301,10 +1297,6 @@ impl Workbench {
             return;
         }
 
-        if m.control && m.alt && key == "b" {
-            return self.run_and_stop(Command::ToggleRightPanel, window, cx);
-        }
-
         if (self.model.menu_open.is_some() || self.model.context_menu.is_some()) && key == "escape"
         {
             self.model.close_menus();
@@ -1512,8 +1504,6 @@ impl Workbench {
         let vp = window.viewport_size();
         let (vw, vh) = (f32::from(vp.width), f32::from(vp.height));
         let (x, y) = (f32::from(ev.position.x), f32::from(ev.position.y));
-        let right_open =
-            self.model.layout.right && (self.panel.is_some() || self.force_right_panel);
         let l = &mut self.model.layout;
         let status = if l.status_bar { STATUS_BAR_HEIGHT } else { 0.0 };
         let activity = if l.activity_bar {
@@ -1523,11 +1513,6 @@ impl Workbench {
         };
         let sidebar_w = if l.sidebar {
             l.effective_sidebar(vw) + SPLITTER
-        } else {
-            0.0
-        };
-        let right_w = if right_open {
-            l.effective_right(vw) + SPLITTER
         } else {
             0.0
         };
@@ -1541,7 +1526,6 @@ impl Workbench {
                 Side::Left => l.set_sidebar_width(x - activity, vw),
                 Side::Right => l.set_sidebar_width(vw - x - activity, vw),
             },
-            Drag::Right => l.set_right_width(vw - right_edge - x, vw),
             Drag::Panel => {
                 let height = if l.panel_pos == PanelPos::Top {
                     y - MENU_BAR_HEIGHT
@@ -1554,7 +1538,7 @@ impl Workbench {
                 let width = if l.panel_pos == PanelPos::Left {
                     x - left_edge
                 } else {
-                    vw - right_edge - right_w - x
+                    vw - right_edge - x
                 };
                 l.set_panel_width(width, vw);
             }
@@ -1582,36 +1566,61 @@ impl Workbench {
         let active = self.drag == Some(drag);
         div()
             .id(id)
+            .group(id)
+            .relative()
             .flex_none()
-            // Never transparent: an unpainted gap shows whatever is behind the window.
-            .bg(if active {
-                rgba(0xffffff55)
-            } else {
-                rgb(theme::BORDER)
-            })
-            .hover(|s| s.bg(rgba(0xffffff33)))
-            .when(vertical, |d| d.w(px(SPLITTER)).h_full().cursor_col_resize())
-            .when(!vertical, |d| {
-                d.h(px(SPLITTER)).w_full().cursor_row_resize()
-            })
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, ev: &MouseDownEvent, _w, cx| {
-                    if ev.click_count >= 2 {
-                        let d = Layout::default();
-                        match drag {
-                            Drag::Sidebar => this.model.layout.sidebar_width = d.sidebar_width,
-                            Drag::Right => this.model.layout.right_width = d.right_width,
-                            Drag::Panel => this.model.layout.panel_height = d.panel_height,
-                            Drag::PanelSide => this.model.layout.panel_width = d.panel_width,
-                        }
-                        this.drag = None;
+            .when(vertical, |d| d.w(px(SPLITTER)).h_full())
+            .when(!vertical, |d| d.h(px(SPLITTER)).w_full())
+            .child(
+                div()
+                    .size_full()
+                    .bg(if active {
+                        rgb(theme::ACCENT)
                     } else {
-                        this.drag = Some(drag);
-                    }
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
+                        rgb(theme::BORDER)
+                    })
+                    .group_hover(id, |s| s.bg(rgb(theme::ACCENT))),
+            )
+            .child(
+                div()
+                    .id(SharedString::from(format!("{id}-grab")))
+                    .absolute()
+                    .when(vertical, |d| {
+                        d.top_0()
+                            .bottom_0()
+                            .left(px(-SPLITTER_GRAB))
+                            .w(px(SPLITTER + SPLITTER_GRAB))
+                            .cursor_col_resize()
+                    })
+                    .when(!vertical, |d| {
+                        d.left_0()
+                            .right_0()
+                            .top(px(-SPLITTER_GRAB))
+                            .h(px(SPLITTER + SPLITTER_GRAB))
+                            .cursor_row_resize()
+                    })
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, ev: &MouseDownEvent, _w, cx| {
+                            if ev.click_count >= 2 {
+                                let d = Layout::default();
+                                match drag {
+                                    Drag::Sidebar => {
+                                        this.model.layout.sidebar_width = d.sidebar_width
+                                    }
+                                    Drag::Panel => this.model.layout.panel_height = d.panel_height,
+                                    Drag::PanelSide => {
+                                        this.model.layout.panel_width = d.panel_width
+                                    }
+                                }
+                                this.drag = None;
+                            } else {
+                                this.drag = Some(drag);
+                            }
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ),
             )
     }
 
@@ -2415,6 +2424,24 @@ impl Workbench {
                 .px_4()
                 .text_color(rgb(theme::TEXT_DIM))
                 .child(SharedString::from(reason.clone())),
+            Some(TabContent::Webview) => {
+                let slot = self.webview_bounds.clone();
+                base.child(
+                    canvas(
+                        |_, _, _| (),
+                        move |bounds, (), window, _cx| {
+                            if slot.get() != Some(bounds) {
+                                slot.set(Some(bounds));
+                                window.refresh();
+                            }
+                        },
+                    )
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full(),
+                )
+            }
             Some(TabContent::Diff(view)) => base.flex().flex_col().children(Self::diff_rows(view)),
             Some(TabContent::Text(editor)) => {
                 let active_tab = self.model.active();
@@ -2727,38 +2754,6 @@ impl Workbench {
             .child(assets::icon(icon_name, 17., theme::ICON))
     }
 
-    fn ai_panel(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let width = self
-            .model
-            .layout
-            .effective_right(f32::from(window.viewport_size().width));
-        div()
-            .flex()
-            .flex_col()
-            .flex_none()
-            .w(px(width))
-            .h_full()
-            .bg(rgb(theme::SIDEBAR))
-            .border_l_1()
-            .border_color(rgb(theme::BORDER))
-            .child(
-                div()
-                    .h(px(AI_PANEL_HEADER))
-                    .flex_none()
-                    .px_3()
-                    .flex()
-                    .items_center()
-                    .justify_end()
-                    .child(
-                        Self::panel_button("right-hide", "close").on_click(cx.listener(
-                            |this, _: &ClickEvent, window, cx| {
-                                this.apply_command(Command::ToggleRightPanel, window, cx);
-                            },
-                        )),
-                    ),
-            )
-    }
-
     fn layout_button(
         id: &'static str,
         icon_name: &'static str,
@@ -2812,7 +2807,9 @@ impl Workbench {
                             }),
                         )
                     }
-                    TabContent::Unavailable(_) | TabContent::Diff(_) => (None, None),
+                    TabContent::Unavailable(_) | TabContent::Diff(_) | TabContent::Webview => {
+                        (None, None)
+                    }
                 };
                 (pos, eol, Some(model::tab_language(t)))
             }
@@ -2883,11 +2880,17 @@ impl Workbench {
                 div()
                     .flex()
                     .gap_4()
-                    .children(
-                        self.status_items
-                            .values()
-                            .map(|t| div().child(SharedString::from(t.clone()))),
-                    )
+                    .children(self.status_items.iter().map(|(id, t)| {
+                        div()
+                            .id(SharedString::from(format!("status-item-{id}")))
+                            .px_2()
+                            .cursor_pointer()
+                            .hover(|s| s.bg(rgb(theme::HOVER)))
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.apply_command(Command::OpenExtensionPanel, window, cx);
+                            }))
+                            .child(SharedString::from(t.clone()))
+                    }))
                     .children(position.map(|p| {
                         div()
                             .id("status-position")
@@ -2929,16 +2932,7 @@ impl Workbench {
                                 self.model.layout.panel,
                                 Command::TogglePanel,
                                 cx,
-                            ))
-                            .children(self.panel.is_some().then(|| {
-                                Self::layout_button(
-                                    "toggle-right",
-                                    "layout-right",
-                                    self.model.layout.right,
-                                    Command::ToggleRightPanel,
-                                    cx,
-                                )
-                            })),
+                            )),
                     ),
             )
     }
@@ -2949,7 +2943,7 @@ impl Workbench {
         let tab = self.model.active()?;
         match &tab.content {
             TabContent::Text(e) => self.highlights_for_tab(e, tab),
-            TabContent::Unavailable(_) | TabContent::Diff(_) => None,
+            TabContent::Unavailable(_) | TabContent::Diff(_) | TabContent::Webview => None,
         }
     }
 
@@ -4276,7 +4270,7 @@ impl EntityInputHandler for Workbench {
         }
         match &self.model.active()?.content {
             TabContent::Text(e) => e.marked_utf16(),
-            TabContent::Unavailable(_) | TabContent::Diff(_) => None,
+            TabContent::Unavailable(_) | TabContent::Diff(_) | TabContent::Webview => None,
         }
     }
 
@@ -4399,49 +4393,48 @@ impl EntityInputHandler for Workbench {
         let pos = self.position_at(point, window)?;
         match &self.model.active()?.content {
             TabContent::Text(e) => Some(e.chars_range_to_utf16(pos..pos).start),
-            TabContent::Unavailable(_) | TabContent::Diff(_) => None,
+            TabContent::Unavailable(_) | TabContent::Diff(_) | TabContent::Webview => None,
         }
     }
 }
 
 impl Render for Workbench {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let vp = window.viewport_size();
-        let (vw, vh) = (f32::from(vp.width), f32::from(vp.height));
-        let status_h = if self.model.layout.status_bar {
-            STATUS_BAR_HEIGHT
-        } else {
-            0.0
-        };
-        let right_w = self.model.layout.effective_right(vw);
-        let right_shown = self.model.layout.right && self.panel.is_some();
-        if let Some(panel) = self.panel.as_mut() {
-            if self.right_applied != Some(right_shown) {
-                panel.set_visible(right_shown);
-                self.right_applied = Some(right_shown);
+        let overlay_open = self.model.palette.is_some()
+            || self.model.menu_open.is_some()
+            || self.model.context_menu.is_some()
+            || self.model.prompt.is_some()
+            || self.external_prompt.is_some()
+            || self.model.settings_open
+            || self.model.ext_detail.is_some();
+        let webview_wanted = !overlay_open
+            && matches!(
+                self.model.active().map(|t| &t.content),
+                Some(TabContent::Webview)
+            )
+            && !(self.model.layout.panel && self.model.layout.panel_maximized);
+        let webview_target = webview_wanted
+            .then(|| self.webview_bounds.get())
+            .flatten()
+            .map(|b| {
+                (
+                    f32::from(b.origin.x) as i32,
+                    f32::from(b.origin.y) as i32,
+                    f32::from(b.size.width) as i32,
+                    f32::from(b.size.height) as i32,
+                )
+            });
+        if let Some(panel) = self.panel.as_mut()
+            && self.webview_applied != webview_target
+        {
+            match webview_target {
+                Some((x, y, w, h)) => {
+                    panel.set_area(x, y, w, h);
+                    panel.set_visible(true);
+                }
+                None => panel.set_visible(false),
             }
-            if right_shown {
-                let layout = &self.model.layout;
-                let outer = if layout.sidebar_side == Side::Right {
-                    (if layout.activity_bar {
-                        ACTIVITY_BAR_WIDTH
-                    } else {
-                        0.0
-                    }) + if layout.sidebar {
-                        layout.effective_sidebar(vw) + SPLITTER
-                    } else {
-                        0.0
-                    }
-                } else {
-                    0.0
-                };
-                panel.set_area(
-                    (vw - outer - right_w + 1.0) as i32,
-                    (AI_PANEL_HEADER + MENU_BAR_HEIGHT) as i32,
-                    (right_w - 1.0) as i32,
-                    (vh - status_h - AI_PANEL_HEADER - MENU_BAR_HEIGHT) as i32,
-                );
-            }
+            self.webview_applied = webview_target;
         }
         if window.focused(cx).is_none() {
             window.focus(&self.root_focus);
@@ -4458,8 +4451,6 @@ impl Render for Workbench {
             self.splitter("split-sidebar", Drag::Sidebar, cx)
                 .into_any_element()
         });
-        let right_open = layout.right && (self.panel.is_some() || self.force_right_panel);
-        let split_right = right_open.then(|| self.splitter("split-right", Drag::Right, cx));
         let panel_drag = if layout.panel_pos.is_side() {
             Drag::PanelSide
         } else {
@@ -4469,7 +4460,6 @@ impl Render for Workbench {
             self.splitter("split-panel", panel_drag, cx)
                 .into_any_element()
         });
-        let right_panel = right_open.then(|| self.ai_panel(window, cx));
         let tab_bar = (!maximized).then(|| self.tab_bar(cx).into_any_element());
         let editor: Option<AnyElement> = (!maximized).then(|| {
             if self.model.settings_open {
@@ -4561,8 +4551,6 @@ impl Render for Workbench {
                     .min_h_0()
                     .children(sidebar_left)
                     .child(center)
-                    .children(split_right)
-                    .children(right_panel)
                     .children(sidebar_right),
             )
             .children(status_bar)

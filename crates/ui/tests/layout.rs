@@ -85,10 +85,9 @@ fn shortcuts_and_palette_toggle_every_region_and_reset_restores_defaults(cx: &mu
     assert_eq!(layout(window, cx), Layout::default());
     cx.simulate_keystrokes("ctrl-b");
     cx.simulate_keystrokes("ctrl-j");
-    cx.simulate_keystrokes("ctrl-alt-b");
     let l = layout(window, cx);
     assert!(
-        !l.sidebar && l.panel && !l.right,
+        !l.sidebar && l.panel,
         "the panel starts hidden, so Ctrl+J shows it"
     );
     for query in ["toggle activity bar", "toggle status bar"] {
@@ -98,9 +97,9 @@ fn shortcuts_and_palette_toggle_every_region_and_reset_restores_defaults(cx: &mu
     }
     let l = layout(window, cx);
     assert!(!l.activity_bar && !l.status_bar);
-    cx.simulate_keystrokes("ctrl-b ctrl-j ctrl-alt-b");
+    cx.simulate_keystrokes("ctrl-b ctrl-j");
     let l = layout(window, cx);
-    assert!(l.sidebar && !l.panel && l.right && !l.activity_bar && !l.status_bar);
+    assert!(l.sidebar && !l.panel && !l.activity_bar && !l.status_bar);
     cx.simulate_keystrokes("ctrl-shift-p");
     cx.simulate_input("reset layout");
     cx.simulate_keystrokes("enter");
@@ -114,13 +113,13 @@ fn dragging_the_sidebar_splitter_resizes_clamps_and_ignores_moves_without_the_bu
     let ws = workspace("dsb");
     let (window, cx) = open(cx, &ws.0, None);
     let (_vw, vh) = viewport(window, cx);
-    drag(cx, (310.0, vh / 2.0), (410.0, vh / 2.0));
+    drag(cx, (307.0, vh / 2.0), (410.0, vh / 2.0));
     let w = layout(window, cx).sidebar_width;
     assert!(
         (w - (410.0 - 48.0)).abs() < 1.0,
         "sidebar follows the pointer: {w}"
     );
-    drag(cx, (48.0 + w + 2.0, vh / 2.0), (5.0, vh / 2.0));
+    drag(cx, (48.0 + w - 1.0, vh / 2.0), (5.0, vh / 2.0));
     assert_eq!(
         layout(window, cx).sidebar_width,
         SIDEBAR_MIN,
@@ -133,24 +132,17 @@ fn dragging_the_sidebar_splitter_resizes_clamps_and_ignores_moves_without_the_bu
 }
 
 #[gpui::test]
-fn dragging_the_right_and_bottom_splitters(cx: &mut TestAppContext) {
+fn dragging_the_bottom_splitter(cx: &mut TestAppContext) {
     let ws = workspace("drp");
     let (window, cx) = open(cx, &ws.0, None);
     window
         .update(cx, |wb, _, cx| {
-            wb.show_empty_right_panel_for_tests();
             wb.model_mut().layout.panel = true;
             cx.notify();
         })
         .unwrap();
     cx.run_until_parked();
-    let (vw, vh) = viewport(window, cx);
-    drag(cx, (vw - 322.0, vh / 2.0), (vw - 420.0, vh / 2.0));
-    let r = layout(window, cx).right_width;
-    assert!(
-        (r - 420.0).abs() < 1.0,
-        "right panel width follows the pointer: {r}"
-    );
+    let (_vw, vh) = viewport(window, cx);
     let top = vh - 22.0 - 240.0;
     drag(cx, (500.0, top - 2.0), (500.0, top - 102.0));
     let h = layout(window, cx).panel_height;
@@ -171,10 +163,10 @@ fn double_clicking_a_splitter_resets_that_size(cx: &mut TestAppContext) {
     let ws = workspace("dbl");
     let (window, cx) = open(cx, &ws.0, None);
     let (_vw, vh) = viewport(window, cx);
-    drag(cx, (310.0, vh / 2.0), (450.0, vh / 2.0));
+    drag(cx, (307.0, vh / 2.0), (450.0, vh / 2.0));
     let w = layout(window, cx).sidebar_width;
     assert!(w > 300.0);
-    let x = 48.0 + w + 2.0;
+    let x = 48.0 + w - 1.0;
     cx.simulate_event(MouseDownEvent {
         position: point(px(x), px(vh / 2.0)),
         modifiers: Modifiers::default(),
@@ -211,7 +203,9 @@ fn maximize_and_hide_the_panel_with_the_keyboard(cx: &mut TestAppContext) {
         .read_with(cx, |wb, _| match &wb.model().active().unwrap().content {
             ui::model::TabContent::Text(e) => e.text(),
             ui::model::TabContent::Unavailable(r) => panic!("{r}"),
-            ui::model::TabContent::Diff(_) => panic!("unexpected diff tab"),
+            ui::model::TabContent::Diff(_) | ui::model::TabContent::Webview => {
+                panic!("unexpected tab")
+            }
         })
         .unwrap();
     assert_eq!(t, "Qx");
@@ -225,13 +219,13 @@ fn layout_is_saved_and_restored_across_instances(cx: &mut TestAppContext) {
         let (window, cx) = open(cx, &ws.0, Some(file.clone()));
         assert!(!file.exists(), "nothing is written until something changes");
         let (_vw, vh) = viewport(window, cx);
-        drag(cx, (48.0 + 260.0 + 2.0, vh / 2.0), (48.0 + 330.0, vh / 2.0));
-        cx.simulate_keystrokes("ctrl-b ctrl-alt-b");
+        drag(cx, (48.0 + 260.0 - 1.0, vh / 2.0), (48.0 + 330.0, vh / 2.0));
+        cx.simulate_keystrokes("ctrl-b");
         window.update(cx, |wb, _, _| wb.save_layout_now()).unwrap();
         assert!(file.exists());
     }
     let saved = Layout::load(&file);
-    assert!(!saved.right && !saved.sidebar, "{saved:?}");
+    assert!(!saved.sidebar, "{saved:?}");
     assert!((saved.sidebar_width - 330.0).abs() < 2.0);
     let (window, cx) = open(cx, &ws.0, Some(file.clone()));
     assert_eq!(
@@ -318,7 +312,7 @@ fn pump_saves_after_a_drag_ends_but_not_in_the_middle_of_one(cx: &mut TestAppCon
     let (window, cx) = open(cx, &ws.0, Some(file.clone()));
     let (_vw, vh) = viewport(window, cx);
     cx.simulate_mouse_down(
-        point(px(310.0), px(vh / 2.0)),
+        point(px(307.0), px(vh / 2.0)),
         MouseButton::Left,
         Modifiers::default(),
     );

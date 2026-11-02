@@ -505,6 +505,33 @@ impl Model {
         }
     }
 
+    pub fn extension_title(&self) -> String {
+        self.panel_extension
+            .as_deref()
+            .and_then(|dir| self.extensions.iter().find(|e| e.dir == dir))
+            .map_or_else(|| "Extension".to_owned(), |e| e.display_name.clone())
+    }
+
+    pub fn open_extension_tab(&mut self) {
+        self.ext_detail = None;
+        self.settings_open = false;
+        let path = PathBuf::from("nanti://extension-panel");
+        if let Some(i) = self.tabs.iter().position(|t| t.path == path) {
+            self.tabs[i].title = self.extension_title();
+            self.active_tab = Some(i);
+            return;
+        }
+        let title = self.extension_title();
+        self.tabs.push(Tab {
+            path,
+            title,
+            content: TabContent::Webview,
+            stamp: None,
+            language_override: None,
+        });
+        self.active_tab = Some(self.tabs.len() - 1);
+    }
+
     pub fn after_extension_installed(&mut self, ext: &extensions::Extension) {
         self.refresh_extensions();
         let note = match (&ext.view_type, &self.panel_extension) {
@@ -512,7 +539,7 @@ impl Model {
                 self.use_as_panel_extension(&ext.dir, view);
                 return;
             }
-            (Some(_), Some(_)) => " (choose Use in right panel to show it)",
+            (Some(_), Some(_)) => " (choose Use as extension panel to show it)",
             _ => "",
         };
         self.say(
@@ -528,7 +555,7 @@ impl Model {
         match extensions::save_panel_choice(&cfg, dir, view) {
             Ok(()) => {
                 self.panel_request = Some((dir.to_path_buf(), view.to_owned()));
-                self.say("Extensions", "Opening the extension in the right panel");
+                self.say("Extensions", "Opening the extension panel");
             }
             Err(e) => self.say("Extensions", &format!("Cannot save the choice: {e}")),
         }

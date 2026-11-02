@@ -82,6 +82,7 @@ pub enum TabContent {
     Text(Editor),
     Unavailable(String),
     Diff(DiffView),
+    Webview,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -450,7 +451,6 @@ impl Model {
         let mut m = Self::new(PathBuf::new());
         m.folder_open = false;
         m.layout.sidebar = false;
-        m.layout.right = false;
         m
     }
 
@@ -562,7 +562,7 @@ impl Model {
         let i = self.active_tab?;
         match &mut self.tabs.get_mut(i)?.content {
             TabContent::Text(e) => Some(e),
-            TabContent::Unavailable(_) | TabContent::Diff(_) => None,
+            TabContent::Unavailable(_) | TabContent::Diff(_) | TabContent::Webview => None,
         }
     }
 
@@ -1066,7 +1066,13 @@ impl Model {
                     self.layout.panel_maximized = !self.layout.panel_maximized;
                 }
             }
-            Command::ToggleRightPanel => self.layout.right = !self.layout.right,
+            Command::OpenExtensionPanel => {
+                if self.panel_extension.is_some() {
+                    self.open_extension_tab();
+                } else {
+                    self.say("Extensions", "No extension panel is set; install one first");
+                }
+            }
             Command::OpenSettings => {
                 self.settings_open = true;
                 self.ext_detail = None;
@@ -1140,7 +1146,7 @@ impl Model {
         {
             self.use_as_panel_extension(dir, vt);
         }
-        self.layout.right = true;
+        self.open_extension_tab();
     }
 
     pub fn open_find(&mut self, show_replace: bool) {
@@ -1693,7 +1699,7 @@ mod tests {
         match &m.active().unwrap().content {
             TabContent::Text(b) => assert_eq!(b.text(), "bee\n"),
             TabContent::Unavailable(r) => panic!("{r}"),
-            TabContent::Diff(_) => panic!("unexpected diff tab"),
+            TabContent::Diff(_) | TabContent::Webview => panic!("unexpected tab"),
         }
     }
 
@@ -1784,7 +1790,7 @@ mod tests {
         match &m.tabs[0].content {
             TabContent::Text(e) => assert_eq!(e.text(), "bee\nX"),
             TabContent::Unavailable(r) => panic!("{r}"),
-            TabContent::Diff(_) => panic!("unexpected diff tab"),
+            TabContent::Diff(_) | TabContent::Webview => panic!("unexpected tab"),
         }
     }
 
@@ -1865,7 +1871,7 @@ mod tests {
         match &m.tabs[0].content {
             TabContent::Text(e) => assert_eq!(e.text(), "theirs\n"),
             TabContent::Unavailable(r) => panic!("{r}"),
-            TabContent::Diff(_) => panic!("unexpected diff tab"),
+            TabContent::Diff(_) | TabContent::Webview => panic!("unexpected tab"),
         }
         assert!(!m.tabs[0].is_dirty());
         assert_eq!(disk(&f), b"theirs\n");
@@ -2119,23 +2125,36 @@ mod tests {
     }
 
     #[test]
+    fn the_extension_panel_lives_in_one_center_tab() {
+        let mut m = Model::without_folder();
+        m.run_command(Command::OpenExtensionPanel);
+        assert!(m.tabs.is_empty(), "nothing to show without an extension");
+        m.panel_extension = Some(PathBuf::from("anthropic.claude-code"));
+        m.run_command(Command::OpenExtensionPanel);
+        m.run_command(Command::OpenExtensionPanel);
+        let webviews = m
+            .tabs
+            .iter()
+            .filter(|t| matches!(t.content, TabContent::Webview))
+            .count();
+        assert_eq!(webviews, 1, "reopening focuses the same tab");
+        assert!(matches!(
+            m.active().map(|t| &t.content),
+            Some(TabContent::Webview)
+        ));
+    }
+
+    #[test]
     fn layout_commands_show_hide_maximize_and_reset() {
         let ws = workspace("layoutcmd");
         let mut m = Model::new(ws.0.clone());
         assert!(
-            m.layout.sidebar
-                && !m.layout.panel
-                && m.layout.right
-                && m.layout.activity_bar
-                && m.layout.status_bar
+            m.layout.sidebar && !m.layout.panel && m.layout.activity_bar && m.layout.status_bar
         );
         m.run_command(Command::ToggleSidebar);
-        m.run_command(Command::ToggleRightPanel);
         m.run_command(Command::ToggleActivityBar);
         m.run_command(Command::ToggleStatusBar);
-        assert!(
-            !m.layout.sidebar && !m.layout.right && !m.layout.activity_bar && !m.layout.status_bar
-        );
+        assert!(!m.layout.sidebar && !m.layout.activity_bar && !m.layout.status_bar);
         m.run_command(Command::MaximizePanel);
         assert!(m.layout.panel && m.layout.panel_maximized);
         m.run_command(Command::MaximizePanel);

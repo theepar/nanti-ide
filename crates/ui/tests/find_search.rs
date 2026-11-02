@@ -47,7 +47,7 @@ fn text(window: WindowHandle<Workbench>, cx: &mut VisualTestContext) -> String {
         .read_with(cx, |wb, _| match &wb.model().active().unwrap().content {
             TabContent::Text(e) => e.text(),
             TabContent::Unavailable(r) => panic!("{r}"),
-            TabContent::Diff(_) => panic!("unexpected diff tab"),
+            TabContent::Diff(_) | TabContent::Webview => panic!("unexpected tab"),
         })
         .unwrap()
 }
@@ -60,7 +60,7 @@ fn selection(
         .read_with(cx, |wb, _| match &wb.model().active().unwrap().content {
             TabContent::Text(e) => e.selection(),
             TabContent::Unavailable(r) => panic!("{r}"),
-            TabContent::Diff(_) => panic!("unexpected diff tab"),
+            TabContent::Diff(_) | TabContent::Webview => panic!("unexpected tab"),
         })
         .unwrap()
 }

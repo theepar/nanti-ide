@@ -163,7 +163,6 @@ graph TD
 | `Ctrl+\`` | **Toggle Terminal** | Show / hide integrated terminal panel |
 | `Ctrl+B` | **Toggle Sidebar** | Show / hide activity sidebar |
 | `Ctrl+J` | **Toggle Panel** | Show / hide bottom panel |
-| `Ctrl+Alt+B` | **Toggle Right Panel** | Show / hide extension webview panel |
 | `Ctrl+Shift+M` | **Maximize Panel** | Maximize / restore bottom panel |
 | `Ctrl+/` | **Toggle Comment** | Comment or uncomment selected lines |
 | `Alt+Up` / `Alt+Down` | **Move Line** | Move selected line(s) up or down |
@@ -179,7 +178,7 @@ graph TD
 |---|---|
 | `NANTI_WORKSPACE` | Path to the default workspace root folder |
 | `NANTI_EXTENSION` | Path to an unpacked extension directory for testing |
-| `NANTI_VIEW` | Webview view identifier to bind to the right panel |
+| `NANTI_VIEW` | Webview view identifier to bind to the extension panel (shown as a tab in the editor area) |
 | `NANTI_NODE` | Custom path to the Node.js binary (defaults to `node` on `PATH`) |
 | `NANTI_CONFIG_DIR` | Custom directory for user preferences and layout state |
 

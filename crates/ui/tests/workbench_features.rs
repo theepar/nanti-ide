@@ -909,7 +909,7 @@ fn installing_an_extension_with_a_view_opens_it_in_the_right_panel_unless_one_is
     assert!(
         m.message
             .as_deref()
-            .is_some_and(|s| s.contains("Use in right panel"))
+            .is_some_and(|s| s.contains("Use as extension panel"))
     );
 
     let plain = pack_fixture_vsix(
