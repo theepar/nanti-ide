@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgs1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#141414"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </linearGradient>
+    <linearGradient id="s1_top_l" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#cccccc"/>
+    </linearGradient>
+    <linearGradient id="s1_top_r" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e0e0e0"/>
+      <stop offset="100%" stop-color="#888888"/>
+    </linearGradient>
+    <linearGradient id="s1_bot_l" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#999999"/>
+      <stop offset="100%" stop-color="#444444"/>
+    </linearGradient>
+    <linearGradient id="s1_bot_r" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#666666"/>
+      <stop offset="100%" stop-color="#222222"/>
+    </linearGradient>
+    <filter id="sh_s1" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="20" stdDeviation="24" flood-color="#000000" flood-opacity="0.9"/>
+    </filter>
+  </defs>
+
+  <rect x="24" y="24" width="464" height="464" rx="108" ry="108" fill="url(#bgs1)" stroke="#333333" stroke-width="2"/>
+
+  <!-- Perfectly Symmetrical Nexus / Hourglass (Center X = 256) -->
+  <g filter="url(#sh_s1)">
+    <!-- Top Left Facet -->
+    <polygon points="144,136 256,136 256,252 188,252" fill="url(#s1_top_l)"/>
+    <!-- Top Right Facet (Mirrored) -->
+    <polygon points="368,136 256,136 256,252 324,252" fill="url(#s1_top_r)"/>
+    <!-- Bottom Left Facet -->
+    <polygon points="188,260 256,260 256,376 144,376" fill="url(#s1_bot_l)"/>
+    <!-- Bottom Right Facet (Mirrored) -->
+    <polygon points="324,260 256,260 256,376 368,376" fill="url(#s1_bot_r)"/>
+  </g>
+</svg>

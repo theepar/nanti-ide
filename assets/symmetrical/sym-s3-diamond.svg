@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgs3" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#141414"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </linearGradient>
+    <!-- Top Quadrant (Light source) -->
+    <linearGradient id="quad_top" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#d4d4d4"/>
+    </linearGradient>
+    <!-- Left Quadrant -->
+    <linearGradient id="quad_left" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e0e0e0"/>
+      <stop offset="100%" stop-color="#808080"/>
+    </linearGradient>
+    <!-- Right Quadrant -->
+    <linearGradient id="quad_right" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#b0b0b0"/>
+      <stop offset="100%" stop-color="#555555"/>
+    </linearGradient>
+    <!-- Bottom Quadrant -->
+    <linearGradient id="quad_bot" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#666666"/>
+      <stop offset="100%" stop-color="#242424"/>
+    </linearGradient>
+    <filter id="sh_s3" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="20" stdDeviation="24" flood-color="#000000" flood-opacity="0.9"/>
+    </filter>
+  </defs>
+
+  <rect x="24" y="24" width="464" height="464" rx="108" ry="108" fill="url(#bgs3)" stroke="#333333" stroke-width="2"/>
+
+  <!-- 4-Quadrant Balanced Diamond (Center = 256, 256) -->
+  <g filter="url(#sh_s3)">
+    <!-- Top Wedge -->
+    <polygon points="256,122 360,248 260,248 256,122" fill="url(#quad_top)"/>
+    <polygon points="256,122 152,248 252,248 256,122" fill="url(#quad_top)"/>
+
+    <!-- Bottom Wedge -->
+    <polygon points="256,390 360,264 260,264 256,390" fill="url(#quad_bot)"/>
+    <polygon points="256,390 152,264 252,264 256,390" fill="url(#quad_bot)"/>
+  </g>
+</svg>
