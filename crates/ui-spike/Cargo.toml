@@ -1,0 +1,13 @@
+[package]
+name = "ui-spike"
+version.workspace = true
+edition = "2024"
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+gpui = "=0.2.2"
+unicode-segmentation = "1"
+wry = "=0.57.1"
+
+# Spike code adapted from upstream examples; not held to workspace clippy rules.
