@@ -6,6 +6,8 @@ use gpui::{
 use crate::{Workbench, assets, scm, theme};
 
 const BODY_LINES: usize = 14;
+// A fixed width lets long messages wrap to a known height, so the card grows downward instead of overlapping.
+const CARD_WIDTH: f32 = 420.0;
 
 /// The hover card of a commit in the history: who, when, the whole message, the size of the change and links.
 pub(crate) struct CommitTip {
@@ -51,8 +53,7 @@ impl Render for CommitTip {
             .occlude()
             .flex()
             .flex_col()
-            .max_w(px(460.))
-            .min_w(px(300.))
+            .w(px(CARD_WIDTH))
             .gap(px(4.))
             .px_2()
             .py(px(6.))

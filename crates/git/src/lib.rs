@@ -446,14 +446,12 @@ pub fn parse_web_remote(remote: &str) -> Option<WebRemote> {
     let remote = remote.trim();
     let (host, path) = if let Some(rest) = remote.strip_prefix("git@") {
         rest.split_once(':')?
-    } else if let Some(rest) = remote
-        .strip_prefix("https://")
-        .or_else(|| remote.strip_prefix("ssh://git@"))
-    {
+    } else {
+        let rest = remote
+            .strip_prefix("https://")
+            .or_else(|| remote.strip_prefix("ssh://git@"))?;
         let rest = rest.split_once('@').map_or(rest, |(_, r)| r);
         rest.split_once('/')?
-    } else {
-        return None;
     };
     let path = path.trim_matches('/').trim_end_matches(".git");
     let segments: Vec<&str> = path.split('/').collect();
