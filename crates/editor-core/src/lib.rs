@@ -6,6 +6,7 @@
 
 use std::ops::Range;
 
+mod edit_ops;
 pub mod find;
 
 use ropey::Rope;
