@@ -3,10 +3,10 @@ use std::ops::Range;
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, Bounds, ClickEvent, ClipboardItem, Context, ElementInputHandler, FocusHandle,
-    FontWeight, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent, SharedString, Window, canvas, div,
-    point, prelude::*, px, rgb, rgba, size,
+    AnyElement, Bounds, ClickEvent, ClipboardItem, Context, ElementInputHandler, FontWeight,
+    IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
+    Point, ScrollDelta, ScrollWheelEvent, SharedString, Window, canvas, div, point, prelude::*,
+    px, rgb, rgba, size,
 };
 use terminal::{CursorShape, KeyMods, SelectKind, Terminal, TerminalOptions, encode_key};
 
@@ -404,81 +404,6 @@ impl Workbench {
         }
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn terminal_strip(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap_1()
-            .px_2()
-            .h(px(24.))
-            .text_size(px(12.))
-            .children(self.terminals.iter().enumerate().map(|(i, s)| {
-                let active = i == self.active_terminal;
-                let label = {
-                    let title = s.term.title();
-                    let base = if title.is_empty() {
-                        s.name.clone()
-                    } else {
-                        title
-                    };
-                    match s.term.exit_code() {
-                        Some(c) => format!("{base} (exited {c})"),
-                        None => base,
-                    }
-                };
-                div()
-                    .id(("term-tab", i))
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .px_2()
-                    .rounded_sm()
-                    .cursor_pointer()
-                    .when(active, |d| {
-                        d.bg(rgb(theme::SELECTED)).text_color(rgb(theme::TEXT))
-                    })
-                    .when(!active, |d| {
-                        d.text_color(rgb(theme::TEXT_DIM))
-                            .hover(|s| s.bg(rgb(theme::HOVER)))
-                    })
-                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                        this.active_terminal = i;
-                        this.focus_target(Target::Terminal, window);
-                        cx.notify();
-                    }))
-                    .child(SharedString::from(label))
-                    .child(
-                        div()
-                            .id(("term-close", i))
-                            .px_1()
-                            .rounded_sm()
-                            .hover(|s| s.bg(rgb(theme::HOVER)))
-                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                cx.stop_propagation();
-                                this.close_terminal(i);
-                                this.sync_focus(window);
-                                cx.notify();
-                            }))
-                            .child("×"),
-                    )
-            }))
-            .child(
-                div()
-                    .id("term-new")
-                    .px_2()
-                    .rounded_sm()
-                    .cursor_pointer()
-                    .text_color(rgb(theme::TEXT_DIM))
-                    .hover(|s| s.bg(rgb(theme::HOVER)).text_color(rgb(theme::TEXT)))
-                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                        this.apply_command(Command::NewTerminal, window, cx);
-                    }))
-                    .child("+ New"),
-            )
-    }
-
     pub(crate) fn terminal_side_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let items: Vec<AnyElement> = self
             .terminals
@@ -756,10 +681,5 @@ impl Workbench {
         self.model.terminal_request = Some(TerminalRequest::Ensure);
         self.process_terminal_request();
         self.sync_focus(window);
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn terminal_focus_handle(&self) -> &FocusHandle {
-        &self.terminal_focus
     }
 }
