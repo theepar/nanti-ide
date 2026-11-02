@@ -1,0 +1,25 @@
+// Windows resources of nanti-ui.exe. gpui loads the window icon from resource id 1; the version
+// block gives Task Manager and the taskbar the product name instead of the bare file name.
+1 ICON "assets/nanti.ico"
+
+1 VERSIONINFO
+FILEVERSION 0,0,1,0
+PRODUCTVERSION 0,0,1,0
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "FileDescription", "nanti."
+      VALUE "ProductName", "nanti."
+      VALUE "InternalName", "nanti-ui"
+      VALUE "OriginalFilename", "nanti-ui.exe"
+      VALUE "FileVersion", "0.0.1"
+      VALUE "ProductVersion", "0.0.1"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0409, 1200
+  END
+END

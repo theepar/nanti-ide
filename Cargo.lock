@@ -6933,6 +6933,7 @@ version = "0.0.1"
 dependencies = [
  "app",
  "editor-core",
+ "embed-resource",
  "git",
  "gpui",
  "serde_json",
