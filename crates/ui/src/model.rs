@@ -114,10 +114,10 @@ impl Model {
     /// Flattened, ordered list of what the explorer shows (directories first, then by name).
     pub fn visible_entries(&self) -> Vec<Entry> {
         let mut out = Vec::new();
-        let root_name = self
-            .root
-            .file_name()
-            .map_or_else(|| self.root.display().to_string(), |n| n.to_string_lossy().into_owned());
+        let root_name = self.root.file_name().map_or_else(
+            || self.root.display().to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        );
         out.push(Entry {
             path: self.root.clone(),
             name: root_name,
@@ -146,7 +146,10 @@ impl Model {
                 Some((is_dir, name, e.path()))
             })
             .collect();
-        items.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.to_lowercase().cmp(&b.1.to_lowercase())));
+        items.sort_by(|a, b| {
+            b.0.cmp(&a.0)
+                .then_with(|| a.1.to_lowercase().cmp(&b.1.to_lowercase()))
+        });
         for (is_dir, name, path) in items {
             let expanded = is_dir && self.expanded.contains(&path);
             out.push(Entry {
@@ -174,9 +177,10 @@ impl Model {
             self.active_tab = Some(i);
             return;
         }
-        let title = path
-            .file_name()
-            .map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+        let title = path.file_name().map_or_else(
+            || path.display().to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        );
         self.tabs.push(Tab {
             path: path.to_path_buf(),
             title,
@@ -252,7 +256,12 @@ fn load(path: &Path) -> TabContent {
 }
 
 pub fn language_of(path: &Path) -> &'static str {
-    match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
         Some("rs") => "Rust",
         Some("js" | "mjs" | "cjs") => "JavaScript",
         Some("ts") => "TypeScript",
@@ -298,7 +307,14 @@ mod tests {
     fn names(m: &Model) -> Vec<String> {
         m.visible_entries()
             .iter()
-            .map(|e| format!("{}{}{}", "  ".repeat(e.depth), e.name, if e.is_dir { "/" } else { "" }))
+            .map(|e| {
+                format!(
+                    "{}{}{}",
+                    "  ".repeat(e.depth),
+                    e.name,
+                    if e.is_dir { "/" } else { "" }
+                )
+            })
             .collect()
     }
 
@@ -342,9 +358,15 @@ mod tests {
         let ws = workspace("bin");
         let mut m = Model::new(ws.0.clone());
         m.open_file(&ws.0.join("blob.bin"));
-        assert!(matches!(m.active().unwrap().content, TabContent::Unavailable(_)));
+        assert!(matches!(
+            m.active().unwrap().content,
+            TabContent::Unavailable(_)
+        ));
         m.open_file(&ws.0.join("missing.txt"));
-        assert!(matches!(m.active().unwrap().content, TabContent::Unavailable(_)));
+        assert!(matches!(
+            m.active().unwrap().content,
+            TabContent::Unavailable(_)
+        ));
     }
 
     #[test]

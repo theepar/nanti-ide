@@ -32,7 +32,11 @@ fn main() {
                     ..Default::default()
                 },
                 move |window, cx| {
-                    let mut workbench = Workbench::new();
+                    let root = std::env::var_os("NANTI_WORKSPACE")
+                        .map(PathBuf::from)
+                        .or_else(|| std::env::current_dir().ok())
+                        .unwrap_or_else(|| PathBuf::from("."));
+                    let mut workbench = Workbench::new(root);
                     if let Some(cfg) = config {
                         let diag_log = cfg.selftest_log.clone();
                         let (events, to_host, _shutdown) = spawn_worker(cfg);
