@@ -1,0 +1,20 @@
+[package]
+name = "ui"
+version.workspace = true
+edition = "2024"
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "nanti-ui"
+path = "src/main.rs"
+
+[dependencies]
+app = { path = "../app" }
+editor-core = { path = "../editor-core" }
+gpui = "=0.2.2"
+serde_json.workspace = true
+wry = "=0.57.1"
+
+[lints]
+workspace = true
