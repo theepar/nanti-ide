@@ -1166,8 +1166,7 @@ impl Model {
                 }
             }
             Command::ToggleDiscord
-            | Command::DiscordSetApplicationId
-            | Command::DiscordReconnect
+            | Command::DiscordConnect
             | Command::ToggleDiscordFile
             | Command::ToggleDiscordWorkspace
             | Command::ToggleDiscordTime => self.run_discord_command(command),

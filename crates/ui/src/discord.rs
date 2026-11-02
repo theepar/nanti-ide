@@ -18,6 +18,8 @@ const RETRY_AFTER: Duration = Duration::from_secs(15);
 const TICK: Duration = Duration::from_millis(100);
 const MIN_SEND_GAP: Duration = Duration::from_secs(15);
 const SETTINGS_FILE: &str = "discord.json";
+// The public id of nanti's own Discord application; it names the activity and carries no secret.
+pub const APPLICATION_ID: &str = "1055749894926774333";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscordSettings {
@@ -35,7 +37,7 @@ impl Default for DiscordSettings {
             client_id: std::env::var("NANTI_DISCORD_CLIENT_ID")
                 .ok()
                 .and_then(|v| valid_client_id(&v))
-                .unwrap_or_default(),
+                .unwrap_or_else(|| APPLICATION_ID.to_owned()),
             show_file: true,
             show_workspace: true,
             show_time: true,

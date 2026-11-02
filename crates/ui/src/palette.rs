@@ -78,8 +78,7 @@ pub enum Command {
     SwitchBranch,
     ChangeLanguageMode,
     ToggleDiscord,
-    DiscordSetApplicationId,
-    DiscordReconnect,
+    DiscordConnect,
     ToggleDiscordFile,
     ToggleDiscordWorkspace,
     ToggleDiscordTime,
@@ -89,7 +88,7 @@ pub enum Command {
 }
 
 impl Command {
-    pub const ALL: [Command; 79] = [
+    pub const ALL: [Command; 78] = [
         Command::CommandPalette,
         Command::QuickOpen,
         Command::Save,
@@ -151,8 +150,7 @@ impl Command {
         Command::Exit,
         Command::OpenSettings,
         Command::ToggleDiscord,
-        Command::DiscordSetApplicationId,
-        Command::DiscordReconnect,
+        Command::DiscordConnect,
         Command::ToggleDiscordFile,
         Command::ToggleDiscordWorkspace,
         Command::ToggleDiscordTime,
@@ -234,8 +232,7 @@ impl Command {
             Command::Exit => "File: Exit",
             Command::OpenSettings => "Preferences: Open Settings",
             Command::ToggleDiscord => "Discord: Toggle Rich Presence",
-            Command::DiscordSetApplicationId => "Discord: Set Application ID...",
-            Command::DiscordReconnect => "Discord: Reconnect",
+            Command::DiscordConnect => "Discord: Connect",
             Command::ToggleDiscordFile => "Discord: Toggle Showing the File Name",
             Command::ToggleDiscordWorkspace => "Discord: Toggle Showing the Workspace",
             Command::ToggleDiscordTime => "Discord: Toggle Showing Elapsed Time",
@@ -1205,7 +1202,6 @@ pub enum InputKind {
     Rename(PathBuf),
     InstallVsix,
     NewBranch,
-    DiscordApplicationId,
 }
 
 impl InputKind {
@@ -1217,7 +1213,6 @@ impl InputKind {
             InputKind::Rename(_) => "New name",
             InputKind::InstallVsix => "Full path of a .vsix file",
             InputKind::NewBranch => "New branch name",
-            InputKind::DiscordApplicationId => "Application ID (17 to 20 digits)",
         }
     }
 }

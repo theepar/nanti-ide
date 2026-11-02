@@ -289,13 +289,6 @@ impl Model {
                 self.after_rename(&from, &to);
                 Ok(())
             }
-            InputKind::DiscordApplicationId => {
-                let id = crate::discord::valid_client_id(text)
-                    .ok_or("an Application ID is 17 to 20 digits")?;
-                self.discord.settings.client_id = id;
-                self.discord_changed();
-                Ok(())
-            }
             InputKind::NewBranch => {
                 let name = text.trim();
                 if name.is_empty() {
@@ -974,20 +967,9 @@ impl Model {
         use crate::palette::Command as C;
         match command {
             C::ToggleDiscord => {
-                if !self.discord.settings.enabled && self.discord.settings.client_id.is_empty() {
-                    self.discord.settings.enabled = true;
-                    self.discord_changed();
-                    self.open_input(InputKind::DiscordApplicationId, "");
-                    return;
-                }
                 self.discord.settings.enabled = !self.discord.settings.enabled;
             }
-            C::DiscordSetApplicationId => {
-                let current = self.discord.settings.client_id.clone();
-                self.open_input(InputKind::DiscordApplicationId, &current);
-                return;
-            }
-            C::DiscordReconnect => {
+            C::DiscordConnect => {
                 self.discord.reconnect();
                 return;
             }

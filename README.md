@@ -105,7 +105,7 @@ graph TD
 - **Workspace Search (`Ctrl+Shift+F`):** Rapid multi-file regex search grouped by file.
 
 ### Discord Rich Presence (opt-in)
-- Off by default. Settings > Discord connects to the Discord desktop app over its local pipe (no password, no network, no token): you create a free application at discord.com/developers and paste its Application ID.
+- Off by default. Settings > Discord connects to the Discord desktop app over its local pipe (no password, no network, no token): it uses nanti's own Discord application, so there is nothing to set up. Set `NANTI_DISCORD_CLIENT_ID` to show a different application.
 - When on, the file name, language, workspace folder name and elapsed time are shown in your Discord status; each can be switched off. Nothing is sent anywhere except to the local Discord app, which shows it on your profile.
 
 ### Modern Dark Theme

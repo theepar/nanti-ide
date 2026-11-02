@@ -151,11 +151,6 @@ impl Workbench {
         );
         let d = &self.model.discord;
         let discord_status = d.status().describe();
-        let discord_app_hint = if d.settings.client_id.is_empty() {
-            "Not set. Create a free application at discord.com/developers and paste its Application ID."
-        } else {
-            "Set. Names and images shown in Discord come from this application."
-        };
         let saved_in = crate::layout::layout_path()
             .map_or_else(|| "memory only".to_owned(), |p| p.display().to_string());
         let page = div()
@@ -235,18 +230,9 @@ impl Workbench {
                     .child(Self::setting_row(
                         "Account",
                         discord_status,
-                        Self::flat_button("set-discord-reconnect", "Reconnect")
+                        Self::flat_button("set-discord-connect", "Connect")
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.apply_command(Command::DiscordReconnect, window, cx);
-                            }))
-                            .into_any_element(),
-                    ))
-                    .child(Self::setting_row(
-                        "Application ID",
-                        discord_app_hint,
-                        Self::flat_button("set-discord-id", "Set...")
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.apply_command(Command::DiscordSetApplicationId, window, cx);
+                                this.apply_command(Command::DiscordConnect, window, cx);
                             }))
                             .into_any_element(),
                     ))
