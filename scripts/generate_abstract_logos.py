@@ -285,3 +285,4 @@ if __name__ == "__main__":
     img_chevron.save(r"C:\Users\Deva\.gemini\antigravity\brain\a126a8d4-8565-4cbf-b8d8-483396d337fe\abstract_chevron.png")
 
     print("Successfully generated all 3 abstract concepts!")
+
