@@ -245,13 +245,7 @@ impl Model {
                     return self.say("Extensions", "Choose a .vsix file");
                 }
                 match extensions::install_vsix(&dir, &path) {
-                    Ok(ext) => {
-                        self.refresh_extensions();
-                        self.say(
-                            "Extensions",
-                            &format!("Installed {} {}", ext.id, ext.version),
-                        );
-                    }
+                    Ok(ext) => self.after_extension_installed(&ext),
                     Err(e) => self.say("Extensions", &format!("Install failed: {e}")),
                 }
             }
@@ -307,11 +301,7 @@ impl Model {
                 let dir = self.config_dir.clone().ok_or("no configuration folder")?;
                 let path = PathBuf::from(text.trim().trim_matches('"'));
                 let ext = extensions::install_vsix(&dir, &path)?;
-                self.refresh_extensions();
-                self.say(
-                    "Extensions",
-                    &format!("Installed {} {}", ext.id, ext.version),
-                );
+                self.after_extension_installed(&ext);
                 Ok(())
             }
         }
@@ -514,15 +504,31 @@ impl Model {
         }
     }
 
+    pub fn after_extension_installed(&mut self, ext: &extensions::Extension) {
+        self.refresh_extensions();
+        let note = match (&ext.view_type, &self.panel_extension) {
+            (Some(view), None) => {
+                self.use_as_panel_extension(&ext.dir, view);
+                return;
+            }
+            (Some(_), Some(_)) => " (choose Use in right panel to show it)",
+            _ => "",
+        };
+        self.say(
+            "Extensions",
+            &format!("Installed {} {}{note}", ext.id, ext.version),
+        );
+    }
+
     pub fn use_as_panel_extension(&mut self, dir: &Path, view: &str) {
         let Some(cfg) = self.config_dir.clone() else {
             return;
         };
         match extensions::save_panel_choice(&cfg, dir, view) {
-            Ok(()) => self.say(
-                "Extensions",
-                "Saved: it will fill the right panel the next time nanti. starts",
-            ),
+            Ok(()) => {
+                self.panel_request = Some((dir.to_path_buf(), view.to_owned()));
+                self.say("Extensions", "Opening the extension in the right panel");
+            }
             Err(e) => self.say("Extensions", &format!("Cannot save the choice: {e}")),
         }
     }
@@ -650,6 +656,7 @@ impl Model {
             return;
         };
         self.readme_rx = None;
+        self.ext_detail_tab = crate::model::DetailTab::Details;
         {
             let (tx, rx) = std::sync::mpsc::channel();
             let (id, publisher, name) = (m.id.clone(), m.publisher.clone(), m.name.clone());
@@ -673,6 +680,7 @@ impl Model {
             license: None,
             categories: Vec::new(),
             readme,
+            manifest: crate::extensions::ManifestState::Loading,
         });
     }
 
@@ -683,6 +691,11 @@ impl Model {
             return;
         };
         self.readme_rx = None;
+        self.ext_detail_tab = crate::model::DetailTab::Details;
+        let manifest = match extensions::read_local_manifest_info(&x.dir) {
+            Some(info) => extensions::ManifestState::Ready(info),
+            None => extensions::ManifestState::Failed("the package.json cannot be read".into()),
+        };
         let readme = match extensions::read_local_readme(&x.dir) {
             Some(text) => Readme::Ready(text),
             None => Readme::None,
@@ -701,6 +714,7 @@ impl Model {
             license: None,
             categories: Vec::new(),
             readme,
+            manifest,
         });
     }
 
@@ -771,8 +785,17 @@ impl Model {
                             d.readme = extra.readme.map_or(Readme::None, Readme::Ready);
                             d.license = extra.license;
                             d.categories = extra.categories;
+                            d.manifest = match extra.manifest {
+                                Some(info) => crate::extensions::ManifestState::Ready(info),
+                                None => crate::extensions::ManifestState::Failed(
+                                    "the package details could not be loaded".into(),
+                                ),
+                            };
                         }
-                        Err(e) => d.readme = Readme::Failed(e),
+                        Err(e) => {
+                            d.manifest = crate::extensions::ManifestState::Failed(e.clone());
+                            d.readme = Readme::Failed(e);
+                        }
                     }
                 }
                 changed = true;
@@ -813,10 +836,7 @@ impl Model {
                 self.install_rx = None;
                 self.installing = None;
                 match res {
-                    Ok(ext) => {
-                        self.refresh_extensions();
-                        self.say("Extensions", &format!("Installed {}", ext.display_name));
-                    }
+                    Ok(ext) => self.after_extension_installed(&ext),
                     Err(e) => self.say("Extensions", &format!("Cannot install: {e}")),
                 }
                 changed = true;

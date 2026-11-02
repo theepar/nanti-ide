@@ -851,3 +851,166 @@ fn the_app_starts_with_no_folder_and_a_saved_layout_never_reopens_the_bottom_pan
         "other layout choices are kept: {width}"
     );
 }
+
+fn pack_fixture_vsix(work: &Path, name: &str, manifest: &str) -> PathBuf {
+    let src = work.join(format!("src-{name}"));
+    std::fs::create_dir_all(src.join("extension")).unwrap();
+    std::fs::write(src.join("extension/package.json"), manifest).unwrap();
+    std::fs::write(src.join("[Content_Types].xml"), "<x/>").unwrap();
+    let out = work.join(format!("{name}.vsix"));
+    let status = std::process::Command::new("tar")
+        .args(["-a", "-cf"])
+        .arg(&out)
+        .arg("-C")
+        .arg(&src)
+        .args(["extension", "[Content_Types].xml"])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    out
+}
+
+const WEBVIEW_MANIFEST: &str = r#"{"name":"chat","publisher":"acme","version":"1.0.0","displayName":"Chat",
+  "contributes":{"views":{"x":[{"id":"chat.view","type":"webview","name":"Chat"}]},
+  "commands":[{"command":"chat.open","title":"Open Chat","category":"Chat"},{"command":"chat.hidden","title":"%loc.title%"}],
+  "keybindings":[{"command":"chat.open","key":"ctrl+alt+c"}],
+  "configuration":{"properties":{"chat.model":{"description":"Which model to use.\nSecond line."}}}},
+  "extensionPack":["acme.other"],"extensionDependencies":["acme.base"]}"#;
+
+#[test]
+fn installing_an_extension_with_a_view_opens_it_in_the_right_panel_unless_one_is_set() {
+    let t = ws("autopanel");
+    let cfg = t.0.join("cfg");
+    let first = pack_fixture_vsix(&t.0, "first", WEBVIEW_MANIFEST);
+    let mut m = Model::new(t.0.clone());
+    m.config_dir = Some(cfg.clone());
+    m.submit_input(InputKind::InstallVsix, &first.display().to_string())
+        .unwrap();
+    let (dir, view) = m.panel_request.take().expect("the panel is requested");
+    assert_eq!(view, "chat.view");
+    assert!(dir.starts_with(ui::extensions::extensions_dir(&cfg)));
+    assert_eq!(
+        ui::extensions::load_panel_choice(&cfg),
+        Some((dir.clone(), view))
+    );
+
+    let second = pack_fixture_vsix(
+        &t.0,
+        "second",
+        r#"{"name":"more","publisher":"acme","version":"1.0.0","contributes":{"views":{"x":[{"id":"more.view","type":"webview"}]}}}"#,
+    );
+    m.panel_extension = Some(dir);
+    m.submit_input(InputKind::InstallVsix, &second.display().to_string())
+        .unwrap();
+    assert!(
+        m.panel_request.is_none(),
+        "an existing panel extension is not replaced"
+    );
+    assert!(
+        m.message
+            .as_deref()
+            .is_some_and(|s| s.contains("Use in right panel"))
+    );
+
+    let plain = pack_fixture_vsix(
+        &t.0,
+        "plain",
+        r#"{"name":"plain","publisher":"acme","version":"1.0.0"}"#,
+    );
+    m.submit_input(InputKind::InstallVsix, &plain.display().to_string())
+        .unwrap();
+    assert!(m.panel_request.is_none());
+}
+
+#[test]
+fn the_features_and_pack_tabs_read_the_package_manifest() {
+    use ui::extensions::{ManifestState, parse_manifest_info};
+    let info = parse_manifest_info(&serde_json::from_str(WEBVIEW_MANIFEST).unwrap());
+    let titles: Vec<&str> = info.features.iter().map(|g| g.title).collect();
+    assert_eq!(
+        titles,
+        ["Commands", "Keyboard shortcuts", "Settings", "Views"]
+    );
+    assert_eq!(info.features[0].items, ["Chat: Open Chat", "chat.hidden"]);
+    assert_eq!(info.features[1].items, ["ctrl+alt+c  ->  chat.open"]);
+    assert_eq!(
+        info.features[2].items,
+        ["chat.model  -  Which model to use."]
+    );
+    assert_eq!(info.features[3].items, ["Chat (chat.view)"]);
+    assert_eq!(
+        (info.pack.as_slice(), info.dependencies.as_slice()),
+        (
+            ["acme.other".to_owned()].as_slice(),
+            ["acme.base".to_owned()].as_slice()
+        )
+    );
+    assert_eq!(
+        parse_manifest_info(&serde_json::json!({})),
+        Default::default()
+    );
+    assert_eq!(
+        parse_manifest_info(&serde_json::json!({"contributes": {"commands": "oops"}}))
+            .features
+            .len(),
+        0
+    );
+
+    let t = ws("manifesttab");
+    let cfg = t.0.join("cfg");
+    let vsix = pack_fixture_vsix(&t.0, "tabs", WEBVIEW_MANIFEST);
+    let mut m = Model::new(t.0.clone());
+    m.config_dir = Some(cfg);
+    m.submit_input(InputKind::InstallVsix, &vsix.display().to_string())
+        .unwrap();
+    m.ext_detail_tab = ui::model::DetailTab::Pack;
+    m.open_installed_detail(0);
+    assert_eq!(
+        m.ext_detail_tab,
+        ui::model::DetailTab::Details,
+        "opening a detail starts on Details"
+    );
+    let detail = m.ext_detail.as_ref().unwrap();
+    assert!(matches!(&detail.manifest, ManifestState::Ready(i) if i.pack == ["acme.other"]));
+}
+
+#[gpui::test]
+fn the_extension_detail_page_renders_every_tab_and_the_compact_installed_list(
+    cx: &mut TestAppContext,
+) {
+    let t = ws("detailrender");
+    let cfg = t.0.join("cfg");
+    let vsix = pack_fixture_vsix(&t.0, "render", WEBVIEW_MANIFEST);
+    let (window, cx) = open(cx, &t.0);
+    window
+        .update(cx, |wb, _, cx| {
+            let m = wb.model_mut();
+            m.config_dir = Some(cfg.clone());
+            m.submit_input(InputKind::InstallVsix, &vsix.display().to_string())
+                .unwrap();
+            m.panel_request = None;
+            m.activity = Activity::Extensions;
+            cx.notify();
+        })
+        .unwrap();
+    cx.run_until_parked();
+    for tab in [
+        ui::model::DetailTab::Details,
+        ui::model::DetailTab::Features,
+        ui::model::DetailTab::Pack,
+    ] {
+        window
+            .update(cx, |wb, _, cx| {
+                let m = wb.model_mut();
+                m.open_installed_detail(0);
+                m.ext_detail_tab = tab;
+                cx.notify();
+            })
+            .unwrap();
+        cx.run_until_parked();
+    }
+    let shown = window
+        .read_with(cx, |wb, _| wb.model().ext_detail.is_some())
+        .unwrap();
+    assert!(shown);
+}

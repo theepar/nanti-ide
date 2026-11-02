@@ -46,10 +46,213 @@ pub struct ExtDetail {
     pub license: Option<String>,
     pub categories: Vec<String>,
     pub readme: Readme,
+    pub manifest: ManifestState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FeatureGroup {
+    pub title: &'static str,
+    pub items: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ManifestInfo {
+    pub features: Vec<FeatureGroup>,
+    pub pack: Vec<String>,
+    pub dependencies: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ManifestState {
+    Loading,
+    Ready(ManifestInfo),
+    Failed(String),
+}
+
+const FEATURE_ITEM_CAP: usize = 200;
+
+fn readable(s: &str) -> Option<String> {
+    let t = s.trim();
+    (!t.is_empty() && !(t.starts_with('%') && t.ends_with('%'))).then(|| t.to_owned())
+}
+
+fn text_of(v: &serde_json::Value, key: &str) -> Option<String> {
+    v.get(key).and_then(|x| x.as_str()).and_then(readable)
+}
+
+fn strings_of(v: Option<&serde_json::Value>) -> Vec<String> {
+    v.and_then(|a| a.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub fn parse_manifest_info(json: &serde_json::Value) -> ManifestInfo {
+    let c = json.get("contributes");
+    let list = |key: &str| -> Vec<&serde_json::Value> {
+        c.and_then(|c| c.get(key))
+            .and_then(|a| a.as_array())
+            .map(|a| a.iter().collect())
+            .unwrap_or_default()
+    };
+    let mut groups: Vec<FeatureGroup> = Vec::new();
+    let mut add = |title: &'static str, mut items: Vec<String>| {
+        items.truncate(FEATURE_ITEM_CAP);
+        if !items.is_empty() {
+            groups.push(FeatureGroup { title, items });
+        }
+    };
+
+    add(
+        "Commands",
+        list("commands")
+            .into_iter()
+            .filter_map(|v| {
+                let id = text_of(v, "command")?;
+                Some(match (text_of(v, "category"), text_of(v, "title")) {
+                    (Some(cat), Some(t)) => format!("{cat}: {t}"),
+                    (None, Some(t)) => t,
+                    _ => id,
+                })
+            })
+            .collect(),
+    );
+    add(
+        "Keyboard shortcuts",
+        list("keybindings")
+            .into_iter()
+            .filter_map(|v| {
+                let key = text_of(v, "key")?;
+                let cmd = text_of(v, "command")?;
+                Some(format!("{key}  ->  {cmd}"))
+            })
+            .collect(),
+    );
+    let mut settings = Vec::new();
+    let config = c.and_then(|c| c.get("configuration"));
+    let blocks: Vec<&serde_json::Value> = match config {
+        Some(serde_json::Value::Array(a)) => a.iter().collect(),
+        Some(v @ serde_json::Value::Object(_)) => vec![v],
+        _ => Vec::new(),
+    };
+    for block in blocks {
+        if let Some(props) = block.get("properties").and_then(|p| p.as_object()) {
+            for (key, spec) in props {
+                let desc = text_of(spec, "markdownDescription")
+                    .or_else(|| text_of(spec, "description"))
+                    .map(|d| {
+                        d.lines()
+                            .next()
+                            .unwrap_or("")
+                            .chars()
+                            .take(110)
+                            .collect::<String>()
+                    });
+                settings.push(match desc {
+                    Some(d) if !d.is_empty() => format!("{key}  -  {d}"),
+                    _ => key.clone(),
+                });
+            }
+        }
+    }
+    add("Settings", settings);
+    add(
+        "Languages",
+        list("languages")
+            .into_iter()
+            .filter_map(|v| {
+                let id = text_of(v, "id")?;
+                let aliases = strings_of(v.get("aliases"));
+                Some(if aliases.is_empty() {
+                    id
+                } else {
+                    format!("{id} ({})", aliases.join(", "))
+                })
+            })
+            .collect(),
+    );
+    add(
+        "Grammars",
+        list("grammars")
+            .into_iter()
+            .filter_map(|v| text_of(v, "scopeName"))
+            .collect(),
+    );
+    for (key, title) in [
+        ("themes", "Color themes"),
+        ("iconThemes", "File icon themes"),
+        ("productIconThemes", "Product icon themes"),
+    ] {
+        add(
+            title,
+            list(key)
+                .into_iter()
+                .filter_map(|v| text_of(v, "label").or_else(|| text_of(v, "id")))
+                .collect(),
+        );
+    }
+    add(
+        "Snippets",
+        list("snippets")
+            .into_iter()
+            .filter_map(|v| text_of(v, "language"))
+            .collect(),
+    );
+    let mut views = Vec::new();
+    if let Some(map) = c.and_then(|c| c.get("views")).and_then(|v| v.as_object()) {
+        for entries in map.values().filter_map(|e| e.as_array()) {
+            for v in entries {
+                if let Some(id) = text_of(v, "id") {
+                    views.push(match text_of(v, "name") {
+                        Some(n) => format!("{n} ({id})"),
+                        None => id,
+                    });
+                }
+            }
+        }
+    }
+    add("Views", views);
+    add(
+        "Debuggers",
+        list("debuggers")
+            .into_iter()
+            .filter_map(|v| text_of(v, "label").or_else(|| text_of(v, "type")))
+            .collect(),
+    );
+    add(
+        "Task types",
+        list("taskDefinitions")
+            .into_iter()
+            .filter_map(|v| text_of(v, "type"))
+            .collect(),
+    );
+    add(
+        "Colors",
+        list("colors")
+            .into_iter()
+            .filter_map(|v| text_of(v, "id"))
+            .collect(),
+    );
+
+    ManifestInfo {
+        features: groups,
+        pack: strings_of(json.get("extensionPack")),
+        dependencies: strings_of(json.get("extensionDependencies")),
+    }
+}
+
+pub fn read_local_manifest_info(dir: &Path) -> Option<ManifestInfo> {
+    let text = std::fs::read_to_string(dir.join("package.json")).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&text).ok()?;
+    Some(parse_manifest_info(&json))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtExtra {
+    pub manifest: Option<ManifestInfo>,
     pub readme: Option<String>,
     pub license: Option<String>,
     pub categories: Vec<String>,
@@ -231,12 +434,30 @@ pub fn download_extra(publisher: &str, name: &str) -> Result<ExtExtra, String> {
     )?;
     let v: serde_json::Value =
         serde_json::from_str(&json).map_err(|e| format!("invalid response: {e}"))?;
-    let readme = v
+    let readme_url = v
         .pointer("/files/readme")
         .and_then(|u| u.as_str())
-        .and_then(|u| download_readme(u).ok())
-        .filter(|t| !t.trim().is_empty());
+        .map(str::to_owned);
+    let manifest_url = v
+        .pointer("/files/manifest")
+        .and_then(|u| u.as_str())
+        .map(str::to_owned);
+    let (readme, manifest) = std::thread::scope(|s| {
+        let manifest = s.spawn(|| {
+            manifest_url
+                .as_deref()
+                .and_then(|u| fetch_text(u, 2_000_000).ok())
+                .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+                .map(|j| parse_manifest_info(&j))
+        });
+        let readme = readme_url
+            .as_deref()
+            .and_then(|u| download_readme(u).ok())
+            .filter(|t| !t.trim().is_empty());
+        (readme, manifest.join().ok().flatten())
+    });
     Ok(ExtExtra {
+        manifest,
         readme,
         license: v
             .get("license")

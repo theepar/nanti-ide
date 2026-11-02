@@ -124,8 +124,8 @@ fn main() {
                         .timer(Duration::from_millis(30))
                         .await;
                     let alive = window
-                        .update(cx, |workbench, _window, cx| {
-                            if workbench.pump() {
+                        .update(cx, |workbench, window, cx| {
+                            if workbench.pump_ui(window) {
                                 cx.notify();
                             }
                         })

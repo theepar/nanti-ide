@@ -18,6 +18,7 @@ use terminal_ui::{GridMetrics, TerminalSession};
 pub mod assets;
 pub mod extensions;
 pub mod find;
+pub mod launch;
 pub mod layout;
 pub mod lsp;
 pub mod menu;
@@ -490,6 +491,37 @@ impl Workbench {
         self.panel = Some(panel);
     }
 
+    pub fn pump_ui(&mut self, window: &mut Window) -> bool {
+        let changed = self.pump();
+        if self.model.panel_request.is_some() {
+            self.activate_panel(window);
+            return true;
+        }
+        changed
+    }
+
+    fn activate_panel(&mut self, window: &mut Window) {
+        let Some((dir, view)) = self.model.panel_request.take() else {
+            return;
+        };
+        let workspace = self.model.folder_open.then(|| self.model.root.clone());
+        let cfg = launch::panel_host_config(dir.clone(), view, workspace);
+        let diag_log = cfg.selftest_log.clone();
+        let (events, to_host, _shutdown) = panel::spawn_worker(cfg);
+        match Panel::new(window, events, to_host, diag_log) {
+            Ok(panel) => {
+                self.panel = Some(panel);
+                self.right_applied = None;
+                self.model.layout.right = true;
+                self.model.panel_extension = Some(dir);
+            }
+            Err(e) => self.model.say(
+                "Extensions",
+                &format!("Cannot open the extension panel: {e}"),
+            ),
+        }
+    }
+
     pub fn allow_window_close(&mut self) -> bool {
         let ok = self.quitting || self.model.request_quit();
         if ok {
@@ -916,6 +948,9 @@ impl Workbench {
         }
         if let Some(req) = self.model.pick_request.take() {
             self.start_picker(req, window, cx);
+        }
+        if self.model.panel_request.is_some() {
+            self.activate_panel(window);
         }
         if std::mem::take(&mut self.model.quit_request) && self.model.request_quit() {
             self.finish_quit(window, cx);

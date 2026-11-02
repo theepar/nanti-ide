@@ -128,6 +128,14 @@ pub enum Prompt {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DetailTab {
+    #[default]
+    Details,
+    Features,
+    Pack,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContextMenu {
     pub path: PathBuf,
@@ -196,6 +204,7 @@ pub struct Model {
     pub search: SearchState,
     pub scm: ScmState,
     pub folder_open: bool,
+    pub panel_request: Option<(PathBuf, String)>,
     pub explorer_sel: Option<PathBuf>,
     pub explorer_gen: u64,
     pub menu_open: Option<MenuKind>,
@@ -229,6 +238,7 @@ pub struct Model {
     pub(crate) icon_tx: std::sync::mpsc::Sender<(String, PathBuf)>,
     pub(crate) icon_rx: std::sync::mpsc::Receiver<(String, PathBuf)>,
     pub ext_detail: Option<ExtDetail>,
+    pub ext_detail_tab: DetailTab,
     pub settings_open: bool,
     pub(crate) readme_rx:
         Option<std::sync::mpsc::Receiver<(String, Result<crate::extensions::ExtExtra, String>)>>,
@@ -247,6 +257,7 @@ impl Model {
         Self {
             scm: ScmState::new(root.clone()),
             folder_open: true,
+            panel_request: None,
             explorer_sel: None,
             explorer_gen: 0,
             menu_open: None,
@@ -280,6 +291,7 @@ impl Model {
             icon_tx,
             icon_rx,
             ext_detail: None,
+            ext_detail_tab: DetailTab::Details,
             settings_open: false,
             readme_rx: None,
             marketplace_rx: None,

@@ -6,7 +6,7 @@ use gpui::{
 
 use crate::assets;
 use crate::menu::{self, MenuItem, MenuKind};
-use crate::model::PanelTab;
+use crate::model::{DetailTab, PanelTab};
 use crate::palette::Command;
 use crate::{MENU_BAR_HEIGHT, Target, Workbench, theme};
 
@@ -526,6 +526,28 @@ impl Workbench {
                 )
                 .into_any_element(),
         )
+    }
+
+    fn outline_button(
+        id: impl Into<gpui::ElementId>,
+        label: &'static str,
+    ) -> gpui::Stateful<gpui::Div> {
+        div()
+            .id(id)
+            .flex()
+            .flex_1()
+            .items_center()
+            .justify_center()
+            .h(px(28.))
+            .rounded_md()
+            .cursor_pointer()
+            .border_1()
+            .border_color(rgb(0x4a4a4a))
+            .bg(rgb(0x2a2a2a))
+            .text_size(px(12.))
+            .text_color(rgb(0xe6e6e6))
+            .hover(|s| s.bg(rgb(0x363636)).border_color(rgb(0x6a6a6a)))
+            .child(label)
     }
 
     fn flat_button(
@@ -1051,6 +1073,205 @@ impl Workbench {
             .into_any_element()
     }
 
+    fn detail_button(
+        id: impl Into<gpui::ElementId>,
+        label: &'static str,
+        danger: bool,
+    ) -> gpui::Stateful<gpui::Div> {
+        div()
+            .id(id)
+            .flex()
+            .items_center()
+            .h(px(30.))
+            .px_4()
+            .rounded_md()
+            .cursor_pointer()
+            .border_1()
+            .border_color(rgb(if danger { 0x7a3a3a } else { 0x5a5a5a }))
+            .bg(rgb(0x2a2a2a))
+            .text_size(px(13.))
+            .text_color(rgb(if danger { 0xf0a8a0 } else { 0xe6e6e6 }))
+            .hover(|s| s.bg(rgb(if danger { 0x4a2222 } else { 0x3a3a3a })))
+            .child(label)
+    }
+
+    fn manifest_note(text: String, color: u32) -> AnyElement {
+        div()
+            .text_size(px(13.))
+            .text_color(rgb(color))
+            .child(SharedString::from(text))
+            .into_any_element()
+    }
+
+    fn features_tab(&self, manifest: &crate::extensions::ManifestState) -> AnyElement {
+        use crate::extensions::ManifestState;
+        let info = match manifest {
+            ManifestState::Loading => {
+                return Self::manifest_note("Loading the features...".into(), theme::TEXT_DIM);
+            }
+            ManifestState::Failed(e) => return Self::manifest_note(e.clone(), 0xe5534b),
+            ManifestState::Ready(info) => info,
+        };
+        if info.features.is_empty() {
+            return Self::manifest_note(
+                "This extension does not list any contributions.".into(),
+                theme::TEXT_DIM,
+            );
+        }
+        const SHOWN: usize = 60;
+        div()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .max_w(px(900.))
+            .children(info.features.iter().map(|g| {
+                let more = g.items.len().saturating_sub(SHOWN);
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_size(px(13.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(SharedString::from(format!(
+                                "{} ({})",
+                                g.title,
+                                g.items.len()
+                            ))),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .rounded_md()
+                            .bg(rgb(0x202020))
+                            .border_1()
+                            .border_color(rgb(theme::BORDER))
+                            .children(g.items.iter().take(SHOWN).map(|item| {
+                                div()
+                                    .px_3()
+                                    .py(px(3.))
+                                    .text_size(px(12.))
+                                    .text_color(rgb(0xd0d0d0))
+                                    .child(SharedString::from(item.clone()))
+                            }))
+                            .children((more > 0).then(|| {
+                                div()
+                                    .px_3()
+                                    .py(px(3.))
+                                    .text_size(px(11.))
+                                    .text_color(rgb(theme::TEXT_DIM))
+                                    .child(SharedString::from(format!("and {more} more")))
+                            })),
+                    )
+            }))
+            .into_any_element()
+    }
+
+    fn pack_tab(
+        &self,
+        manifest: &crate::extensions::ManifestState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        use crate::extensions::ManifestState;
+        let info = match manifest {
+            ManifestState::Loading => {
+                return Self::manifest_note("Loading the package...".into(), theme::TEXT_DIM);
+            }
+            ManifestState::Failed(e) => return Self::manifest_note(e.clone(), 0xe5534b),
+            ManifestState::Ready(info) => info,
+        };
+        if info.pack.is_empty() && info.dependencies.is_empty() {
+            return Self::manifest_note(
+                "This extension is not an extension pack and has no dependencies.".into(),
+                theme::TEXT_DIM,
+            );
+        }
+        let section = |title: &'static str, ids: &[String], base: usize, cx: &mut Context<Self>| {
+            let rows: Vec<AnyElement> = ids
+                .iter()
+                .enumerate()
+                .map(|(i, id)| {
+                    let installed = self
+                        .model
+                        .extensions
+                        .iter()
+                        .any(|e| e.id.eq_ignore_ascii_case(id));
+                    let query = id.clone();
+                    div()
+                        .id(("pack-member", base + i))
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .px_3()
+                        .py(px(5.))
+                        .text_size(px(12.))
+                        .when(!installed, |d| {
+                            d.cursor_pointer().hover(|s| s.bg(rgb(theme::HOVER)))
+                        })
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
+                            if installed {
+                                return;
+                            }
+                            this.model.close_ext_detail();
+                            this.model.ext_query.clear();
+                            this.model.ext_query.insert(&query);
+                            this.model.search_marketplace(&query);
+                            cx.notify();
+                        }))
+                        .child(SharedString::from(id.clone()))
+                        .child(
+                            div()
+                                .text_size(px(11.))
+                                .text_color(rgb(if installed { 0x8fd19e } else { theme::TEXT_DIM }))
+                                .child(if installed {
+                                    "Installed"
+                                } else {
+                                    "Find in marketplace"
+                                }),
+                        )
+                        .into_any_element()
+                })
+                .collect();
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .text_size(px(13.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(SharedString::from(format!("{title} ({})", ids.len()))),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .rounded_md()
+                        .bg(rgb(0x202020))
+                        .border_1()
+                        .border_color(rgb(theme::BORDER))
+                        .children(rows),
+                )
+                .into_any_element()
+        };
+        let mut parts: Vec<AnyElement> = Vec::new();
+        if !info.pack.is_empty() {
+            parts.push(section("Extensions in this pack", &info.pack, 0, cx));
+        }
+        if !info.dependencies.is_empty() {
+            parts.push(section("Dependencies", &info.dependencies, 1000, cx));
+        }
+        div()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .max_w(px(900.))
+            .children(parts)
+            .into_any_element()
+    }
+
     pub(crate) fn ext_detail_page(
         &self,
         d: &crate::extensions::ExtDetail,
@@ -1069,23 +1290,49 @@ impl Workbench {
 
         let action: AnyElement = if let Some(x) = installed {
             let dir = x.dir.clone();
+            let in_panel = self.model.panel_extension.as_deref() == Some(x.dir.as_path());
+            let view = x.view_type.clone();
+            let panel_dir = x.dir.clone();
             div()
                 .flex()
                 .items_center()
                 .gap_2()
                 .child(
                     div()
-                        .text_size(px(12.))
-                        .text_color(rgb(0x81b88b))
+                        .flex()
+                        .items_center()
+                        .h(px(30.))
+                        .px_3()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(rgb(0x3f6b49))
+                        .bg(rgb(0x1f2f24))
+                        .text_size(px(13.))
+                        .text_color(rgb(0x8fd19e))
                         .child("Installed"),
                 )
+                .children(view.filter(|_| !in_panel).map(|view| {
+                    Self::detail_button("ext-detail-panel", "Use in right panel", false).on_click(
+                        cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            this.model.use_as_panel_extension(&panel_dir, &view);
+                            this.drain_requests(window, cx);
+                            cx.notify();
+                        }),
+                    )
+                }))
+                .children(in_panel.then(|| {
+                    div()
+                        .text_size(px(12.))
+                        .text_color(rgb(0x8fd19e))
+                        .child("Showing in the right panel")
+                }))
                 .children(removable.then(|| {
-                    Self::flat_button("ext-detail-remove", "Uninstall").on_click(cx.listener(
-                        move |this, _: &ClickEvent, _w, cx| {
+                    Self::detail_button("ext-detail-remove", "Uninstall", true).on_click(
+                        cx.listener(move |this, _: &ClickEvent, _w, cx| {
                             this.model.confirm_remove_extension(&dir);
                             cx.notify();
-                        },
-                    ))
+                        }),
+                    )
                 }))
                 .into_any_element()
         } else if let Some(url) = d.download_url.clone() {
@@ -1196,6 +1443,64 @@ impl Workbench {
             ],
         };
 
+        let current = self.model.ext_detail_tab;
+        let tabs = div()
+            .flex()
+            .gap_6()
+            .border_b_1()
+            .border_color(rgb(theme::BORDER))
+            .children(
+                [
+                    (DetailTab::Details, "DETAILS"),
+                    (DetailTab::Features, "FEATURES"),
+                    (DetailTab::Pack, "EXTENSION PACK"),
+                ]
+                .into_iter()
+                .enumerate()
+                .map(|(i, (tab, label))| {
+                    let active = tab == current;
+                    div()
+                        .id(("ext-tab", i))
+                        .pb(px(6.))
+                        .cursor_pointer()
+                        .text_size(px(11.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(rgb(if active { 0xffffff } else { theme::TEXT_DIM }))
+                        .border_b_2()
+                        .border_color(if active {
+                            rgb(theme::ACCENT)
+                        } else {
+                            rgb(theme::EDITOR)
+                        })
+                        .hover(|s| s.text_color(rgb(0xffffff)))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
+                            this.model.ext_detail_tab = tab;
+                            cx.notify();
+                        }))
+                        .child(label)
+                }),
+            );
+        let body: AnyElement = match current {
+            DetailTab::Details => div()
+                .flex()
+                .gap_6()
+                .items_start()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_w_0()
+                        .max_w(px(780.))
+                        .gap(px(4.))
+                        .children(readme),
+                )
+                .child(facts)
+                .into_any_element(),
+            DetailTab::Features => self.features_tab(&d.manifest),
+            DetailTab::Pack => self.pack_tab(&d.manifest, cx),
+        };
+
         let page = div()
             .id("ext-detail")
             .size_full()
@@ -1245,38 +1550,8 @@ impl Workbench {
                             .child(div().pt_2().flex().child(action)),
                     ),
             )
-            .child(
-                div()
-                    .flex()
-                    .border_b_1()
-                    .border_color(rgb(theme::BORDER))
-                    .child(
-                        div()
-                            .pb(px(6.))
-                            .text_size(px(11.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .border_b_2()
-                            .border_color(rgb(theme::ACCENT))
-                            .child("DETAILS"),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap_6()
-                    .items_start()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .flex_1()
-                            .min_w_0()
-                            .max_w(px(780.))
-                            .gap(px(4.))
-                            .children(readme),
-                    )
-                    .child(facts),
-            );
+            .child(tabs)
+            .child(body);
 
         div()
             .flex()
@@ -1294,12 +1569,6 @@ impl Workbench {
     }
 
     pub(crate) fn extensions_panel(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let installed_root = self
-            .model
-            .config_dir
-            .as_ref()
-            .map(|c| crate::extensions::extensions_dir(c));
-
         let mut list_rows: Vec<AnyElement> = Vec::new();
 
         if self.model.marketplace_searching {
@@ -1504,108 +1773,64 @@ impl Workbench {
         } else {
             for (i, x) in self.model.extensions.iter().enumerate() {
                 let active = self.model.panel_extension.as_deref() == Some(x.dir.as_path());
-                let removable = installed_root.as_deref() == x.dir.parent();
-                let (dir_use, dir_rm) = (x.dir.clone(), x.dir.clone());
-                let view = x.view_type.clone();
-                let mut actions = div().flex().gap_1().pt_1();
-                if let Some(view) = view {
-                    actions = actions.child(
-                        Self::flat_button(("ext-use", i), "Use in right panel").on_click(
-                            cx.listener(move |this, _: &ClickEvent, _w, cx| {
-                                cx.stop_propagation();
-                                this.model.use_as_panel_extension(&dir_use, &view);
-                                cx.notify();
-                            }),
-                        ),
-                    );
-                }
-                if removable {
-                    actions = actions.child(Self::flat_button(("ext-rm", i), "Remove").on_click(
-                        cx.listener(move |this, _: &ClickEvent, _w, cx| {
-                            cx.stop_propagation();
-                            this.model.confirm_remove_extension(&dir_rm);
-                            cx.notify();
-                        }),
-                    ));
-                }
                 list_rows.push(
                     div()
                         .id(("ext", i))
                         .flex()
+                        .items_center()
                         .gap_3()
                         .px_3()
-                        .py_2()
+                        .h(px(56.))
                         .cursor_pointer()
-                        .border_b_1()
-                        .border_color(rgb(theme::BORDER))
                         .hover(|s| s.bg(rgb(theme::HOVER)))
                         .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
                             this.model.open_installed_detail(i);
                             cx.notify();
                         }))
-                        .child(self.ext_icon(&x.id, x.icon.as_ref(), &x.display_name, 40.))
+                        .child(self.ext_icon(&x.id, x.icon.as_ref(), &x.display_name, 36.))
                         .child(
                             div()
                                 .flex()
                                 .flex_col()
                                 .flex_1()
                                 .min_w_0()
+                                .gap(px(1.))
                                 .child(
                                     div()
-                                        .flex()
-                                        .justify_between()
+                                        .whitespace_nowrap()
+                                        .overflow_hidden()
                                         .text_size(px(13.))
-                                        .child(SharedString::from(x.display_name.clone()))
-                                        .child(
-                                            div()
-                                                .text_size(px(11.))
-                                                .text_color(rgb(theme::TEXT_DIM))
-                                                .child(SharedString::from(x.version.clone())),
-                                        ),
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .child(SharedString::from(x.display_name.clone())),
                                 )
                                 .child(
                                     div()
+                                        .whitespace_nowrap()
+                                        .overflow_hidden()
                                         .text_size(px(11.))
                                         .text_color(rgb(theme::TEXT_DIM))
-                                        .child(SharedString::from(format!(
-                                            "{}{}{}",
-                                            x.id,
-                                            if x.commands > 0 {
-                                                format!("  ·  {} commands", x.commands)
-                                            } else {
-                                                String::new()
-                                            },
-                                            if x.engine.is_empty() {
-                                                String::new()
-                                            } else {
-                                                format!("  ·  vscode {}", x.engine)
-                                            }
-                                        ))),
+                                        .child(SharedString::from(x.description.clone())),
                                 )
-                                .children((!x.description.is_empty()).then(|| {
+                                .child(
                                     div()
-                                        .pt_1()
-                                        .text_size(px(12.))
-                                        .child(SharedString::from(x.description.clone()))
-                                }))
-                                .children(active.then(|| {
-                                    div()
-                                        .pt_1()
+                                        .whitespace_nowrap()
+                                        .overflow_hidden()
                                         .text_size(px(11.))
-                                        .text_color(rgb(0x81b88b))
-                                        .child("● running in the right panel")
-                                }))
-                                .child(actions),
+                                        .text_color(rgb(0xb0b0b0))
+                                        .child(SharedString::from(x.publisher.clone())),
+                                ),
                         )
+                        .children(active.then(|| {
+                            div()
+                                .flex_none()
+                                .size(px(8.))
+                                .rounded_full()
+                                .bg(rgb(0x81b88b))
+                        }))
                         .into_any_element(),
                 );
             }
         }
-
-        let folder = installed_root.as_ref().map_or_else(
-            || "no configuration folder".to_owned(),
-            |p| p.display().to_string(),
-        );
 
         let search_field = self.field_widget(
             window,
@@ -1627,18 +1852,18 @@ impl Workbench {
             .child(
                 div()
                     .flex()
-                    .gap_1()
+                    .gap_2()
                     .px_2()
-                    .pb_1()
+                    .pb_2()
                     .child(
-                        Self::flat_button("ext-install", "Install from VSIX...").on_click(
+                        Self::outline_button("ext-install", "Install from VSIX").on_click(
                             cx.listener(|this, _: &ClickEvent, window, cx| {
                                 this.apply_command(Command::InstallVsix, window, cx)
                             }),
                         ),
                     )
                     .child(
-                        Self::flat_button("ext-refresh", "Refresh").on_click(cx.listener(
+                        Self::outline_button("ext-refresh", "Refresh").on_click(cx.listener(
                             |this, _: &ClickEvent, _w, cx| {
                                 this.model.refresh_extensions();
                                 cx.notify();
@@ -1647,15 +1872,6 @@ impl Workbench {
                     ),
             )
             .child(self.scroll_list("ext-list", &self.scrolls.ext, list_rows, None, cx))
-            .child(
-                div()
-                    .flex_none()
-                    .px_3()
-                    .py_2()
-                    .text_size(px(11.))
-                    .text_color(rgb(theme::TEXT_DIM))
-                    .child(SharedString::from(format!("Folder: {folder}"))),
-            )
             .into_any_element()
     }
 
