@@ -1,5 +1,6 @@
 # Dependencies & Build
 target/
+node_modules/
 
 # Local tooling & agents
 .snapgent/
@@ -12,3 +13,4 @@ PRD*.md
 .DS_Store
 Thumbs.db
 *.pdb
+webview-spike.log

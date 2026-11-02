@@ -1,0 +1,23 @@
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Rust toolchain
+        run: rustup show
+      - run: cargo fmt --all --check
+      # ui-spike holds code adapted from upstream examples; it only has to build.
+      - run: cargo clippy --workspace --exclude ui-spike --all-targets -- -D warnings
+      - run: cargo test --workspace --exclude ui-spike
+      - run: cargo build -p ui-spike
+      - name: Extension host tests
+        working-directory: extension-host
+        run: npm test
