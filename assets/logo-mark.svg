@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="130 146 252 220">
+  <!-- Inward Wings mark on a transparent background; recolor it with the CSS/GPUI text color.
+       The left wing cuts a thin gap out of the right wing via a mask (no black stroke needed). -->
+  <defs>
+    <mask id="gap" maskUnits="userSpaceOnUse" x="100" y="120" width="312" height="272">
+      <rect x="100" y="120" width="312" height="272" fill="#fff"/>
+      <polygon points="138.2,153.6 248.3,256.0 138.2,358.4 194.6,358.4 304.6,256.0 194.6,153.6"
+               fill="#000" stroke="#000" stroke-width="6" stroke-linejoin="round"/>
+    </mask>
+  </defs>
+  <polygon mask="url(#gap)" points="373.8,153.6 263.7,256.0 373.8,358.4 317.4,358.4 207.4,256.0 317.4,153.6"
+           fill="#fff" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>
+  <polygon points="138.2,153.6 248.3,256.0 138.2,358.4 194.6,358.4 304.6,256.0 194.6,153.6"
+           fill="#fff" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>
+</svg>
