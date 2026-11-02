@@ -102,7 +102,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "editor-core",
  "serde",
@@ -1697,7 +1697,7 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "editor-core"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "regex",
  "ropey",
@@ -2413,7 +2413,7 @@ dependencies = [
 
 [[package]]
 name = "git"
-version = "0.0.1"
+version = "1.0.0"
 
 [[package]]
 name = "git2"
@@ -6253,7 +6253,7 @@ dependencies = [
 
 [[package]]
 name = "syntax"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "tree-sitter",
  "tree-sitter-bash",
@@ -6441,7 +6441,7 @@ dependencies = [
 
 [[package]]
 name = "terminal"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "alacritty_terminal",
 ]
@@ -7226,7 +7226,7 @@ dependencies = [
 
 [[package]]
 name = "ui"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "app",
  "editor-core",
@@ -7242,7 +7242,7 @@ dependencies = [
 
 [[package]]
 name = "ui-spike"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "gpui",
  "unicode-segmentation",

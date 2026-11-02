@@ -3,8 +3,8 @@
 1 ICON "assets/nanti.ico"
 
 1 VERSIONINFO
-FILEVERSION 0,0,1,0
-PRODUCTVERSION 0,0,1,0
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
 BEGIN
   BLOCK "StringFileInfo"
   BEGIN
@@ -14,8 +14,8 @@ BEGIN
       VALUE "ProductName", "nanti."
       VALUE "InternalName", "nanti"
       VALUE "OriginalFilename", "nanti.exe"
-      VALUE "FileVersion", "0.0.1"
-      VALUE "ProductVersion", "0.0.1"
+      VALUE "FileVersion", "1.0.0"
+      VALUE "ProductVersion", "1.0.0"
     END
   END
   BLOCK "VarFileInfo"
