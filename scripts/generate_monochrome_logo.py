@@ -119,3 +119,4 @@ if __name__ == "__main__":
         r"C:\Users\Deva\.gemini\antigravity\brain\a126a8d4-8565-4cbf-b8d8-483396d337fe\nanti_logo_monochrome.jpg"
     )
     print("Monochrome transformation complete!")
+
