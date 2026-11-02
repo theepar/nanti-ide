@@ -697,3 +697,126 @@ fn run_task_types_the_command_into_a_real_terminal(cx: &mut TestAppContext) {
         .update(cx, |wb, _, _| wb.kill_all_terminals())
         .unwrap();
 }
+
+#[gpui::test]
+fn a_long_file_gives_the_editor_a_scrollable_range(cx: &mut TestAppContext) {
+    let t = ws("scrollrange");
+    let long: String = (0..400).map(|i| format!("line {i}\n")).collect();
+    std::fs::write(t.0.join("long.txt"), long).unwrap();
+    let (window, cx) = open(cx, &t.0);
+    window
+        .update(cx, |wb, _, cx| {
+            wb.open_path(&t.0.join("long.txt"));
+            cx.notify();
+        })
+        .unwrap();
+    cx.simulate_keystrokes("ctrl-home"); // input events draw a frame
+    cx.run_until_parked();
+    let (view, max, off) = window
+        .read_with(cx, |wb, _| wb.editor_scroll_metrics())
+        .unwrap();
+    assert!(view > 50.0, "the scroll area has a size: {view}");
+    assert!(max > 1000.0, "400 lines of 20px do not fit: max {max}");
+    assert_eq!(off, 0.0);
+}
+
+fn editor_text(window: WindowHandle<Workbench>, cx: &mut VisualTestContext) -> String {
+    window
+        .update(cx, |wb, _, _| {
+            wb.model_mut().active_editor_mut().unwrap().text()
+        })
+        .unwrap()
+}
+
+#[gpui::test]
+fn editing_shortcuts_comment_move_duplicate_delete_indent_and_words(cx: &mut TestAppContext) {
+    let t = ws("shortcuts");
+    std::fs::write(t.0.join("code.rs"), "fn a() {\n    one\n    two\n}\n").unwrap();
+    let (window, cx) = open(cx, &t.0);
+    window
+        .update(cx, |wb, _, _| wb.open_path(&t.0.join("code.rs")))
+        .unwrap();
+    cx.run_until_parked();
+
+    cx.simulate_keystrokes("ctrl-/");
+    assert!(
+        editor_text(window, cx).starts_with("// fn a() {\n"),
+        "{:?}",
+        editor_text(window, cx)
+    );
+    cx.simulate_keystrokes("ctrl-/");
+    assert!(editor_text(window, cx).starts_with("fn a() {\n"));
+
+    cx.simulate_keystrokes("alt-down");
+    assert_eq!(editor_text(window, cx), "    one\nfn a() {\n    two\n}\n");
+    cx.simulate_keystrokes("alt-up");
+    assert_eq!(editor_text(window, cx), "fn a() {\n    one\n    two\n}\n");
+
+    cx.simulate_keystrokes("shift-alt-down");
+    assert_eq!(
+        editor_text(window, cx),
+        "fn a() {\nfn a() {\n    one\n    two\n}\n"
+    );
+    cx.simulate_keystrokes("ctrl-shift-k");
+    assert_eq!(editor_text(window, cx), "fn a() {\n    one\n    two\n}\n");
+
+    // Enter after an opening brace indents the next line; Tab / Shift+Tab indent and outdent
+    cx.simulate_keystrokes("ctrl-home end enter");
+    assert_eq!(
+        editor_text(window, cx),
+        "fn a() {\n    \n    one\n    two\n}\n"
+    );
+    cx.simulate_keystrokes("shift-tab");
+    assert_eq!(editor_text(window, cx), "fn a() {\n\n    one\n    two\n}\n");
+    cx.simulate_keystrokes("tab");
+    assert_eq!(
+        editor_text(window, cx),
+        "fn a() {\n    \n    one\n    two\n}\n"
+    );
+
+    // word-wise keys
+    cx.simulate_keystrokes("ctrl-home ctrl-right ctrl-right");
+    let col = window
+        .update(cx, |wb, _, _| {
+            wb.model_mut().active_editor_mut().unwrap().line_col()
+        })
+        .unwrap();
+    assert_eq!(col, (0, 4), "fn then a: the caret stops after 'a'");
+    cx.simulate_keystrokes("ctrl-backspace");
+    assert_eq!(
+        editor_text(window, cx),
+        "fn () {\n    \n    one\n    two\n}\n"
+    );
+    cx.simulate_keystrokes("ctrl-z");
+    assert_eq!(
+        editor_text(window, cx),
+        "fn a() {\n    \n    one\n    two\n}\n"
+    );
+
+    // Ctrl+Enter opens a line below with the current indentation
+    cx.simulate_keystrokes("ctrl-home down down ctrl-enter");
+    assert_eq!(
+        editor_text(window, cx),
+        "fn a() {\n    \n    one\n    \n    two\n}\n"
+    );
+}
+
+#[gpui::test]
+fn comment_toggle_reports_file_types_without_line_comments(cx: &mut TestAppContext) {
+    let t = ws("nocomment");
+    std::fs::write(t.0.join("data.json"), "{}\n").unwrap();
+    let (window, cx) = open(cx, &t.0);
+    window
+        .update(cx, |wb, _, _| wb.open_path(&t.0.join("data.json")))
+        .unwrap();
+    cx.simulate_keystrokes("ctrl-/");
+    assert_eq!(
+        editor_text(window, cx),
+        "{}\n",
+        "JSON has no line comments: nothing changes"
+    );
+    let msg = window
+        .read_with(cx, |wb, _| wb.model().message.clone())
+        .unwrap();
+    assert!(msg.is_some_and(|m| m.contains("no line comment")));
+}

@@ -24,6 +24,10 @@ pub enum UiEvent {
     Html(String),
     Roots(Vec<PathBuf>),
     Message(Value),
+    OpenExternal {
+        id: String,
+        url: String,
+    },
     StatusItem {
         id: String,
         visible: bool,
@@ -35,6 +39,7 @@ pub enum UiEvent {
 #[derive(Debug)]
 pub enum HostCommand {
     WebviewMessage(Value),
+    ResolveExternal { id: String, approved: bool },
     Shutdown,
 }
 
@@ -154,6 +159,12 @@ impl Panel {
         })
     }
 
+    /// Show or hide the native webview surface. It floats above GPUI content, so hiding the
+    /// right panel in the layout must hide it too.
+    pub fn set_visible(&self, visible: bool) {
+        let _ = self.webview.set_visible(visible);
+    }
+
     /// Place the webview over the right-hand panel area (logical pixels).
     pub fn set_area(&mut self, x: i32, y: i32, w: i32, h: i32) {
         let b = (x, y, w.max(1), h.max(1));
@@ -167,7 +178,14 @@ impl Panel {
         });
     }
 
-    /// Apply pending host events; returns the ones the UI itself must show (status items).
+    /// Send a user's browser-opening decision to the extension host.
+    pub fn resolve_external(&self, id: String, approved: bool) {
+        let _ = self
+            .to_host
+            .send(HostCommand::ResolveExternal { id, approved });
+    }
+
+    /// Apply pending host events; returns the ones the UI itself must show (status items and consent requests).
     pub fn pump(&mut self) -> Vec<UiEvent> {
         let mut ui = Vec::new();
         while let Ok(ev) = self.events.try_recv() {
@@ -183,7 +201,9 @@ impl Panel {
                         .load_url(&format!("{ORIGIN}/html?v={}", self.html_version));
                 }
                 UiEvent::Message(m) => self.queued.push(m),
-                other @ UiEvent::StatusItem { .. } => ui.push(other),
+                other @ (UiEvent::StatusItem { .. } | UiEvent::OpenExternal { .. }) => {
+                    ui.push(other)
+                }
             }
         }
         if self.html_version > 0 && self.loaded.load(Ordering::SeqCst) {
@@ -265,14 +285,31 @@ fn run_worker(
 
     let mut seen_pong = false;
     let mut seen_secret_denied = false;
+    let mut pending_webview: Vec<app::host::DeferredResponse> = Vec::new();
     loop {
         while let Ok(cmd) = cmds.try_recv() {
             match cmd {
                 HostCommand::Shutdown => return host.shutdown(),
+                HostCommand::ResolveExternal { id, approved } => {
+                    let _ = host.request(
+                        "env.openExternal.resolve",
+                        json!({ "id": id, "approved": approved }),
+                    )?;
+                }
                 HostCommand::WebviewMessage(m) => {
                     selftest_log(log, &format!("webview -> host: {m}"));
-                    host.send_webview_message(&handle, m)?;
+                    pending_webview.push(host.send_webview_message_deferred(&handle, m)?);
                 }
+            }
+        }
+        let mut index = 0;
+        while index < pending_webview.len() {
+            match pending_webview[index].try_complete() {
+                Some(Ok(_)) => {
+                    drop(pending_webview.swap_remove(index));
+                }
+                Some(Err(error)) => return Err(error),
+                None => index += 1,
             }
         }
         let Some(n) = host.recv_notification(Duration::from_millis(20)) else {
@@ -300,6 +337,14 @@ fn run_worker(
             "webview.postMessage" if for_us => {
                 selftest_log(log, &format!("host -> webview: {}", n.params["message"]));
                 let _ = ui.send(UiEvent::Message(n.params["message"].clone()));
+            }
+            "env.openExternal" => {
+                if let (Some(id), Some(url)) = (n.params["id"].as_str(), n.params["url"].as_str()) {
+                    let _ = ui.send(UiEvent::OpenExternal {
+                        id: id.to_owned(),
+                        url: url.to_owned(),
+                    });
+                }
             }
             "window.statusBarItem" => {
                 let _ = ui.send(UiEvent::StatusItem {

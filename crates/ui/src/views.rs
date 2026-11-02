@@ -3,8 +3,8 @@
 //! command or model operation; nothing here is decorative.
 
 use gpui::{
-    AnyElement, ClickEvent, Context, IntoElement, MouseButton, MouseDownEvent, SharedString,
-    Window, div, prelude::*, px, rgb,
+    AnyElement, Bounds, ClickEvent, Context, IntoElement, MouseButton, MouseDownEvent, Pixels,
+    ScrollHandle, SharedString, Window, canvas, div, fill, point, prelude::*, px, rgb, size,
 };
 
 use crate::menu::{self, MenuItem, MenuKind};
@@ -28,7 +28,134 @@ fn menu_left(kind: MenuKind) -> f32 {
             .sum::<f32>()
 }
 
+/// Width of the scrollbar track.
+const SCROLLBAR_W: f32 = 12.0;
+const SCROLLBAR_MIN_THUMB: f32 = 30.0;
+
+/// Top and height of the thumb inside `track`, or `None` when everything fits.
+fn thumb_geometry(handle: &ScrollHandle, track: Bounds<Pixels>) -> Option<(f32, f32)> {
+    let view = f32::from(handle.bounds().size.height);
+    let max = f32::from(handle.max_offset().height);
+    if max <= 1.0 || view <= 1.0 {
+        return None;
+    }
+    let track_h = f32::from(track.size.height);
+    let thumb = (track_h * view / (view + max)).clamp(SCROLLBAR_MIN_THUMB.min(track_h), track_h);
+    let frac = (-f32::from(handle.offset().y) / max).clamp(0.0, 1.0);
+    Some((f32::from(track.origin.y) + (track_h - thumb) * frac, thumb))
+}
+
+/// Scroll `handle` so the thumb is centred on window y position `y` (click and drag on the track).
+pub(crate) fn scroll_to_pointer(handle: &ScrollHandle, y: Pixels) {
+    let b = handle.bounds();
+    let (view, max) = (
+        f32::from(b.size.height),
+        f32::from(handle.max_offset().height),
+    );
+    if max <= 1.0 || view <= 1.0 {
+        return;
+    }
+    let thumb = (view * view / (view + max)).clamp(SCROLLBAR_MIN_THUMB.min(view), view);
+    let span = (view - thumb).max(1.0);
+    let frac = ((f32::from(y - b.origin.y) - thumb / 2.0) / span).clamp(0.0, 1.0);
+    let off = handle.offset();
+    handle.set_offset(point(off.x, px(-frac * max)));
+}
+
 impl Workbench {
+    // ---- scrollbars ------------------------------------------------------------------------------
+
+    /// A visible scrollbar for `handle`: a dark track and a light grey thumb, drawn only when the
+    /// content is larger than the view. Click or drag on it to scroll.
+    pub(crate) fn scrollbar(
+        &self,
+        id: &str,
+        handle: &ScrollHandle,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (down, paint) = (handle.clone(), handle.clone());
+        div()
+            .id(SharedString::from(format!("{id}-bar")))
+            .absolute()
+            .top_0()
+            .right_0()
+            .bottom_0()
+            .w(px(SCROLLBAR_W))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, ev: &MouseDownEvent, _w, cx| {
+                    scroll_to_pointer(&down, ev.position.y);
+                    this.scroll_drag = Some(down.clone());
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .child(
+                canvas(
+                    |_, _, _| (),
+                    move |track, (), window, _cx| {
+                        let Some((top, height)) = thumb_geometry(&paint, track) else {
+                            return;
+                        };
+                        window.paint_quad(fill(track, rgb(theme::SCROLL_TRACK)));
+                        let thumb = Bounds {
+                            origin: point(track.origin.x + px(2.), px(top)),
+                            size: size(px(SCROLLBAR_W - 4.), px(height)),
+                        };
+                        window
+                            .paint_quad(fill(thumb, rgb(theme::SCROLL_THUMB)).corner_radii(px(4.)));
+                    },
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full(),
+            )
+            .into_any_element()
+    }
+
+    /// Put a scroll area (already tracking `handle`) in a box that fills its parent, with its scrollbar.
+    pub(crate) fn scroll_box(
+        &self,
+        id: &str,
+        inner: AnyElement,
+        handle: &ScrollHandle,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .relative()
+            .flex_1()
+            .min_h_0()
+            .child(inner)
+            .child(self.scrollbar(id, handle, cx))
+            .into_any_element()
+    }
+
+    /// A vertically scrolling list of `rows` with a visible scrollbar. `max_h` caps its height
+    /// (otherwise it fills the space it is given).
+    pub(crate) fn scroll_list(
+        &self,
+        id: &'static str,
+        handle: &ScrollHandle,
+        rows: Vec<AnyElement>,
+        max_h: Option<f32>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let list = div()
+            .id(id)
+            .overflow_y_scroll()
+            .track_scroll(handle)
+            .children(rows);
+        match max_h {
+            Some(h) => div()
+                .relative()
+                .child(list.max_h(px(h)))
+                .child(self.scrollbar(id, handle, cx))
+                .into_any_element(),
+            None => self.scroll_box(id, list.size_full().into_any_element(), handle, cx),
+        }
+    }
+
     // ---- menu bar -------------------------------------------------------------------------------
 
     pub(crate) fn menu_bar(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -389,13 +516,7 @@ impl Workbench {
                     ))),
             )
             .children(empty)
-            .child(
-                div()
-                    .id("outline-list")
-                    .max_h(px(190.))
-                    .overflow_y_scroll()
-                    .children(rows),
-            )
+            .child(self.scroll_list("outline-list", &self.scrolls.outline, rows, Some(190.), cx))
             .into_any_element()
     }
 
@@ -465,7 +586,7 @@ impl Workbench {
                     ))),
             )
             .children(empty)
-            .child(div().id("task-list").flex_1().min_h_0().overflow_y_scroll().children(rows))
+            .child(self.scroll_list("task-list", &self.scrolls.tasks, rows, None, cx))
             .child(
                 div()
                     .flex_none()
@@ -605,7 +726,7 @@ impl Workbench {
                     .text_color(rgb(theme::TEXT_DIM))
                     .child("No extensions installed. Install a .vsix package you own, or start with NANTI_EXTENSION.")
             }))
-            .child(div().id("ext-list").flex_1().min_h_0().overflow_y_scroll().children(rows))
+            .child(self.scroll_list("ext-list", &self.scrolls.ext, rows, None, cx))
             .child(
                 div()
                     .flex_none()
@@ -681,13 +802,7 @@ impl Workbench {
                 id += 1;
             }
         }
-        div()
-            .id("problems-list")
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .children(rows)
-            .into_any_element()
+        self.scroll_list("problems-list", &self.scrolls.problems, rows, None, cx)
     }
 
     pub(crate) fn output_view(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -751,14 +866,7 @@ impl Workbench {
                         )),
                     ),
             )
-            .child(
-                div()
-                    .id("output-list")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .children(lines),
-            )
+            .child(self.scroll_list("output-list", &self.scrolls.output, lines, None, cx))
             .into_any_element()
     }
 

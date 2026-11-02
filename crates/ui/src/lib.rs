@@ -71,6 +71,9 @@ const EDITOR_PAD_Y: f32 = 8.0;
 const TAB_WIDTH: usize = 4;
 
 pub mod theme {
+    /// Scrollbar colors: a dark track and a clearly visible light grey thumb.
+    pub const SCROLL_TRACK: u32 = 0x2a2a2a;
+    pub const SCROLL_THUMB: u32 = 0x8f8f8f;
     pub const ACTIVITY_BAR: u32 = 0x2b2b2b;
     pub const SIDEBAR: u32 = 0x1f1f1f;
     pub const EDITOR: u32 = 0x181818;
@@ -235,6 +238,19 @@ enum Target {
     Terminal,
 }
 
+/// Scroll state of the sidebar and panel lists (the editor has its own handle).
+#[derive(Default)]
+struct Scrolls {
+    explorer: ScrollHandle,
+    outline: ScrollHandle,
+    scm: ScrollHandle,
+    tasks: ScrollHandle,
+    ext: ScrollHandle,
+    problems: ScrollHandle,
+    output: ScrollHandle,
+    search: ScrollHandle,
+}
+
 /// Cached syntax highlights for one file at one text version.
 type HlCache = (PathBuf, u64, Option<Rc<Vec<Vec<LineSpan>>>>);
 
@@ -266,6 +282,9 @@ pub struct Workbench {
     highlighter: RefCell<SyntaxHighlighter>,
     hl_cache: RefCell<Option<HlCache>>,
     scroll: ScrollHandle,
+    scrolls: Scrolls,
+    /// Scroll area whose scrollbar thumb is being dragged.
+    scroll_drag: Option<ScrollHandle>,
     /// Outline section of the explorer is expanded.
     outline_open: bool,
     dragging: bool,
@@ -299,6 +318,8 @@ impl Workbench {
             highlighter: RefCell::new(SyntaxHighlighter::new()),
             hl_cache: RefCell::new(None),
             scroll: ScrollHandle::new(),
+            scrolls: Scrolls::default(),
+            scroll_drag: None,
             outline_open: true,
             dragging: false,
             quitting: false,
@@ -556,6 +577,15 @@ impl Workbench {
             Target::Editor | Target::Palette => self.model.focus_editor_inputs(),
         }
         self.sync_focus(window);
+    }
+
+    /// (view height, scrollable range, offset) of the editor's scroll area, in pixels.
+    pub fn editor_scroll_metrics(&self) -> (f32, f32, f32) {
+        (
+            f32::from(self.scroll.bounds().size.height),
+            f32::from(self.scroll.max_offset().height),
+            f32::from(self.scroll.offset().y),
+        )
     }
 
     /// Run task `index` of the Run view in the integrated terminal (same as clicking it).
@@ -941,11 +971,29 @@ impl Workbench {
                 }
                 ("home", s) => e.move_doc_start(s),
                 ("end", s) => e.move_doc_end(s),
+                ("left", s) => e.move_word_left(s),
+                ("right", s) => e.move_word_right(s),
+                ("backspace", _) => e.delete_word_left(),
+                ("delete", _) => e.delete_word_right(),
+                ("enter", s) => e.insert_line(!s, model::INDENT_UNIT),
                 _ => return,
             }
             self.reveal_cursor();
             cx.stop_propagation();
             return cx.notify();
+        }
+
+        if m.alt && !m.control {
+            let command = match (key, m.shift) {
+                ("up", false) => Some(Command::MoveLineUp),
+                ("down", false) => Some(Command::MoveLineDown),
+                ("up", true) => Some(Command::DuplicateLineUp),
+                ("down", true) => Some(Command::DuplicateLineDown),
+                _ => None,
+            };
+            if let Some(c) = command {
+                return self.run_and_stop(c, window, cx);
+            }
         }
 
         let Some(e) = self.model.active_editor_mut() else {
@@ -963,8 +1011,10 @@ impl Workbench {
             "pagedown" => (0..20).for_each(|_| e.move_down(s)),
             "backspace" => e.backspace(),
             "delete" => e.delete_forward(),
-            "enter" => e.newline(),
-            "tab" => e.insert(&" ".repeat(TAB_WIDTH)),
+            "enter" => e.smart_newline(model::INDENT_UNIT),
+            "tab" if s => e.outdent_lines(model::INDENT_UNIT),
+            "tab" if e.has_multiline_selection() => e.indent_lines(model::INDENT_UNIT),
+            "tab" => e.insert(model::INDENT_UNIT),
             // Everything else, including typed characters, goes to the InputHandler below.
             _ => return,
         }
@@ -1001,8 +1051,13 @@ impl Workbench {
         if let Some(pos) = self.position_at(ev.position, window)
             && let Some(e) = self.model.active_editor_mut()
         {
-            e.set_cursor(pos, ev.modifiers.shift);
-            self.dragging = true;
+            match ev.click_count {
+                2 => e.select_word_at(pos),
+                n if n >= 3 => e.select_line_at(pos),
+                _ => e.set_cursor(pos, ev.modifiers.shift),
+            }
+            // a drag extends by characters, so only a single click starts one
+            self.dragging = ev.click_count < 2;
         }
         cx.notify();
     }
@@ -1036,6 +1091,15 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(handle) = self.scroll_drag.clone() {
+            if ev.pressed_button == Some(MouseButton::Left) {
+                views::scroll_to_pointer(&handle, ev.position.y);
+                cx.notify();
+            } else {
+                self.scroll_drag = None;
+            }
+            return;
+        }
         let Some(drag) = self.drag else {
             return;
         };
@@ -1067,6 +1131,10 @@ impl Workbench {
     }
 
     fn on_root_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.scroll_drag.take().is_some() {
+            cx.notify();
+            return;
+        }
         if self.drag.take().is_some() {
             cx.notify();
         }
@@ -1185,9 +1253,9 @@ impl Workbench {
                 let list =
                     div()
                         .id("explorer-list")
-                        .flex_1()
-                        .min_h_0()
+                        .size_full()
                         .overflow_y_scroll()
+                        .track_scroll(&self.scrolls.explorer)
                         .children(self.model.visible_entries().into_iter().enumerate().map(
                             |(i, e)| {
                                 let selected = (!e.is_dir && active_path.as_ref() == Some(&e.path))
@@ -1255,6 +1323,7 @@ impl Workbench {
                             },
                         ))
                         .into_any_element();
+                let list = self.scroll_box("explorer-list", list, &self.scrolls.explorer, cx);
                 div()
                     .flex()
                     .flex_col()
@@ -1690,6 +1759,7 @@ impl Workbench {
             .min_h_0()
             .child(inner)
             .children(input)
+            .child(self.scrollbar("editor", &self.scroll, cx))
     }
 
     fn bottom_panel(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -2433,14 +2503,7 @@ impl Workbench {
                             .child(SharedString::from(summary)),
                     ),
             )
-            .child(
-                div()
-                    .id("search-results")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .children(rows),
-            )
+            .child(self.scroll_list("search-results", &self.scrolls.search, rows, None, cx))
             .into_any_element()
     }
 
@@ -2734,14 +2797,7 @@ impl Workbench {
                     ),
             )
             .children(notice)
-            .child(
-                div()
-                    .id("scm-list")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .children(body),
-            )
+            .child(self.scroll_list("scm-list", &self.scrolls.scm, body, None, cx))
             .into_any_element()
     }
 

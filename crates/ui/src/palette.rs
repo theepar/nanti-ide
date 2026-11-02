@@ -64,11 +64,19 @@ pub enum Command {
     RunTask,
     About,
     Exit,
+    ToggleComment,
+    MoveLineUp,
+    MoveLineDown,
+    DuplicateLineUp,
+    DuplicateLineDown,
+    DeleteLine,
+    IndentLines,
+    OutdentLines,
 }
 
 impl Command {
     /// Every command shown in the palette. Only things that really work are listed.
-    pub const ALL: [Command; 51] = [
+    pub const ALL: [Command; 59] = [
         Command::CommandPalette,
         Command::QuickOpen,
         Command::Save,
@@ -120,6 +128,14 @@ impl Command {
         Command::RunTask,
         Command::About,
         Command::Exit,
+        Command::ToggleComment,
+        Command::MoveLineUp,
+        Command::MoveLineDown,
+        Command::DuplicateLineUp,
+        Command::DuplicateLineDown,
+        Command::DeleteLine,
+        Command::IndentLines,
+        Command::OutdentLines,
     ];
 
     pub fn title(self) -> &'static str {
@@ -175,6 +191,14 @@ impl Command {
             Command::RunTask => "Run: Show Tasks",
             Command::About => "Help: About nanti.",
             Command::Exit => "File: Exit",
+            Command::ToggleComment => "Edit: Toggle Line Comment",
+            Command::MoveLineUp => "Edit: Move Line Up",
+            Command::MoveLineDown => "Edit: Move Line Down",
+            Command::DuplicateLineUp => "Edit: Copy Line Up",
+            Command::DuplicateLineDown => "Edit: Copy Line Down",
+            Command::DeleteLine => "Edit: Delete Line",
+            Command::IndentLines => "Edit: Indent Lines",
+            Command::OutdentLines => "Edit: Outdent Lines",
         }
     }
 
@@ -208,6 +232,12 @@ impl Command {
             Command::ToggleRightPanel => Some("Ctrl+Alt+B"),
             Command::ShowSourceControl => Some("Ctrl+Shift+G"),
             Command::GoToLine => Some("Ctrl+G"),
+            Command::ToggleComment => Some("Ctrl+/"),
+            Command::MoveLineUp => Some("Alt+Up"),
+            Command::MoveLineDown => Some("Alt+Down"),
+            Command::DuplicateLineUp => Some("Shift+Alt+Up"),
+            Command::DuplicateLineDown => Some("Shift+Alt+Down"),
+            Command::DeleteLine => Some("Ctrl+Shift+K"),
             Command::RenameItem => Some("F2"),
             _ => None,
         }
@@ -230,6 +260,8 @@ impl Command {
             ("f", false) => Command::Find,
             ("g", true) => Command::ShowSourceControl,
             ("g", false) => Command::GoToLine,
+            ("/", _) => Command::ToggleComment,
+            ("k", true) => Command::DeleteLine,
             ("h", _) => Command::Replace,
             ("`", true) => Command::NewTerminal,
             ("`", false) => Command::ToggleTerminal,
@@ -702,7 +734,7 @@ mod tests {
         for c in Command::ALL {
             if let Some(kb) = c.keybinding() {
                 assert!(
-                    kb.contains("Ctrl+") || kb.contains("F3") || kb == "F2",
+                    kb.contains("Ctrl+") || kb.contains("Alt+") || kb.contains("F3") || kb == "F2",
                     "{kb}"
                 );
             }

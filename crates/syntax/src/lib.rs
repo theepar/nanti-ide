@@ -13,7 +13,7 @@ use std::path::Path;
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
 mod analysis;
-pub use analysis::{Diagnostic, Symbol, diagnostics, outline};
+pub use analysis::{diagnostics, outline, Diagnostic, Symbol};
 
 /// Files larger than this are shown unhighlighted (re-parsing on every edit would lag).
 pub const MAX_BYTES: usize = 1_500_000;
@@ -492,10 +492,9 @@ mod tests {
             Some(Language::Tsx)
         );
         let mut h = SyntaxHighlighter::new();
-        assert!(
-            h.highlight(Language::Rust, &"a".repeat(MAX_BYTES + 1))
-                .is_none()
-        );
+        assert!(h
+            .highlight(Language::Rust, &"a".repeat(MAX_BYTES + 1))
+            .is_none());
         let empty = h.highlight(Language::Rust, "").unwrap();
         assert_eq!(empty, vec![Vec::<LineSpan>::new()]);
         // broken code still yields spans (tree-sitter is error tolerant) and never panics

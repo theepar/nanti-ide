@@ -19,6 +19,8 @@ use crate::tasks::Task;
 
 /// Directories never listed in the explorer (heavy or tool-owned).
 const HIDDEN_DIRS: [&str; 3] = [".git", "node_modules", "target"];
+/// One indentation level (Tab, auto-indent).
+pub const INDENT_UNIT: &str = "    ";
 /// Files above this size are not loaded into the editor (viewer limit for now).
 pub const MAX_OPEN_BYTES: u64 = 2 * 1024 * 1024;
 
@@ -488,6 +490,26 @@ impl Model {
             .map_or_else(|| "no repository".to_owned(), |b| format!("⎇ {b}"))
     }
 
+    /// Run an editing command on the active text editor, if there is one.
+    fn edit_active(&mut self, f: impl FnOnce(&mut Editor)) {
+        if let Some(e) = self.active_editor_mut() {
+            f(e);
+        }
+    }
+
+    /// Comment or uncomment the selected lines using the file type's line comment marker.
+    pub fn toggle_comment(&mut self) {
+        let Some(path) = self.active().map(|t| t.path.clone()) else {
+            return;
+        };
+        match comment_prefix(&path) {
+            Some(prefix) => self.edit_active(|e| {
+                e.toggle_line_comment(prefix);
+            }),
+            None => self.say("Editor", "This file type has no line comment syntax"),
+        }
+    }
+
     pub fn dirty_count(&self) -> usize {
         self.tabs.iter().filter(|t| t.is_dirty()).count()
     }
@@ -722,6 +744,18 @@ impl Model {
             Command::ShowRun => self.show_activity(Activity::Run),
             Command::ShowExtensions => self.show_activity(Activity::Extensions),
             Command::GitRefresh => self.scm.refresh(),
+            Command::ToggleComment => self.toggle_comment(),
+            Command::MoveLineUp => self.edit_active(|e| {
+                e.move_lines(false);
+            }),
+            Command::MoveLineDown => self.edit_active(|e| {
+                e.move_lines(true);
+            }),
+            Command::DuplicateLineUp => self.edit_active(|e| e.duplicate_lines(false)),
+            Command::DuplicateLineDown => self.edit_active(|e| e.duplicate_lines(true)),
+            Command::DeleteLine => self.edit_active(Editor::delete_lines),
+            Command::IndentLines => self.edit_active(|e| e.indent_lines(INDENT_UNIT)),
+            Command::OutdentLines => self.edit_active(|e| e.outdent_lines(INDENT_UNIT)),
             Command::NewFile => self.cmd_new(false),
             Command::NewFolder => self.cmd_new(true),
             Command::SaveAll => self.save_all(),
@@ -1056,6 +1090,19 @@ fn load(path: &Path) -> TabContent {
         },
         Err(e) => TabContent::Unavailable(format!("Cannot read file: {e}")),
     }
+}
+
+/// Line comment marker of a file type (`None` where there is none, such as JSON or Markdown).
+pub fn comment_prefix(path: &Path) -> Option<&'static str> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "rs" | "js" | "mjs" | "cjs" | "jsx" | "ts" | "tsx" | "mts" | "cts" | "go" | "dart"
+        | "java" | "c" | "h" | "cpp" | "hpp" | "cs" | "kt" | "swift" | "scala" | "php" => "//",
+        "py" | "rb" | "sh" | "bash" | "ps1" | "toml" | "yaml" | "yml" | "conf" | "gitignore"
+        | "r" | "pl" => "#",
+        "sql" | "lua" | "hs" => "--",
+        _ => return None,
+    })
 }
 
 pub fn language_of(path: &Path) -> &'static str {

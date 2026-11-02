@@ -241,10 +241,9 @@ mod tests {
         let d = diagnostics(Language::Rust, "fn ok() {}\nfn broken( {\n    let = ;\n}\n");
         assert!(!d.is_empty());
         assert!(d.iter().all(|d| d.line >= 1), "line 0 is valid: {d:?}");
-        assert!(
-            d.iter()
-                .any(|d| d.message.contains("error") || d.message.starts_with("Missing"))
-        );
+        assert!(d
+            .iter()
+            .any(|d| d.message.contains("error") || d.message.starts_with("Missing")));
         assert!(d.iter().all(|d| d.len >= 1));
     }
 
@@ -268,10 +267,9 @@ mod tests {
         let src = "fn a( {\n".repeat(500);
         let d = diagnostics(Language::Rust, &src);
         assert!(d.len() <= MAX_DIAGNOSTICS);
-        assert!(
-            d.windows(2)
-                .all(|w| (w[0].line, w[0].col) <= (w[1].line, w[1].col))
-        );
+        assert!(d
+            .windows(2)
+            .all(|w| (w[0].line, w[0].col) <= (w[1].line, w[1].col)));
     }
 
     #[test]

@@ -1,3 +1,6 @@
+// Release builds are a pure GUI app: no console window next to the IDE.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -31,7 +34,32 @@ fn host_config_from_env(config_dir: Option<&std::path::Path>) -> Option<HostConf
     })
 }
 
+/// Without a console the "windows" subsystem gives console children (the Node extension host) a
+/// visible window of their own. Give the process a hidden console that they inherit instead.
+#[cfg(all(windows, not(debug_assertions)))]
+fn hide_console() {
+    use std::ffi::c_void;
+    #[link(name = "kernel32")]
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn AllocConsole() -> i32;
+        fn GetConsoleWindow() -> *mut c_void;
+        fn ShowWindow(hwnd: *mut c_void, cmd: i32) -> i32;
+    }
+    // SAFETY: plain Win32 calls with no pointers owned by us; a null window handle is checked.
+    unsafe {
+        if AllocConsole() != 0 {
+            let hwnd = GetConsoleWindow();
+            if !hwnd.is_null() {
+                ShowWindow(hwnd, 0); // SW_HIDE
+            }
+        }
+    }
+}
+
 fn main() {
+    #[cfg(all(windows, not(debug_assertions)))]
+    hide_console();
     Application::new().run(|cx: &mut App| {
         let bounds = Bounds::centered(None, size(px(1280.), px(800.)), cx);
         let config_dir =
