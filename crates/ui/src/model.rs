@@ -222,6 +222,7 @@ pub struct Model {
     pub config_dir: Option<PathBuf>,
     pub panel_extension: Option<PathBuf>,
     pub panel_icon: Option<PathBuf>,
+    pub panel_running: bool,
     pub discord: crate::discord::DiscordState,
     pub clipboard_request: Option<String>,
     pub quit_request: bool,
@@ -280,6 +281,7 @@ impl Model {
             config_dir: None,
             panel_extension: None,
             panel_icon: None,
+            panel_running: false,
             discord: crate::discord::DiscordState::default(),
             clipboard_request: None,
             quit_request: false,
@@ -1076,8 +1078,14 @@ impl Model {
                 }
             }
             Command::OpenExtensionPanel => {
-                if self.panel_extension.is_some() {
+                if self.panel_running {
                     self.open_extension_tab();
+                } else if let (Some(dir), Some(cfg)) =
+                    (self.panel_extension.clone(), self.config_dir.clone())
+                    && let Some((chosen, view)) = crate::extensions::load_panel_choice(&cfg)
+                    && chosen == dir
+                {
+                    self.panel_request = Some((dir, view));
                 } else {
                     self.say("Extensions", "No extension panel is set; install one first");
                 }
@@ -2167,6 +2175,12 @@ mod tests {
         m.run_command(Command::OpenExtensionPanel);
         assert!(m.tabs.is_empty(), "nothing to show without an extension");
         m.panel_extension = Some(PathBuf::from("anthropic.claude-code"));
+        m.run_command(Command::OpenExtensionPanel);
+        assert!(
+            m.tabs.is_empty(),
+            "a panel that is not running is not opened as a tab"
+        );
+        m.panel_running = true;
         m.run_command(Command::OpenExtensionPanel);
         m.run_command(Command::OpenExtensionPanel);
         let webviews = m

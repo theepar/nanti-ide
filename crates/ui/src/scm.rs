@@ -30,6 +30,7 @@ pub enum Job {
     Unstage(Vec<String>),
     UnstageAll,
     Commit(String),
+    CommitAll(String),
     Checkout(String),
     NewBranch(String),
     Discard(Vec<String>),
@@ -377,8 +378,8 @@ impl ScmState {
             Some("no Git repository".to_owned())
         } else if msg.is_empty() {
             Some("enter a commit message first".to_owned())
-        } else if self.staged_count() == 0 {
-            Some("nothing is staged; stage some changes first".to_owned())
+        } else if self.staged_count() == 0 && self.committable_changes() == 0 {
+            Some("nothing to commit".to_owned())
         } else {
             None
         };
@@ -386,8 +387,16 @@ impl ScmState {
             self.notice = Some((true, r.clone()));
             return Err(r);
         }
-        self.request(Job::Commit(msg));
+        if self.staged_count() == 0 {
+            self.request(Job::CommitAll(msg));
+        } else {
+            self.request(Job::Commit(msg));
+        }
         Ok(())
+    }
+
+    pub fn committable_changes(&self) -> usize {
+        self.status.as_ref().map_or(0, |s| s.changes().count())
     }
 
     pub fn toggle_group(&mut self, g: GroupKind) {
@@ -592,6 +601,13 @@ fn execute(root: &Path, repo: Option<Repo>, job: Job) -> Done {
             }
             Err(e) => done.notice = Some((true, e.to_string())),
         },
+        Job::CommitAll(msg) => match repo.stage_all().and_then(|()| repo.commit(&msg)) {
+            Ok(summary) => {
+                done.committed = true;
+                done.notice = Some((false, format!("Committed: {summary}")));
+            }
+            Err(e) => done.notice = Some((true, e.to_string())),
+        },
         Job::Commit(msg) => match repo.commit(&msg) {
             Ok(summary) => {
                 done.committed = true;
@@ -751,10 +767,15 @@ mod tests {
         let mut s = bare(vec![entry("a.txt", None, Some(Change::Modified))]);
         s.enabled = true;
         assert_eq!(s.commit(), Err("enter a commit message first".to_owned()));
-        s.message.insert("msg");
-        assert!(s.commit().unwrap_err().contains("nothing is staged"));
-        assert!(matches!(s.notice, Some((true, _))));
-        assert!(!s.is_busy(), "refused before any git process was started");
+        let mut clean = bare(Vec::new());
+        clean.enabled = true;
+        clean.message.insert("msg");
+        assert!(clean.commit().unwrap_err().contains("nothing to commit"));
+        assert!(matches!(clean.notice, Some((true, _))));
+        assert!(
+            !clean.is_busy(),
+            "refused before any git process was started"
+        );
     }
 
     #[test]

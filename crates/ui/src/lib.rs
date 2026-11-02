@@ -526,6 +526,7 @@ impl Workbench {
 
     pub fn attach_panel(&mut self, panel: Panel) {
         self.panel = Some(panel);
+        self.model.panel_running = true;
         if self.model.panel_extension.is_some() {
             self.model.open_extension_tab();
         }
@@ -551,6 +552,7 @@ impl Workbench {
         match Panel::new(window, events, to_host, diag_log) {
             Ok(panel) => {
                 self.panel = Some(panel);
+                self.model.panel_running = true;
                 self.webview_applied = Some((-1, -1, 0, 0));
                 self.status_items.clear();
                 self.model.panel_extension = Some(dir);
@@ -3887,11 +3889,17 @@ impl Workbench {
                             .items_center()
                             .gap_2()
                             .child(
-                                Self::scm_button("scm-commit", "Commit", staged > 0)
-                                    .flex_1()
-                                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                Self::scm_button(
+                                    "scm-commit",
+                                    "Commit",
+                                    staged > 0 || s.committable_changes() > 0,
+                                )
+                                .flex_1()
+                                .on_click(cx.listener(
+                                    |this, _: &ClickEvent, window, cx| {
                                         this.apply_command(Command::GitCommit, window, cx);
-                                    })),
+                                    },
+                                )),
                             )
                             .child(
                                 div()

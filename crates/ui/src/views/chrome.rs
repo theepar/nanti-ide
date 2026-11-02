@@ -261,7 +261,7 @@ impl Workbench {
             ("Find in Files", Command::FindInFiles),
             ("Source Control", Command::ShowSourceControl),
             ("Open Terminal", Command::ToggleTerminal),
-            ("About nanti.", Command::About),
+            ("About nanti", Command::About),
         ];
         div()
             .flex()
@@ -275,7 +275,7 @@ impl Workbench {
                     .text_size(px(32.))
                     .font_weight(FontWeight::BOLD)
                     .text_color(rgb(0xffffff))
-                    .child("nanti."),
+                    .child("nanti"),
             )
             .child(
                 div()

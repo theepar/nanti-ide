@@ -735,7 +735,7 @@ pub fn remove_dir_force(dir: &Path) -> std::io::Result<()> {
 pub fn uninstall(config_dir: &Path, dir: &Path) -> Result<(), String> {
     let root = extensions_dir(config_dir);
     if dir.parent() != Some(root.as_path()) || !dir.is_dir() {
-        return Err("only extensions installed by nanti. can be removed here".into());
+        return Err("only extensions installed by nanti can be removed here".into());
     }
     remove_dir_force(dir).map_err(|e| e.to_string())
 }

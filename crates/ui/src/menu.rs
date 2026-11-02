@@ -207,6 +207,6 @@ mod tests {
     fn menu_labels_drop_the_category() {
         assert_eq!(Command::Save.menu_label(), "Save");
         assert_eq!(Command::GoToLine.menu_label(), "Go to Line...");
-        assert_eq!(Command::About.menu_label(), "About nanti.");
+        assert_eq!(Command::About.menu_label(), "About nanti");
     }
 }

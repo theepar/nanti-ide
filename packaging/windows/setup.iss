@@ -1,4 +1,4 @@
-#define MyAppName "nanti."
+#define MyAppName "nanti"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "theepar"
 #define MyAppURL "https://github.com/theepar/nanti-ide"

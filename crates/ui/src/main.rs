@@ -68,15 +68,17 @@ fn main() {
             let bounds = Bounds::centered(None, size(px(1280.), px(800.)), cx);
             let config_dir = ui::layout::layout_path()
                 .and_then(|p| p.parent().map(std::path::Path::to_path_buf));
-            let config = host_config_from_env(config_dir.as_deref());
-            let panel_extension = config.as_ref().map(|c| c.extension_dir.clone());
+            // The extension panel starts only when asked for, unless a developer forces it with NANTI_EXTENSION.
+            let config = std::env::var_os("NANTI_EXTENSION")
+                .and_then(|_| host_config_from_env(config_dir.as_deref()));
+            let panel_extension = panel_choice(config_dir.as_deref()).map(|(dir, _)| dir);
             let root = std::env::var_os("NANTI_WORKSPACE").map(PathBuf::from);
             let window = cx
                 .open_window(
                     WindowOptions {
                         window_bounds: Some(WindowBounds::Windowed(bounds)),
                         titlebar: Some(TitlebarOptions {
-                            title: Some("nanti.".into()),
+                            title: Some("nanti".into()),
                             appears_transparent: true,
                             ..Default::default()
                         }),

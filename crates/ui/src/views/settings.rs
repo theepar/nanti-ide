@@ -213,7 +213,7 @@ impl Workbench {
                     ))
                     .child(Self::setting_row(
                         "Panel",
-                        "Terminal, problems and output. Hidden when nanti. starts.",
+                        "Terminal, problems and output. Hidden when nanti starts.",
                         self.switch("set-panel", l.panel, Command::TogglePanel, cx),
                     ))
                     .child(Self::setting_row(

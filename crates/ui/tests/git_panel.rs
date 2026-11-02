@@ -147,7 +147,6 @@ fn stage_unstage_and_commit_change_the_real_repository() {
 
     assert!(m.scm.commit().is_err());
     m.scm.message.insert("only message");
-    assert!(m.scm.commit().unwrap_err().contains("nothing is staged"));
     assert_eq!(git(&t.0, &["rev-list", "--count", "HEAD"]).trim(), "1");
 
     m.scm.stage("a.txt");
@@ -175,6 +174,43 @@ fn stage_unstage_and_commit_change_the_real_repository() {
             .as_deref()
             .is_some_and(|s| s.starts_with("Committed"))
     );
+}
+
+#[test]
+fn committing_with_nothing_staged_commits_every_change() {
+    let t = repo("commitall");
+    std::fs::write(
+        t.0.join("a.txt"),
+        "one
+TWO
+three
+",
+    )
+    .unwrap();
+    std::fs::write(
+        t.0.join("new.txt"),
+        "n
+",
+    )
+    .unwrap();
+    let mut m = model(&t.0);
+    settle(&mut m);
+    assert!(m.scm.change_count() > 0);
+    assert_eq!(m.scm.staged_count(), 0);
+    m.scm.message.insert("all at once");
+    assert!(m.scm.commit().is_ok());
+    settle(&mut m);
+    assert_eq!(
+        git(&t.0, &["log", "-1", "--format=%s"]).trim(),
+        "all at once"
+    );
+    assert_eq!(
+        m.scm.change_count(),
+        0,
+        "tracked and untracked files were all committed"
+    );
+    m.scm.message.insert("again");
+    assert!(m.scm.commit().unwrap_err().contains("nothing to commit"));
 }
 
 #[test]

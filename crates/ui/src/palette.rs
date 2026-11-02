@@ -224,7 +224,7 @@ impl Command {
             Command::ClearOutput => "Output: Clear",
             Command::InstallVsix => "Extensions: Install from VSIX...",
             Command::RunTask => "Run: Show Tasks",
-            Command::About => "Help: About nanti.",
+            Command::About => "Help: About nanti",
             Command::Exit => "File: Exit",
             Command::OpenSettings => "Preferences: Open Settings",
             Command::ToggleDiscord => "Discord: Toggle Rich Presence",

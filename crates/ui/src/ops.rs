@@ -452,17 +452,17 @@ impl Model {
             return;
         }
         let text = format!(
-            "nanti.  version {}\n\nCode now. Not later.\nA lightweight code editor built natively in Rust.\n\n\
+            "nanti  version {}\n\nCode now. Not later.\nA lightweight code editor built natively in Rust.\n\n\
              Built with open-source software: GPUI (Apache-2.0), alacritty_terminal (Apache-2.0), tree-sitter (MIT), \
              ropey (MIT), wry (Apache-2.0 / MIT) and others. Every dependency, its license and its authors are listed in \
              THIRD_PARTY_NOTICES.md and in the README credits; their licenses are kept unmodified.\n\n\
              Third-party extensions (for example Claude Code or Codex) are not included; you install them yourself \
-             under their own licenses. nanti. is not affiliated with Microsoft, Zed Industries, Anthropic, OpenAI or Google.",
+             under their own licenses. nanti is not affiliated with Microsoft, Zed Industries, Anthropic, OpenAI or Google.",
             env!("CARGO_PKG_VERSION")
         );
         self.tabs.push(Tab {
             path,
-            title: "About nanti.".to_owned(),
+            title: "About nanti".to_owned(),
             content: TabContent::Unavailable(text),
             stamp: None,
             language_override: None,
