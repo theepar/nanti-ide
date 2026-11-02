@@ -68,14 +68,13 @@ fn main() {
                 .map(PathBuf::from)
                 .or_else(|| std::env::current_dir().ok())
                 .unwrap_or_else(|| PathBuf::from("."));
-            if root.ends_with("target\\debug")
+            if (root.ends_with("target\\debug")
                 || root.ends_with("target/debug")
                 || root.ends_with("target\\release")
-                || root.ends_with("target/release")
+                || root.ends_with("target/release"))
+                && let Some(repo) = root.parent().and_then(|p| p.parent())
             {
-                if let Some(repo) = root.parent().and_then(|p| p.parent()) {
-                    root = repo.to_path_buf();
-                }
+                root = repo.to_path_buf();
             }
             let window = cx
                 .open_window(

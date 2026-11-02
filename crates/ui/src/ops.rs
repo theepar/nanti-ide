@@ -552,8 +552,8 @@ impl Model {
         );
         if total > 0 && done >= total {
             "Unpacking...".to_owned()
-        } else if total > 0 {
-            format!("Installing {}%", done * 100 / total)
+        } else if let Some(percent) = (done * 100).checked_div(total) {
+            format!("Installing {percent}%")
         } else if done > 0 {
             format!("Installing {} MB", done / 1_000_000)
         } else {

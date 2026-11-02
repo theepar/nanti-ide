@@ -200,10 +200,10 @@ impl LspServer {
                     if trimmed.is_empty() {
                         break;
                     }
-                    if let Some(rest) = trimmed.strip_prefix("Content-Length:") {
-                        if let Ok(len) = rest.trim().parse::<usize>() {
-                            content_length = Some(len);
-                        }
+                    if let Some(rest) = trimmed.strip_prefix("Content-Length:")
+                        && let Ok(len) = rest.trim().parse::<usize>()
+                    {
+                        content_length = Some(len);
                     }
                 }
 
@@ -220,49 +220,42 @@ impl LspServer {
 
                 if val.get("method").and_then(|m| m.as_str())
                     == Some("textDocument/publishDiagnostics")
+                    && let Some(params) = val.get("params")
+                    && let Some(uri) = params.get("uri").and_then(|u| u.as_str())
+                    && let Some(path) = uri_to_path(uri)
                 {
-                    if let Some(params) = val.get("params") {
-                        if let Some(uri) = params.get("uri").and_then(|u| u.as_str()) {
-                            if let Some(path) = uri_to_path(uri) {
-                                let mut items = Vec::new();
-                                if let Some(arr) =
-                                    params.get("diagnostics").and_then(|d| d.as_array())
-                                {
-                                    for d in arr {
-                                        let line = d
-                                            .pointer("/range/start/line")
-                                            .and_then(|l| l.as_u64())
-                                            .unwrap_or(0)
-                                            as usize;
-                                        let col = d
-                                            .pointer("/range/start/character")
-                                            .and_then(|c| c.as_u64())
-                                            .unwrap_or(0)
-                                            as usize;
-                                        let end_col = d
-                                            .pointer("/range/end/character")
-                                            .and_then(|c| c.as_u64())
-                                            .unwrap_or(col as u64 + 1)
-                                            as usize;
-                                        let len = end_col.saturating_sub(col).max(1);
-                                        let message = d
-                                            .get("message")
-                                            .and_then(|m| m.as_str())
-                                            .unwrap_or("Error")
-                                            .to_owned();
+                    let mut items = Vec::new();
+                    if let Some(arr) = params.get("diagnostics").and_then(|d| d.as_array()) {
+                        for d in arr {
+                            let line = d
+                                .pointer("/range/start/line")
+                                .and_then(|l| l.as_u64())
+                                .unwrap_or(0) as usize;
+                            let col = d
+                                .pointer("/range/start/character")
+                                .and_then(|c| c.as_u64())
+                                .unwrap_or(0) as usize;
+                            let end_col = d
+                                .pointer("/range/end/character")
+                                .and_then(|c| c.as_u64())
+                                .unwrap_or(col as u64 + 1)
+                                as usize;
+                            let len = end_col.saturating_sub(col).max(1);
+                            let message = d
+                                .get("message")
+                                .and_then(|m| m.as_str())
+                                .unwrap_or("Error")
+                                .to_owned();
 
-                                        items.push(Diagnostic {
-                                            line,
-                                            col,
-                                            len,
-                                            message,
-                                        });
-                                    }
-                                }
-                                let _ = event_tx.send(LspEvent::Diagnostics { path, items });
-                            }
+                            items.push(Diagnostic {
+                                line,
+                                col,
+                                len,
+                                message,
+                            });
                         }
                     }
+                    let _ = event_tx.send(LspEvent::Diagnostics { path, items });
                 }
             }
         });
@@ -340,10 +333,10 @@ impl LspManager {
         if !matches!(lang, Language::Rust | Language::Go) || self.unavailable.contains(&lang) {
             return None;
         }
-        if !self.servers.contains_key(&lang) {
+        if let std::collections::hash_map::Entry::Vacant(e) = self.servers.entry(lang) {
             match LspServer::spawn(lang, root) {
                 Some(s) => {
-                    self.servers.insert(lang, s);
+                    e.insert(s);
                 }
                 None => {
                     self.unavailable.insert(lang);
@@ -418,10 +411,10 @@ pub fn path_to_uri(path: &Path) -> String {
 }
 
 pub fn uri_to_path(uri: &str) -> Option<PathBuf> {
-    if let Ok(url) = url::Url::parse(uri) {
-        if let Ok(path) = url.to_file_path() {
-            return Some(path);
-        }
+    if let Ok(url) = url::Url::parse(uri)
+        && let Ok(path) = url.to_file_path()
+    {
+        return Some(path);
     }
     let stripped = uri.strip_prefix("file:///")?;
     Some(PathBuf::from(stripped.replace('/', "\\")))

@@ -241,6 +241,7 @@ struct Scrolls {
 }
 
 type HlCache = (PathBuf, u64, Option<Rc<Vec<Vec<LineSpan>>>>);
+type ExplorerCache = (std::time::Instant, u64, Rc<Vec<model::Entry>>);
 
 pub struct Workbench {
     model: Model,
@@ -267,7 +268,7 @@ pub struct Workbench {
     term_metrics: GridMetrics,
     highlighter: RefCell<SyntaxHighlighter>,
     hl_cache: RefCell<Option<HlCache>>,
-    explorer_cache: RefCell<Option<(std::time::Instant, u64, Rc<Vec<model::Entry>>)>>,
+    explorer_cache: RefCell<Option<ExplorerCache>>,
     scroll: ScrollHandle,
     scrolls: Scrolls,
     scroll_drag: Option<ScrollHandle>,
@@ -439,42 +440,38 @@ impl Workbench {
         changed |= self.model.pump_problems();
         changed |= self.model.pump_marketplace();
 
-        if let Some(tab) = self.model.active() {
-            if let TabContent::Text(e) = &tab.content {
-                let v = e.version();
-                let last = self
-                    .last_synced_versions
-                    .get(&tab.path)
-                    .copied()
-                    .unwrap_or(0);
-                if v != last {
-                    self.last_synced_versions.insert(tab.path.clone(), v);
-                    let uri = format!("file:///{}", tab.path.to_string_lossy().replace('\\', "/"));
-                    self.model
-                        .doc_sync_events
-                        .push(crate::model::DocSyncEvent::Change {
-                            uri,
-                            version: v,
-                            text: e.text(),
-                        });
-                }
+        if let Some(tab) = self.model.active()
+            && let TabContent::Text(e) = &tab.content
+        {
+            let v = e.version();
+            let last = self
+                .last_synced_versions
+                .get(&tab.path)
+                .copied()
+                .unwrap_or(0);
+            if v != last {
+                self.last_synced_versions.insert(tab.path.clone(), v);
+                let uri = format!("file:///{}", tab.path.to_string_lossy().replace('\\', "/"));
+                self.model
+                    .doc_sync_events
+                    .push(crate::model::DocSyncEvent::Change {
+                        uri,
+                        version: v,
+                        text: e.text(),
+                    });
             }
         }
-        if let Some(tab) = self.model.active() {
-            if let Some(lang) = Language::from_path(&tab.path) {
-                if matches!(lang, Language::Rust | Language::Go) {
-                    if let Some(server) = self.lsp.ensure_server(lang, &self.model.root) {
-                        if !server.opened.contains(&tab.path) {
-                            if let TabContent::Text(e) = &tab.content {
-                                server.did_open(&tab.path, lang, e.version(), &e.text());
-                            }
-                        }
-                    }
-                }
-            }
+        if let Some(tab) = self.model.active()
+            && let Some(lang) = Language::from_path(&tab.path)
+            && matches!(lang, Language::Rust | Language::Go)
+            && let Some(server) = self.lsp.ensure_server(lang, &self.model.root)
+            && !server.opened.contains(&tab.path)
+            && let TabContent::Text(e) = &tab.content
+        {
+            server.did_open(&tab.path, lang, e.version(), &e.text());
         }
         let sync_events: Vec<crate::model::DocSyncEvent> =
-            self.model.doc_sync_events.drain(..).collect();
+            std::mem::take(&mut self.model.doc_sync_events);
         for ev in &sync_events {
             if let Some(panel) = self.panel.as_ref() {
                 match ev {
@@ -502,39 +499,36 @@ impl Workbench {
                 crate::model::DocSyncEvent::Open {
                     uri, version, text, ..
                 } => {
-                    if let Some(path) = crate::lsp::uri_to_path(uri) {
-                        if let Some(lang) = Language::from_path(&path) {
-                            if let Some(server) = self.lsp.ensure_server(lang, &self.model.root) {
-                                server.did_open(&path, lang, *version, text);
-                            }
-                        }
+                    if let Some(path) = crate::lsp::uri_to_path(uri)
+                        && let Some(lang) = Language::from_path(&path)
+                        && let Some(server) = self.lsp.ensure_server(lang, &self.model.root)
+                    {
+                        server.did_open(&path, lang, *version, text);
                     }
                 }
                 crate::model::DocSyncEvent::Change { uri, version, text } => {
-                    if let Some(path) = crate::lsp::uri_to_path(uri) {
-                        if let Some(lang) = Language::from_path(&path) {
-                            if let Some(server) = self.lsp.get_mut(lang) {
-                                server.did_change(&path, *version, text);
-                            }
-                        }
+                    if let Some(path) = crate::lsp::uri_to_path(uri)
+                        && let Some(lang) = Language::from_path(&path)
+                        && let Some(server) = self.lsp.get_mut(lang)
+                    {
+                        server.did_change(&path, *version, text);
                     }
                 }
                 crate::model::DocSyncEvent::Save { uri } => {
-                    if let Some(path) = crate::lsp::uri_to_path(uri) {
-                        if let Some(lang) = Language::from_path(&path) {
-                            if let Some(server) = self.lsp.get_mut(lang) {
-                                server.did_save(&path);
-                            }
-                        }
+                    if let Some(path) = crate::lsp::uri_to_path(uri)
+                        && let Some(lang) = Language::from_path(&path)
+                        && let Some(server) = self.lsp.get_mut(lang)
+                    {
+                        server.did_save(&path);
                     }
                 }
                 crate::model::DocSyncEvent::Close { uri } => {
-                    if let Some(path) = crate::lsp::uri_to_path(uri) {
-                        if let Some(lang) = Language::from_path(&path) {
-                            // Never start a server just to close a document.
-                            if let Some(server) = self.lsp.get_mut(lang) {
-                                server.did_close(&path);
-                            }
+                    if let Some(path) = crate::lsp::uri_to_path(uri)
+                        && let Some(lang) = Language::from_path(&path)
+                    {
+                        // Never start a server just to close a document.
+                        if let Some(server) = self.lsp.get_mut(lang) {
+                            server.did_close(&path);
                         }
                     }
                 }
@@ -598,16 +592,16 @@ impl Workbench {
                     text,
                     add_new_line,
                 } => {
-                    if let Some(idx) = self.find_terminal_by_ext_id(&id) {
-                        if let Some(term) = self.terminals.get(idx) {
-                            let payload = if add_new_line {
-                                format!("{text}\r\n")
-                            } else {
-                                text
-                            };
-                            term.term.send_text(&payload);
-                            changed = true;
-                        }
+                    if let Some(idx) = self.find_terminal_by_ext_id(&id)
+                        && let Some(term) = self.terminals.get(idx)
+                    {
+                        let payload = if add_new_line {
+                            format!("{text}\r\n")
+                        } else {
+                            text
+                        };
+                        term.term.send_text(&payload);
+                        changed = true;
                     }
                 }
                 UiEvent::TerminalShow { id, preserve_focus } => {
@@ -868,15 +862,14 @@ impl Workbench {
     }
 
     fn accept_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(p) = self.model.palette.as_ref() {
-            if let Some(crate::palette::PaletteAction::Command(
+        if let Some(p) = self.model.palette.as_ref()
+            && let Some(crate::palette::PaletteAction::Command(
                 c @ (Command::OpenFile | Command::OpenFolder),
             )) = p.selected_action()
-            {
-                self.model.close_palette();
-                self.apply_command(c, window, cx);
-                return;
-            }
+        {
+            self.model.close_palette();
+            self.apply_command(c, window, cx);
+            return;
         }
         self.model.accept_palette();
         self.process_terminal_request();

@@ -376,8 +376,10 @@ mod tests {
 
     #[test]
     fn a_docked_side_panel_is_clamped_and_leaves_room_for_the_editor() {
-        let mut l = Layout::default();
-        l.panel_pos = PanelPos::Left;
+        let mut l = Layout {
+            panel_pos: PanelPos::Left,
+            ..Layout::default()
+        };
         l.set_panel_width(5000.0, 1280.0);
         assert!(
             l.panel_width <= 1280.0 - EDITOR_MIN_WIDTH - 48.0 - l.sidebar_width - l.right_width
