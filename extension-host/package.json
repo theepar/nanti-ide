@@ -1,0 +1,11 @@
+{
+  "name": "nanti-extension-host",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Out-of-process Node host for VS Code extensions (M0 spike)",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test tests/"
+  }
+}
