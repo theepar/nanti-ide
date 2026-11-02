@@ -1570,179 +1570,168 @@ impl Workbench {
 
     pub(crate) fn extensions_panel(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let mut list_rows: Vec<AnyElement> = Vec::new();
+        let query = self.model.ext_query.text().trim().to_owned();
 
-        if self.model.marketplace_searching {
-            list_rows.push(
-                div()
-                    .px_3()
-                    .py_2()
-                    .text_size(px(12.))
-                    .text_color(rgb(theme::TEXT_DIM))
-                    .child(if self.model.marketplace_recommended {
-                        "Loading recommended extensions..."
-                    } else {
-                        "Searching Open VSX Marketplace..."
-                    })
-                    .into_any_element(),
-            );
-        } else if let Some(err) = &self.model.marketplace_message {
-            list_rows.push(
-                div()
-                    .px_3()
-                    .py_2()
-                    .text_size(px(12.))
-                    .text_color(rgb(0xe5534b))
-                    .child(SharedString::from(err.clone()))
-                    .into_any_element(),
-            );
-        } else if !self.model.marketplace_results.is_empty() {
-            list_rows.push(
-                div()
-                    .px_3()
-                    .py(px(4.))
-                    .bg(rgb(theme::PANEL))
-                    .text_size(px(11.))
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(rgb(theme::TEXT_DIM))
-                    .child(SharedString::from(format!(
-                        "{} ({})",
-                        if self.model.marketplace_recommended {
-                            "RECOMMENDED"
-                        } else {
-                            "MARKETPLACE"
-                        },
-                        self.model.marketplace_results.len()
-                    )))
-                    .into_any_element(),
-            );
-            for (i, m) in self.model.marketplace_results.iter().enumerate() {
-                let is_installed = self
-                    .model
-                    .extensions
-                    .iter()
-                    .any(|e| e.id == m.id || e.id == m.name);
-                let download_url = m.download_url.clone();
-                let stats = if m.downloads > 0 {
-                    format!("{}  ·  {}", m.publisher, short_count(m.downloads))
-                } else {
-                    m.publisher.clone()
-                };
+        if !query.is_empty() {
+            if self.model.marketplace_searching {
                 list_rows.push(
                     div()
-                        .id(("mkt-ext", i))
-                        .flex()
-                        .gap_3()
                         .px_3()
-                        .py(px(10.))
-                        .cursor_pointer()
-                        .border_b_1()
-                        .border_color(rgb(theme::BORDER))
-                        .hover(|s| s.bg(rgb(theme::HOVER)))
-                        .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
-                            this.model.open_market_detail(i);
-                            cx.notify();
-                        }))
-                        .child(self.ext_icon(&m.id, None, &m.display_name, 42.))
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .flex_1()
-                                .min_w_0()
-                                .gap(px(2.))
-                                .child(
-                                    div()
-                                        .text_size(px(13.))
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .whitespace_nowrap()
-                                        .overflow_hidden()
-                                        .child(SharedString::from(m.display_name.clone())),
-                                )
-                                .children((!m.description.is_empty()).then(|| {
-                                    div()
-                                        .text_size(px(11.))
-                                        .text_color(rgb(theme::TEXT_DIM))
-                                        .whitespace_nowrap()
-                                        .overflow_hidden()
-                                        .child(SharedString::from(m.description.clone()))
-                                }))
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .justify_between()
-                                        .gap_2()
-                                        .pt(px(2.))
-                                        .child(
-                                            div()
-                                                .min_w_0()
-                                                .text_size(px(11.))
-                                                .text_color(rgb(theme::TEXT_DIM))
-                                                .whitespace_nowrap()
-                                                .overflow_hidden()
-                                                .child(SharedString::from(stats)),
-                                        )
-                                        .child(if is_installed {
-                                            div()
-                                                .flex_none()
-                                                .text_size(px(11.))
-                                                .text_color(rgb(0x81b88b))
-                                                .child("Installed")
-                                                .into_any_element()
-                                        } else if self.model.installing.as_deref()
-                                            == Some(download_url.as_str())
-                                        {
-                                            div()
-                                                .flex_none()
-                                                .text_size(px(11.))
-                                                .text_color(rgb(theme::TEXT_DIM))
-                                                .child(SharedString::from(
-                                                    self.model.install_label(),
-                                                ))
-                                                .into_any_element()
-                                        } else {
-                                            Self::flat_button(("mkt-install-btn", i), "Install")
-                                                .flex_none()
-                                                .bg(rgb(0x2f2f2f))
-                                                .text_color(rgb(theme::TEXT))
-                                                .on_click(cx.listener(
-                                                    move |this, _: &ClickEvent, _w, cx| {
-                                                        cx.stop_propagation();
-                                                        this.model.install_from_marketplace(
-                                                            &download_url,
-                                                        );
-                                                        cx.notify();
-                                                    },
-                                                ))
-                                                .into_any_element()
-                                        }),
-                                ),
-                        )
+                        .py_2()
+                        .text_size(px(12.))
+                        .text_color(rgb(theme::TEXT_DIM))
+                        .child("Searching Open VSX Marketplace...")
+                        .into_any_element(),
+                );
+            } else if let Some(err) = &self.model.marketplace_message {
+                list_rows.push(
+                    div()
+                        .px_3()
+                        .py_2()
+                        .text_size(px(12.))
+                        .text_color(rgb(0xe5534b))
+                        .child(SharedString::from(err.clone()))
+                        .into_any_element(),
+                );
+            } else if !self.model.marketplace_results.is_empty() {
+                list_rows.push(
+                    div()
+                        .px_3()
+                        .py(px(4.))
+                        .bg(rgb(theme::PANEL))
+                        .text_size(px(11.))
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(rgb(theme::TEXT_DIM))
+                        .child(SharedString::from(format!(
+                            "{} ({})",
+                            if self.model.marketplace_recommended {
+                                "RECOMMENDED"
+                            } else {
+                                "MARKETPLACE"
+                            },
+                            self.model.marketplace_results.len()
+                        )))
+                        .into_any_element(),
+                );
+                for (i, m) in self.model.marketplace_results.iter().enumerate() {
+                    let is_installed = self
+                        .model
+                        .extensions
+                        .iter()
+                        .any(|e| e.id == m.id || e.id == m.name);
+                    let download_url = m.download_url.clone();
+                    let stats = if m.downloads > 0 {
+                        format!("{}  ·  {}", m.publisher, short_count(m.downloads))
+                    } else {
+                        m.publisher.clone()
+                    };
+                    list_rows.push(
+                        div()
+                            .id(("mkt-ext", i))
+                            .flex()
+                            .gap_3()
+                            .px_3()
+                            .py(px(10.))
+                            .cursor_pointer()
+                            .border_b_1()
+                            .border_color(rgb(theme::BORDER))
+                            .hover(|s| s.bg(rgb(theme::HOVER)))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
+                                this.model.open_market_detail(i);
+                                cx.notify();
+                            }))
+                            .child(self.ext_icon(&m.id, None, &m.display_name, 42.))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .gap(px(2.))
+                                    .child(
+                                        div()
+                                            .text_size(px(13.))
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .whitespace_nowrap()
+                                            .overflow_hidden()
+                                            .child(SharedString::from(m.display_name.clone())),
+                                    )
+                                    .children((!m.description.is_empty()).then(|| {
+                                        div()
+                                            .text_size(px(11.))
+                                            .text_color(rgb(theme::TEXT_DIM))
+                                            .whitespace_nowrap()
+                                            .overflow_hidden()
+                                            .child(SharedString::from(m.description.clone()))
+                                    }))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .justify_between()
+                                            .gap_2()
+                                            .pt(px(2.))
+                                            .child(
+                                                div()
+                                                    .min_w_0()
+                                                    .text_size(px(11.))
+                                                    .text_color(rgb(theme::TEXT_DIM))
+                                                    .whitespace_nowrap()
+                                                    .overflow_hidden()
+                                                    .child(SharedString::from(stats)),
+                                            )
+                                            .child(if is_installed {
+                                                div()
+                                                    .flex_none()
+                                                    .text_size(px(11.))
+                                                    .text_color(rgb(0x81b88b))
+                                                    .child("Installed")
+                                                    .into_any_element()
+                                            } else if self.model.installing.as_deref()
+                                                == Some(download_url.as_str())
+                                            {
+                                                div()
+                                                    .flex_none()
+                                                    .text_size(px(11.))
+                                                    .text_color(rgb(theme::TEXT_DIM))
+                                                    .child(SharedString::from(
+                                                        self.model.install_label(),
+                                                    ))
+                                                    .into_any_element()
+                                            } else {
+                                                Self::flat_button(("mkt-install-btn", i), "Install")
+                                                    .flex_none()
+                                                    .bg(rgb(0x2f2f2f))
+                                                    .text_color(rgb(theme::TEXT))
+                                                    .on_click(cx.listener(
+                                                        move |this, _: &ClickEvent, _w, cx| {
+                                                            cx.stop_propagation();
+                                                            this.model.install_from_marketplace(
+                                                                &download_url,
+                                                            );
+                                                            cx.notify();
+                                                        },
+                                                    ))
+                                                    .into_any_element()
+                                            }),
+                                    ),
+                            )
+                            .into_any_element(),
+                    );
+                }
+            } else if let Some(q) = &self.model.marketplace_query {
+                list_rows.push(
+                    div()
+                        .px_3()
+                        .py_2()
+                        .text_size(px(12.))
+                        .text_color(rgb(theme::TEXT_DIM))
+                        .child(SharedString::from(format!(
+                            "No extensions found for \"{q}\" on Open VSX."
+                        )))
                         .into_any_element(),
                 );
             }
-        } else if let Some(q) = &self.model.marketplace_query {
-            list_rows.push(
-                div()
-                    .px_3()
-                    .py_2()
-                    .text_size(px(12.))
-                    .text_color(rgb(theme::TEXT_DIM))
-                    .child(SharedString::from(format!(
-                        "No extensions found for \"{q}\" on Open VSX."
-                    )))
-                    .into_any_element(),
-            );
-        } else {
-            list_rows.push(
-                div()
-                    .px_3()
-                    .py_2()
-                    .text_size(px(12.))
-                    .text_color(rgb(theme::TEXT_DIM))
-                    .child("Type a name above and press Enter to search the Open VSX marketplace.")
-                    .into_any_element(),
-            );
         }
 
         list_rows.push(
@@ -1838,7 +1827,7 @@ impl Workbench {
             "ext-search-query",
             &self.model.ext_query,
             self.model.ext_query_focused,
-            "Search Marketplace (Enter)",
+            "Search Extensions in Marketplace...",
             &self.ext_search_focus,
             Target::ExtSearch,
         );

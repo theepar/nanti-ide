@@ -76,10 +76,11 @@ pub enum Command {
     IndentLines,
     OutdentLines,
     SwitchBranch,
+    ChangeLanguageMode,
 }
 
 impl Command {
-    pub const ALL: [Command; 69] = [
+    pub const ALL: [Command; 70] = [
         Command::CommandPalette,
         Command::QuickOpen,
         Command::Save,
@@ -149,6 +150,7 @@ impl Command {
         Command::IndentLines,
         Command::OutdentLines,
         Command::SwitchBranch,
+        Command::ChangeLanguageMode,
     ];
 
     pub fn title(self) -> &'static str {
@@ -222,6 +224,7 @@ impl Command {
             Command::IndentLines => "Edit: Indent Lines",
             Command::OutdentLines => "Edit: Outdent Lines",
             Command::SwitchBranch => "Git: Switch Branch...",
+            Command::ChangeLanguageMode => "Change Language Mode",
         }
     }
 
@@ -233,6 +236,7 @@ impl Command {
     pub fn keybinding(self) -> Option<&'static str> {
         match self {
             Command::CommandPalette => Some("Ctrl+Shift+P"),
+            Command::ChangeLanguageMode => Some("Ctrl+K M"),
             Command::QuickOpen => Some("Ctrl+P"),
             Command::OpenFile => Some("Ctrl+O"),
             Command::OpenFolder => Some("Ctrl+K Ctrl+O"),
@@ -476,11 +480,78 @@ impl TextField {
     }
 }
 
+pub const LANGUAGE_LIST: &[(&str, &str, &str)] = &[
+    ("Python", "python", ".py, .pyw"),
+    ("JavaScript", "javascript", ".js, .mjs, .cjs"),
+    ("TypeScript", "typescript", ".ts, .mts"),
+    ("TypeScript React", "typescriptreact", ".tsx"),
+    ("JavaScript React", "javascriptreact", ".jsx"),
+    ("Java", "java", ".java"),
+    ("Kotlin", "kotlin", ".kt, .kts"),
+    ("Swift", "swift", ".swift"),
+    ("Dart", "dart", ".dart"),
+    ("Go", "go", ".go"),
+    ("Rust", "rust", ".rs"),
+    ("C", "c", ".c, .h"),
+    ("C++", "cpp", ".cpp, .hpp, .cc"),
+    ("C#", "csharp", ".cs"),
+    ("PHP", "php", ".php"),
+    ("Ruby", "ruby", ".rb"),
+    ("Perl", "perl", ".pl, .pm"),
+    ("Lua", "lua", ".lua"),
+    ("R", "r", ".r, .R"),
+    ("Julia", "julia", ".jl"),
+    ("MATLAB", "matlab", ".m"),
+    ("Octave", "octave", ".m"),
+    ("Scala", "scala", ".scala"),
+    ("Groovy", "groovy", ".groovy"),
+    ("Clojure", "clojure", ".clj"),
+    ("Elixir", "elixir", ".ex, .exs"),
+    ("Erlang", "erlang", ".erl, .hrl"),
+    ("Haskell", "haskell", ".hs"),
+    ("OCaml", "ocaml", ".ml"),
+    ("F#", "fsharp", ".fs"),
+    ("Elm", "elm", ".elm"),
+    ("PureScript", "purescript", ".purs"),
+    ("Zig", "zig", ".zig"),
+    ("Nim", "nim", ".nim"),
+    ("Crystal", "crystal", ".cr"),
+    ("D", "d", ".d"),
+    ("V", "v", ".v"),
+    ("Objective-C", "objective-c", ".m, .mm"),
+    ("Assembly", "assembly", ".asm, .s"),
+    ("Fortran", "fortran", ".f90, .f95"),
+    ("COBOL", "cobol", ".cob, .cbl"),
+    ("Pascal", "pascal", ".pas"),
+    ("Delphi / Object Pascal", "delphi", ".pas, .dpr"),
+    ("Ada", "ada", ".adb, .ads"),
+    ("Lisp", "lisp", ".lisp, .lsp"),
+    ("Scheme", "scheme", ".scm"),
+    ("Racket", "racket", ".rkt"),
+    ("Prolog", "prolog", ".pl"),
+    ("Smalltalk", "smalltalk", ".st"),
+    ("Solidity", "solidity", ".sol"),
+    ("Move", "move", ".move"),
+    ("WebAssembly Text", "wat", ".wat"),
+    ("HTML", "html", ".html, .htm"),
+    ("CSS", "css", ".css"),
+    ("JSON", "json", ".json"),
+    ("YAML", "yaml", ".yaml, .yml"),
+    ("TOML", "toml", ".toml"),
+    ("SQL", "sql", ".sql"),
+    ("Markdown", "markdown", ".md"),
+    ("Shell Script", "bash", ".sh, .bash"),
+    ("PowerShell", "powershell", ".ps1"),
+    ("Batch", "bat", ".bat, .cmd"),
+    ("Plain Text", "plaintext", ".txt"),
+];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PaletteMode {
     Commands,
     Files,
     Branches,
+    LanguageMode,
     Input(InputKind),
 }
 
@@ -513,6 +584,13 @@ pub enum PaletteAction {
     OpenFile(PathBuf),
     Checkout(String),
     NewBranchPrompt,
+    SetLanguageMode(Option<String>),
+    ExtensionCommand {
+        id: String,
+        label: String,
+        ext_dir: Option<PathBuf>,
+        view_type: Option<String>,
+    },
     Submit(InputKind, String),
 }
 
@@ -533,8 +611,8 @@ pub struct Palette {
 }
 
 impl Palette {
-    pub fn commands() -> Self {
-        let items = Command::ALL
+    pub fn commands(extensions: &[crate::extensions::Extension]) -> Self {
+        let mut items: Vec<PaletteItem> = Command::ALL
             .iter()
             .map(|c| PaletteItem {
                 label: c.title().to_owned(),
@@ -542,7 +620,39 @@ impl Palette {
                 action: PaletteAction::Command(*c),
             })
             .collect();
+
+        for ext in extensions {
+            for cmd in &ext.contributed_commands {
+                items.push(PaletteItem {
+                    label: cmd.label(),
+                    detail: Some(ext.display_name.clone()),
+                    action: PaletteAction::ExtensionCommand {
+                        id: cmd.id.clone(),
+                        label: cmd.label(),
+                        ext_dir: Some(ext.dir.clone()),
+                        view_type: ext.view_type.clone(),
+                    },
+                });
+            }
+        }
+
         Self::build(PaletteMode::Commands, items)
+    }
+
+    pub fn language_modes() -> Self {
+        let mut items = vec![PaletteItem {
+            label: "Auto Detect".to_owned(),
+            detail: Some("Auto detect from file extension".to_owned()),
+            action: PaletteAction::SetLanguageMode(None),
+        }];
+        for (name, id, exts) in LANGUAGE_LIST {
+            items.push(PaletteItem {
+                label: format!("{name} ({id})"),
+                detail: Some(exts.to_string()),
+                action: PaletteAction::SetLanguageMode(Some(id.to_string())),
+            });
+        }
+        Self::build(PaletteMode::LanguageMode, items)
     }
 
     pub fn files(root: &Path) -> Self {
@@ -653,6 +763,7 @@ impl Palette {
             PaletteMode::Commands => "Type a command",
             PaletteMode::Files => "Type a file name to open",
             PaletteMode::Branches => "Select a branch to switch to",
+            PaletteMode::LanguageMode => "Select Language Mode",
             PaletteMode::Input(k) => k.placeholder(),
         }
     }
@@ -719,7 +830,7 @@ mod tests {
 
     #[test]
     fn command_palette_lists_only_real_commands_and_filters() {
-        let mut p = Palette::commands();
+        let mut p = Palette::commands(&[]);
         assert_eq!(p.result_count(), Command::ALL.len());
         p.field.insert("save");
         p.refilter();
@@ -736,7 +847,7 @@ mod tests {
 
     #[test]
     fn selection_wraps_and_resets_on_new_query() {
-        let mut p = Palette::commands();
+        let mut p = Palette::commands(&[]);
         p.move_selection(-1);
         assert_eq!(p.selected, Command::ALL.len() - 1);
         p.move_selection(1);

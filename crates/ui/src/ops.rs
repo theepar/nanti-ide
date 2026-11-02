@@ -458,6 +458,7 @@ impl Model {
             title: "About nanti.".to_owned(),
             content: TabContent::Unavailable(text),
             stamp: None,
+            language_override: None,
         });
         self.active_tab = Some(self.tabs.len() - 1);
     }
@@ -727,6 +728,19 @@ impl Model {
         self.readme_rx = None;
     }
 
+    pub fn on_ext_search_edited(&mut self) {
+        let q = self.ext_query.text().trim().to_owned();
+        if q.is_empty() {
+            self.marketplace_query = None;
+            self.marketplace_results.clear();
+            self.marketplace_searching = false;
+            self.marketplace_recommended = false;
+            self.ext_search_debounce = None;
+        } else {
+            self.ext_search_debounce = Some(std::time::Instant::now());
+        }
+    }
+
     fn recommend_if_idle(&mut self) -> bool {
         if !self.marketplace_enabled
             || self.activity != crate::model::Activity::Extensions
@@ -734,6 +748,7 @@ impl Model {
             || self.marketplace_searching
             || self.marketplace_query.is_some()
             || !self.marketplace_results.is_empty()
+            || !self.extensions.is_empty()
         {
             return false;
         }
@@ -751,6 +766,16 @@ impl Model {
     pub fn pump_marketplace(&mut self) -> bool {
         use std::sync::mpsc::TryRecvError;
         let mut changed = self.recommend_if_idle();
+        if let Some(t) = self.ext_search_debounce
+            && t.elapsed() >= std::time::Duration::from_millis(400)
+        {
+            self.ext_search_debounce = None;
+            let q = self.ext_query.text().trim().to_owned();
+            if !q.is_empty() && self.marketplace_query.as_deref() != Some(&q) {
+                self.search_marketplace(&q);
+                changed = true;
+            }
+        }
         if self.installing.is_some() {
             let now = self
                 .install_progress

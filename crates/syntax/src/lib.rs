@@ -87,6 +87,49 @@ impl Language {
         Language::Nix,
     ];
 
+    pub fn from_id(id: &str) -> Option<Self> {
+        let norm = id.to_ascii_lowercase();
+        Some(match norm.as_str() {
+            "rust" | "rs" => Language::Rust,
+            "javascript" | "js" | "mjs" | "cjs" => Language::JavaScript,
+            "typescript" | "ts" => Language::TypeScript,
+            "typescriptreact" | "tsx" => Language::Tsx,
+            "javascriptreact" | "jsx" => Language::JavaScript,
+            "go" => Language::Go,
+            "json" => Language::Json,
+            "dart" => Language::Dart,
+            "markdown" | "md" => Language::Markdown,
+            "python" | "py" => Language::Python,
+            "c" => Language::C,
+            "cpp" | "c++" => Language::Cpp,
+            "csharp" | "c#" | "cs" => Language::CSharp,
+            "java" => Language::Java,
+            "ruby" | "rb" => Language::Ruby,
+            "php" => Language::Php,
+            "html" | "htm" => Language::Html,
+            "css" => Language::Css,
+            "yaml" | "yml" => Language::Yaml,
+            "toml" => Language::Toml,
+            "bash" | "sh" | "shellscript" => Language::Bash,
+            "powershell" | "ps1" => Language::PowerShell,
+            "lua" => Language::Lua,
+            "sql" => Language::Sql,
+            "xml" => Language::Xml,
+            "makefile" | "make" => Language::Make,
+            "cmake" => Language::CMake,
+            "bat" | "batch" => Language::Batch,
+            "ini" => Language::Ini,
+            "properties" => Language::Properties,
+            "diff" => Language::Diff,
+            "r" => Language::R,
+            "zig" => Language::Zig,
+            "elixir" | "ex" => Language::Elixir,
+            "erlang" | "erl" => Language::Erlang,
+            "nix" => Language::Nix,
+            _ => return None,
+        })
+    }
+
     pub fn from_path(path: &Path) -> Option<Self> {
         if let Some(lang) = path
             .file_name()

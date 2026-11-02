@@ -103,6 +103,7 @@ pub struct Tab {
     pub title: String,
     pub content: TabContent,
     pub stamp: Option<DiskStamp>,
+    pub language_override: Option<String>,
 }
 
 impl Tab {
@@ -223,6 +224,7 @@ pub struct Model {
     pub doc_sync_events: Vec<DocSyncEvent>,
     pub ext_query: TextField,
     pub ext_query_focused: bool,
+    pub ext_search_debounce: Option<std::time::Instant>,
     pub marketplace_results: Vec<MarketplaceExtension>,
     pub marketplace_searching: bool,
     pub marketplace_message: Option<String>,
@@ -276,6 +278,7 @@ impl Model {
             doc_sync_events: Vec::new(),
             ext_query: TextField::default(),
             ext_query_focused: false,
+            ext_search_debounce: None,
             marketplace_results: Vec::new(),
             marketplace_searching: false,
             marketplace_message: None,
@@ -394,6 +397,8 @@ impl Model {
     pub fn without_folder() -> Self {
         let mut m = Self::new(PathBuf::new());
         m.folder_open = false;
+        m.layout.sidebar = false;
+        m.layout.right = false;
         m
     }
 
@@ -403,6 +408,7 @@ impl Model {
         }
         self.root = folder.clone();
         self.folder_open = true;
+        self.layout.sidebar = true;
         self.expanded.clear();
         self.expanded.insert(folder.clone());
         self.scm = ScmState::new(folder.clone());
@@ -460,6 +466,7 @@ impl Model {
             title,
             content,
             stamp: DiskStamp::of(path),
+            language_override: None,
         });
         self.active_tab = Some(self.tabs.len() - 1);
     }
@@ -552,6 +559,7 @@ impl Model {
                         state: DiffState::Loading,
                     }),
                     stamp: None,
+                    language_override: None,
                 });
                 self.active_tab = Some(self.tabs.len() - 1);
             }
@@ -818,9 +826,10 @@ impl Model {
 
     pub fn open_palette(&mut self, mode: PaletteMode) {
         self.palette = Some(match mode {
-            PaletteMode::Commands => Palette::commands(),
+            PaletteMode::Commands => Palette::commands(&self.extensions),
             PaletteMode::Files => Palette::files(&self.root),
             PaletteMode::Branches => Palette::branches(&self.scm.branches),
+            PaletteMode::LanguageMode => Palette::language_modes(),
             PaletteMode::Input(kind) => Palette::input(kind, ""),
         });
     }
@@ -859,6 +868,24 @@ impl Model {
             }
             PaletteAction::NewBranchPrompt => {
                 self.open_input(InputKind::NewBranch, "");
+                None
+            }
+            PaletteAction::ExtensionCommand {
+                id,
+                label,
+                ext_dir,
+                view_type,
+            } => {
+                self.execute_extension_command(
+                    &id,
+                    &label,
+                    ext_dir.as_deref(),
+                    view_type.as_deref(),
+                );
+                None
+            }
+            PaletteAction::SetLanguageMode(lang_id) => {
+                self.set_active_language_mode(lang_id);
                 None
             }
         }
@@ -1030,7 +1057,38 @@ impl Model {
                     }
                 }
             }
+            Command::ChangeLanguageMode => self.cmd_change_language_mode(),
         }
+    }
+
+    pub fn cmd_change_language_mode(&mut self) {
+        self.open_palette(PaletteMode::LanguageMode);
+    }
+
+    pub fn set_active_language_mode(&mut self, mode: Option<String>) {
+        if let Some(i) = self.active_tab {
+            if let Some(tab) = self.tabs.get_mut(i) {
+                tab.language_override = mode.clone();
+                let disp = mode.as_deref().unwrap_or("Auto Detect");
+                self.message = Some(format!("Language mode: {disp}"));
+            }
+        }
+    }
+
+    pub fn execute_extension_command(
+        &mut self,
+        _id: &str,
+        label: &str,
+        ext_dir: Option<&Path>,
+        view_type: Option<&str>,
+    ) {
+        self.message = Some(format!("Running {label}"));
+        if let Some(dir) = ext_dir {
+            if let Some(vt) = view_type {
+                self.use_as_panel_extension(dir, vt);
+            }
+        }
+        self.layout.right = true;
     }
 
     pub fn open_find(&mut self, show_replace: bool) {
@@ -1311,6 +1369,19 @@ pub fn language_of(path: &Path) -> &'static str {
         Some("css") => "CSS",
         _ => "Plain Text",
     }
+}
+
+pub fn tab_language(tab: &Tab) -> String {
+    if let Some(id) = &tab.language_override {
+        if let Some((name, _, _)) = crate::palette::LANGUAGE_LIST
+            .iter()
+            .find(|(_, i, _)| *i == id)
+        {
+            return (*name).to_string();
+        }
+        return id.clone();
+    }
+    language_of(&tab.path).to_string()
 }
 
 #[cfg(test)]

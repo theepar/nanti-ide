@@ -1,6 +1,23 @@
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtensionCommand {
+    pub id: String,
+    pub title: String,
+    pub category: Option<String>,
+}
+
+impl ExtensionCommand {
+    pub fn label(&self) -> String {
+        if let Some(cat) = &self.category {
+            format!("{cat}: {}", self.title)
+        } else {
+            self.title.clone()
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Extension {
     pub dir: PathBuf,
     pub id: String,
@@ -12,6 +29,7 @@ pub struct Extension {
     pub commands: usize,
     pub publisher: String,
     pub icon: Option<PathBuf>,
+    pub contributed_commands: Vec<ExtensionCommand>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -317,6 +335,41 @@ fn read_manifest(dir: &Path) -> Option<Extension> {
         .pointer("/contributes/commands")
         .and_then(|c| c.as_array())
         .map_or(0, Vec::len);
+    let mut contributed_commands: Vec<ExtensionCommand> = j
+        .pointer("/contributes/commands")
+        .and_then(|c| c.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| {
+                    let id = v.get("command").and_then(|c| c.as_str())?.to_owned();
+                    let title = v
+                        .get("title")
+                        .and_then(|t| t.as_str())
+                        .map_or_else(|| id.clone(), str::to_owned);
+                    let category = v
+                        .get("category")
+                        .and_then(|c| c.as_str())
+                        .map(str::to_owned);
+                    Some(ExtensionCommand {
+                        id,
+                        title,
+                        category,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if let Some(vt) = &view_type {
+        let view_cmd_title = format!("Show {}", display);
+        if !contributed_commands.iter().any(|c| c.id == *vt) {
+            contributed_commands.push(ExtensionCommand {
+                id: vt.clone(),
+                title: view_cmd_title,
+                category: Some("View".to_owned()),
+            });
+        }
+    }
     Some(Extension {
         dir: dir.to_path_buf(),
         id: format!("{publisher}.{name}"),
@@ -332,6 +385,7 @@ fn read_manifest(dir: &Path) -> Option<Extension> {
             .and_then(|v| v.as_str())
             .map(|rel| dir.join(rel))
             .filter(|p| p.is_file()),
+        contributed_commands,
     })
 }
 

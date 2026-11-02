@@ -38,7 +38,7 @@ pub mod workspace_ops;
 
 use find::FindFocus;
 use layout::{Layout, PanelPos, Side};
-use model::{Activity, Model, PanelTab, Prompt, SaveOutcome, TabContent, language_of};
+use model::{Activity, Model, PanelTab, Prompt, SaveOutcome, Tab, TabContent};
 use palette::{Command, TextField};
 
 const PALETTE_ROWS: usize = 12;
@@ -462,6 +462,10 @@ impl Workbench {
         self.model.layout = Layout::load(&path);
         self.model.layout.panel = false;
         self.model.layout.panel_maximized = false;
+        if !self.model.folder_open {
+            self.model.layout.sidebar = false;
+            self.model.layout.right = false;
+        }
         self.layout_saved = self.model.layout.clone();
         self.layout_path = Some(path);
     }
@@ -866,6 +870,7 @@ impl Workbench {
                 }
             }
             Target::FindQuery => self.model.find_select_nearest(),
+            Target::ExtSearch => self.model.on_ext_search_edited(),
             _ => {}
         }
     }
@@ -1227,6 +1232,7 @@ impl Workbench {
     }
 
     fn after_field_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.on_field_edited();
         self.model.refresh_find();
         self.sync_focus(window);
         self.reveal_cursor();
@@ -2588,7 +2594,7 @@ impl Workbench {
                     }
                     TabContent::Unavailable(_) | TabContent::Diff(_) => (None, None),
                 };
-                (pos, eol, Some(language_of(&t.path)))
+                (pos, eol, Some(model::tab_language(t)))
             }
             None => (None, None, None),
         };
@@ -2673,9 +2679,19 @@ impl Workbench {
                             }))
                             .child(SharedString::from(p))
                     }))
-                    .children(lang.map(|_| "UTF-8"))
+                    .children(lang.as_ref().map(|_| "UTF-8"))
                     .children(eol)
-                    .children(lang)
+                    .children(lang.map(|l| {
+                        div()
+                            .id("status-language")
+                            .px_2()
+                            .cursor_pointer()
+                            .hover(|s| s.bg(rgb(theme::HOVER)))
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.apply_command(Command::ChangeLanguageMode, window, cx);
+                            }))
+                            .child(SharedString::from(l))
+                    }))
                     .child(
                         div()
                             .flex()
@@ -2712,9 +2728,35 @@ impl Workbench {
     pub fn active_highlights(&self) -> Option<Rc<Vec<Vec<LineSpan>>>> {
         let tab = self.model.active()?;
         match &tab.content {
-            TabContent::Text(e) => self.highlights(e, &tab.path),
+            TabContent::Text(e) => self.highlights_for_tab(e, tab),
             TabContent::Unavailable(_) | TabContent::Diff(_) => None,
         }
+    }
+
+    fn highlights_for_tab(&self, editor: &Editor, tab: &Tab) -> Option<Rc<Vec<Vec<LineSpan>>>> {
+        let version = editor.version();
+        let lang = tab
+            .language_override
+            .as_deref()
+            .and_then(Language::from_id)
+            .or_else(|| Language::from_path(&tab.path))?;
+        if let Some((p, v, spans)) = &*self.hl_cache.borrow()
+            && p == &tab.path
+            && *v == version
+        {
+            return spans.clone();
+        }
+        let text = editor.text();
+        let spans = if text.split('\n').count() == editor.buffer().len_lines() {
+            self.highlighter
+                .borrow_mut()
+                .highlight(lang, &text)
+                .map(Rc::new)
+        } else {
+            None
+        };
+        *self.hl_cache.borrow_mut() = Some((tab.path.clone(), version, spans.clone()));
+        spans
     }
 
     fn highlights(&self, editor: &Editor, path: &Path) -> Option<Rc<Vec<Vec<LineSpan>>>> {
