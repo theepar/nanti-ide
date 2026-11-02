@@ -844,7 +844,71 @@ fn thousands_of_changes_and_a_huge_diff_keep_frames_cheap(cx: &mut TestAppContex
     }
     let per_frame = start.elapsed() / 10;
     assert!(
-        per_frame < Duration::from_millis(400),
+        per_frame < Duration::from_millis(250),
         "a frame took {per_frame:?} with 4000 changes and a 15000 line diff"
+    );
+}
+
+fn long_history(tag: &str, commits: usize) -> Tmp {
+    let t = repo(tag);
+    let mut stream = String::new();
+    for i in 0..commits {
+        let msg = format!("commit number {i}\n\nbody line one\nbody line two\n");
+        let body = format!("content {i}\n");
+        stream.push_str(&format!(
+            "commit refs/heads/main\ncommitter T <t@example.com> {} +0000\ndata {}\n{msg}\nM 100644 inline h{}.txt\ndata {}\n{body}\n",
+            1_700_000_000 + i,
+            msg.len(),
+            i % 50,
+            body.len(),
+        ));
+    }
+    use std::io::Write;
+    let mut child = Command::new("git")
+        .current_dir(&t.0)
+        .args(["fast-import", "--force", "--quiet"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stream.as_bytes())
+        .unwrap();
+    assert!(child.wait().unwrap().success());
+    git(&t.0, &["reset", "-q", "--hard", "main"]);
+    t
+}
+
+#[gpui::test]
+fn a_long_loaded_history_keeps_frames_cheap(cx: &mut TestAppContext) {
+    let t = long_history("ui-long", 3000);
+    let (window, cx) = open(cx, &t.0);
+    wait_idle(window, cx);
+    window
+        .update(cx, |wb, _, _| {
+            wb.model_mut().activity = Activity::SourceControl;
+        })
+        .unwrap();
+    for _ in 0..80 {
+        window
+            .update(cx, |wb, _, _| wb.model_mut().scm.load_more_history())
+            .unwrap();
+        wait_idle(window, cx);
+    }
+    let loaded = window
+        .read_with(cx, |wb, _| wb.model().scm.history.len())
+        .unwrap();
+    assert!(loaded >= 2000, "only {loaded} commits loaded");
+    let start = Instant::now();
+    for _ in 0..10 {
+        window.update(cx, |_, _, cx| cx.notify()).unwrap();
+        cx.run_until_parked();
+    }
+    let per_frame = start.elapsed() / 10;
+    assert!(
+        per_frame < Duration::from_millis(100),
+        "a frame took {per_frame:?} with {loaded} commits loaded"
     );
 }

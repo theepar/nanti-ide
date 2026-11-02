@@ -135,7 +135,7 @@ struct Done {
     reload_history: bool,
 }
 
-pub const HISTORY_PAGE: usize = 40;
+pub const HISTORY_PAGE: usize = 80;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommitFiles {
@@ -175,6 +175,7 @@ pub struct ScmState {
     pub collapsed: HashSet<GroupKind>,
     pub history: Vec<Commit>,
     pub history_more: bool,
+    history_pending: bool,
     pub history_error: Option<String>,
     pub history_open: bool,
     pub expanded_commits: HashSet<String>,
@@ -206,6 +207,7 @@ impl ScmState {
             collapsed: HashSet::new(),
             history: Vec::new(),
             history_more: false,
+            history_pending: false,
             history_error: None,
             history_open: true,
             expanded_commits: HashSet::new(),
@@ -392,6 +394,7 @@ impl ScmState {
             self.message.clear();
         }
         if let Some((skip, result)) = done.history {
+            self.history_pending = false;
             match result {
                 Ok(list) => {
                     self.history_error = None;
@@ -453,9 +456,14 @@ impl ScmState {
     }
 
     pub fn load_more_history(&mut self) {
-        if self.history_more {
+        if self.history_more && !self.history_pending {
+            self.history_pending = true;
             self.request(Job::History(self.history.len()));
         }
+    }
+
+    pub fn history_loading(&self) -> bool {
+        self.history_pending
     }
 
     pub fn toggle_commit(&mut self, hash: &str) {
@@ -564,33 +572,48 @@ impl ScmState {
     }
 
     pub fn group(&self, kind: GroupKind) -> Vec<Row> {
+        self.group_window(kind, 0, usize::MAX)
+    }
+
+    fn in_group(kind: GroupKind, e: &git::Entry) -> Option<Change> {
+        let (change, in_group) = match kind {
+            GroupKind::Conflicts => (Some(Change::Conflicted), e.conflicted),
+            GroupKind::Staged => (e.staged, !e.conflicted && e.staged.is_some()),
+            GroupKind::Changes => (e.unstaged, !e.conflicted && e.unstaged.is_some()),
+        };
+        if in_group { change } else { None }
+    }
+
+    pub fn group_len(&self, kind: GroupKind) -> usize {
+        self.status.as_ref().map_or(0, |st| {
+            st.entries
+                .iter()
+                .filter(|e| Self::in_group(kind, e).is_some())
+                .count()
+        })
+    }
+
+    /// The rows `first..last` of a group; only those few are built, so a huge change list stays cheap.
+    pub fn group_window(&self, kind: GroupKind, first: usize, last: usize) -> Vec<Row> {
         let Some(st) = &self.status else {
             return Vec::new();
         };
         st.entries
             .iter()
-            .filter_map(|e| {
-                let (change, in_group) = match kind {
-                    GroupKind::Conflicts => (Some(Change::Conflicted), e.conflicted),
-                    GroupKind::Staged => (e.staged, !e.conflicted && e.staged.is_some()),
-                    GroupKind::Changes => (e.unstaged, !e.conflicted && e.unstaged.is_some()),
-                };
-                if !in_group {
-                    return None;
-                }
-                let change = change?;
-                Some(Row {
-                    rel: e.path.clone(),
-                    orig: if kind == GroupKind::Staged {
-                        e.orig_path.clone()
-                    } else {
-                        None
-                    },
-                    letter: change.letter(),
-                    tone: Tone::of(change),
-                    untracked: change == Change::Untracked,
-                    group: kind,
-                })
+            .filter_map(|e| Self::in_group(kind, e).map(|change| (e, change)))
+            .skip(first)
+            .take(last.saturating_sub(first))
+            .map(|(e, change)| Row {
+                rel: e.path.clone(),
+                orig: if kind == GroupKind::Staged {
+                    e.orig_path.clone()
+                } else {
+                    None
+                },
+                letter: change.letter(),
+                tone: Tone::of(change),
+                untracked: change == Change::Untracked,
+                group: kind,
             })
             .collect()
     }

@@ -60,6 +60,8 @@ const OVERSCAN_ROWS: usize = 10;
 const EXPLORER_ROW_H: f32 = 22.0;
 const SCM_ROW_H: f32 = 22.0;
 const SCM_HEADER_H: f32 = 24.0;
+const COMMIT_ROW_H: f32 = 46.0;
+const HISTORY_HEADER_H: f32 = 28.0;
 const EXPLORER_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(2);
 const LINE_HEIGHT: f32 = 20.0;
 const GUTTER_WIDTH: f32 = 56.0;
@@ -134,7 +136,7 @@ fn activity_icon(a: Activity) -> &'static str {
     }
 }
 
-struct DiffWindow {
+struct RowWindow {
     rows: Vec<AnyElement>,
     y: f32,
     gap: f32,
@@ -142,7 +144,7 @@ struct DiffWindow {
     hi: f32,
 }
 
-impl DiffWindow {
+impl RowWindow {
     fn new(lo: f32, hi: f32) -> Self {
         Self {
             rows: Vec::new(),
@@ -3727,8 +3729,8 @@ impl Workbench {
             scm::GroupKind::Staged,
             scm::GroupKind::Changes,
         ] {
-            let rows = s.group(kind);
-            if rows.is_empty() {
+            let total = s.group_len(kind);
+            if total == 0 {
                 continue;
             }
             let collapsed = s.collapsed.contains(&kind);
@@ -3777,7 +3779,7 @@ impl Workbench {
                                     .bg(rgb(0x2f2f2f))
                                     .font_weight(FontWeight::NORMAL)
                                     .text_color(rgb(theme::TEXT_DIM))
-                                    .child(SharedString::from(rows.len().to_string())),
+                                    .child(SharedString::from(total.to_string())),
                             ),
                     )
                     .children(bulk.map(|(id, icon_name)| {
@@ -3807,7 +3809,6 @@ impl Workbench {
             if collapsed {
                 continue;
             }
-            let total = rows.len();
             // Only the rows near the viewport become elements, so thousands of changes cost the same as a few.
             let first = (((scrolled - y) / SCM_ROW_H).max(0.0) as usize)
                 .saturating_sub(OVERSCAN_ROWS)
@@ -3816,6 +3817,7 @@ impl Workbench {
                 + OVERSCAN_ROWS)
                 .min(total)
                 .max(first);
+            let rows = s.group_window(kind, first, last);
             let base = rid;
             rid += total;
             y += total as f32 * SCM_ROW_H;
@@ -3827,7 +3829,7 @@ impl Workbench {
                         .into_any_element(),
                 );
             }
-            for (k, row) in rows[first..last].iter().enumerate() {
+            for (k, row) in rows.iter().enumerate() {
                 let rid = base + first + k;
                 let (name, dir) = row.name_and_dir();
                 let (name, dir) = (name.to_owned(), dir.to_owned());
@@ -3964,7 +3966,7 @@ impl Workbench {
                     .into_any_element(),
             );
         }
-        self.scm_history_rows(&mut body, cx);
+        self.scm_history_rows(&mut body, y, scrolled, viewport, cx);
         let notice = s.notice.as_ref().map(|(is_err, text)| {
             let shown: Vec<&str> = text.lines().take(12).collect();
             div()
@@ -4104,7 +4106,14 @@ impl Workbench {
             }))
     }
 
-    fn scm_history_rows(&self, body: &mut Vec<AnyElement>, cx: &mut Context<Self>) {
+    fn scm_history_rows(
+        &self,
+        body: &mut Vec<AnyElement>,
+        y: f32,
+        scrolled: f32,
+        viewport: f32,
+        cx: &mut Context<Self>,
+    ) {
         let s = &self.model.scm;
         if s.history.is_empty() && s.history_error.is_none() {
             return;
@@ -4114,10 +4123,11 @@ impl Workbench {
             div()
                 .id("scm-history-header")
                 .flex()
+                .flex_none()
                 .items_center()
                 .gap_1()
                 .px_2()
-                .h(px(24.))
+                .h(px(SCM_HEADER_H))
                 .mt_1()
                 .text_size(px(11.))
                 .font_weight(FontWeight::SEMIBOLD)
@@ -4157,37 +4167,55 @@ impl Workbench {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs() as i64);
+        // Commits and their files all have a fixed height, so only the rows near the viewport become elements.
+        let margin = OVERSCAN_ROWS as f32 * SCM_ROW_H;
+        let mut w = RowWindow::new(scrolled - margin, scrolled + viewport + margin);
+        w.y = y + HISTORY_HEADER_H;
+        let note = |text: SharedString, color: u32| {
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .h(px(SCM_ROW_H))
+                .pl_6()
+                .text_size(px(11.))
+                .text_color(rgb(color))
+                .child(text)
+                .into_any_element()
+        };
         for (i, c) in s.history.iter().enumerate() {
-            let hash = c.hash.clone();
-            let hover_hash = c.hash.clone();
-            let hover_entity = cx.entity();
             let expanded = s.expanded_commits.contains(&c.hash);
-            let refs: Vec<AnyElement> = c
-                .refs
-                .iter()
-                .take(3)
-                .map(|r| {
-                    let head = r.starts_with("HEAD");
-                    let name = r.strip_prefix("HEAD -> ").unwrap_or(r).to_owned();
-                    div()
-                        .flex_none()
-                        .px_1()
-                        .rounded_sm()
-                        .text_size(px(10.))
-                        .bg(rgb(if head { 0x264f78 } else { 0x2f2f2f }))
-                        .text_color(rgb(if head { 0xffffff } else { theme::TEXT_DIM }))
-                        .child(SharedString::from(name))
-                        .into_any_element()
-                })
-                .collect();
-            body.push(
+            w.push(COMMIT_ROW_H, || {
+                let hash = c.hash.clone();
+                let hover_hash = c.hash.clone();
+                let hover_entity = cx.entity();
+                let refs: Vec<AnyElement> = c
+                    .refs
+                    .iter()
+                    .take(3)
+                    .map(|r| {
+                        let head = r.starts_with("HEAD");
+                        let name = r.strip_prefix("HEAD -> ").unwrap_or(r).to_owned();
+                        div()
+                            .flex_none()
+                            .px_1()
+                            .rounded_sm()
+                            .text_size(px(10.))
+                            .bg(rgb(if head { 0x264f78 } else { 0x2f2f2f }))
+                            .text_color(rgb(if head { 0xffffff } else { theme::TEXT_DIM }))
+                            .child(SharedString::from(name))
+                            .into_any_element()
+                    })
+                    .collect();
                 div()
                     .id(("scm-commit-row", i))
                     .flex()
+                    .flex_none()
                     .flex_col()
+                    .justify_center()
+                    .h(px(COMMIT_ROW_H))
                     .gap(px(1.))
                     .px_2()
-                    .py(px(4.))
                     .cursor_pointer()
                     .when(expanded, |d| d.bg(rgb(theme::HOVER)))
                     .hover(|s| s.bg(rgb(theme::HOVER)))
@@ -4245,58 +4273,49 @@ impl Workbench {
                                 scm::relative_time(now, c.time)
                             ))),
                     )
-                    .into_any_element(),
-            );
+                    .into_any_element()
+            });
             if !expanded {
                 continue;
             }
             match s.commit_files.get(&c.hash) {
-                None | Some(scm::CommitFiles::Loading) => body.push(
-                    div()
-                        .pl_6()
-                        .py_1()
-                        .text_size(px(11.))
-                        .text_color(rgb(theme::TEXT_DIM))
-                        .child("Loading files...")
-                        .into_any_element(),
-                ),
-                Some(scm::CommitFiles::Failed(e)) => body.push(
-                    div()
-                        .pl_6()
-                        .py_1()
-                        .text_size(px(11.))
-                        .text_color(rgb(0xe5534b))
-                        .child(SharedString::from(e.clone()))
-                        .into_any_element(),
-                ),
+                None | Some(scm::CommitFiles::Loading) => {
+                    w.push(SCM_ROW_H, || {
+                        note("Loading files...".into(), theme::TEXT_DIM)
+                    });
+                }
+                Some(scm::CommitFiles::Failed(e)) => {
+                    w.push(SCM_ROW_H, || note(SharedString::from(e.clone()), 0xe5534b));
+                }
                 Some(scm::CommitFiles::Ready(files)) => {
                     for (j, file) in files.iter().enumerate() {
-                        let name = file
-                            .path
-                            .rsplit('/')
-                            .next()
-                            .unwrap_or(&file.path)
-                            .to_owned();
-                        let dir = file
-                            .path
-                            .rfind('/')
-                            .map_or(String::new(), |k| file.path[..k].to_owned());
-                        let color = match file.letter {
-                            'A' | 'C' | 'R' => 0x81b88b,
-                            'D' => 0xc74e39,
-                            _ => 0xe2c08d,
-                        };
-                        let letter = file.letter.to_string();
-                        let (hash, file) = (c.hash.clone(), file.clone());
-                        body.push(
+                        w.push(SCM_ROW_H, || {
+                            let name = file
+                                .path
+                                .rsplit('/')
+                                .next()
+                                .unwrap_or(&file.path)
+                                .to_owned();
+                            let dir = file
+                                .path
+                                .rfind('/')
+                                .map_or(String::new(), |k| file.path[..k].to_owned());
+                            let color = match file.letter {
+                                'A' | 'C' | 'R' => 0x81b88b,
+                                'D' => 0xc74e39,
+                                _ => 0xe2c08d,
+                            };
+                            let letter = file.letter.to_string();
+                            let (hash, file) = (c.hash.clone(), file.clone());
                             div()
-                                .id(("scm-commit-file", i * 1000 + j))
+                                .id(("scm-commit-file", i * 100_000 + j))
                                 .flex()
+                                .flex_none()
                                 .items_center()
                                 .justify_between()
+                                .h(px(SCM_ROW_H))
                                 .pl_6()
                                 .pr_2()
-                                .py(px(2.))
                                 .text_size(px(12.))
                                 .cursor_pointer()
                                 .hover(|s| s.bg(rgb(theme::HOVER)))
@@ -4332,24 +4351,36 @@ impl Workbench {
                                         .text_color(rgb(color))
                                         .child(SharedString::from(letter)),
                                 )
-                                .into_any_element(),
-                        );
+                                .into_any_element()
+                        });
                     }
                 }
             }
         }
+        // Reaching the end of the loaded commits asks for the next page, so there is no button to hunt for.
+        let near_end = w.y < scrolled + viewport + 600.0;
         if s.history_more {
-            body.push(
-                Self::scm_button("scm-history-more", "Load more commits", true)
-                    .mx_2()
-                    .my_1()
-                    .on_click(cx.listener(|this, _: &ClickEvent, _w, cx| {
-                        this.model.scm.load_more_history();
+            w.push(SCM_ROW_H, || {
+                note(
+                    if s.history_loading() {
+                        "Loading more commits...".into()
+                    } else {
+                        "Scroll for more commits".into()
+                    },
+                    theme::TEXT_DIM,
+                )
+            });
+            if near_end && !s.history_loading() {
+                let entity = cx.entity();
+                cx.defer(move |cx| {
+                    entity.update(cx, |wb, cx| {
+                        wb.model.scm.load_more_history();
                         cx.notify();
-                    }))
-                    .into_any_element(),
-            );
+                    });
+                });
+            }
         }
+        body.extend(w.finish());
     }
 
     fn diff_rows(view: &scm::DiffView, lo: f32, hi: f32) -> Vec<AnyElement> {
@@ -4376,7 +4407,7 @@ impl Workbench {
             scm::DiffState::Ready(d) => d,
         };
         // Only the lines near the viewport become elements; every other row is a known height, so one spacer stands in for them.
-        let mut w = DiffWindow::new(lo, hi);
+        let mut w = RowWindow::new(lo, hi);
         w.push(DIFF_NOTE_H, || {
             note(
                 format!(
