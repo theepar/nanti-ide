@@ -14,3 +14,9 @@ PRD*.md
 Thumbs.db
 *.pdb
 webview-spike.log
+
+# Vendor extension packages are proprietary: never commit or redistribute
+*.vsix
+gatec/
+vendor/
+THIRD_PARTY_LICENSES.txt
