@@ -10,8 +10,8 @@ BEGIN
   BEGIN
     BLOCK "040904B0"
     BEGIN
-      VALUE "FileDescription", "nanti"
-      VALUE "ProductName", "nanti"
+      VALUE "FileDescription", "Nanti IDE"
+      VALUE "ProductName", "Nanti IDE"
       VALUE "InternalName", "nanti"
       VALUE "OriginalFilename", "nanti.exe"
       VALUE "FileVersion", "1.0.0"
