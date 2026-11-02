@@ -13,6 +13,11 @@ const ASSETS: &[(&str, &str)] = &[
         include_str!("../assets/icons/folder.svg"),
     ),
     ("icons/close.svg", include_str!("../assets/icons/close.svg")),
+    ("icons/error.svg", include_str!("../assets/icons/error.svg")),
+    (
+        "icons/warning.svg",
+        include_str!("../assets/icons/warning.svg"),
+    ),
     ("icons/plus.svg", include_str!("../assets/icons/plus.svg")),
     ("icons/trash.svg", include_str!("../assets/icons/trash.svg")),
     (
@@ -30,10 +35,6 @@ const ASSETS: &[(&str, &str)] = &[
     (
         "icons/layout-panel-on.svg",
         include_str!("../assets/icons/layout-panel-on.svg"),
-    ),
-    (
-        "icons/layout-right-on.svg",
-        include_str!("../assets/icons/layout-right-on.svg"),
     ),
     (
         "icons/minimize.svg",
@@ -89,10 +90,6 @@ const ASSETS: &[(&str, &str)] = &[
     (
         "icons/layout-panel.svg",
         include_str!("../assets/icons/layout-panel.svg"),
-    ),
-    (
-        "icons/layout-right.svg",
-        include_str!("../assets/icons/layout-right.svg"),
     ),
     ("icons/file.svg", include_str!("../assets/icons/file.svg")),
     (

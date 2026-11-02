@@ -85,6 +85,8 @@ pub struct HostConfig {
     pub selftest_log: Option<PathBuf>,
 }
 
+const THEME_CSS: &str = ":root{color-scheme:dark;--vscode-editor-background:#1e1e1e;--vscode-editor-foreground:#cccccc;--vscode-foreground:#cccccc;--vscode-sideBar-background:#1e1e1e;--vscode-editorWidget-background:#252526;--vscode-editorWidget-foreground:#cccccc;--vscode-editorWidget-border:#454545;--vscode-widget-border:#454545;--vscode-panel-border:#2b2b2b;--vscode-editorHoverWidget-background:#252526;--vscode-editorHoverWidget-foreground:#cccccc;--vscode-editorHoverWidget-border:#454545;--vscode-editorHoverWidget-statusBarBackground:#2c2c2d;--vscode-input-background:#2b2b2b;--vscode-input-foreground:#cccccc;--vscode-input-border:#3c3c3c;--vscode-input-placeholderForeground:#858585;--vscode-button-background:#0e639c;--vscode-button-foreground:#ffffff;--vscode-button-hoverBackground:#1177bb;--vscode-button-border:transparent;--vscode-button-secondaryBackground:#3a3d41;--vscode-button-secondaryHoverBackground:#45494e;--vscode-focusBorder:#4a4a4a;--vscode-contrastBorder:transparent;--vscode-textLink-foreground:#3794ff;--vscode-textLink-activeForeground:#3794ff;--vscode-editorLink-activeForeground:#4e94ce;--vscode-textCodeBlock-background:#2b2b2b;--vscode-textPreformat-foreground:#d7ba7d;--vscode-textPreformat-background:#3c3c3c;--vscode-descriptionForeground:#9d9d9d;--vscode-disabledForeground:#6b6b6b;--vscode-errorForeground:#f48771;--vscode-icon-foreground:#c5c5c5;--vscode-toolbar-hoverBackground:#2a2d2e;--vscode-list-hoverBackground:#2a2d2e;--vscode-list-activeSelectionBackground:#37373d;--vscode-list-activeSelectionForeground:#ffffff;--vscode-menu-background:#252526;--vscode-menu-foreground:#cccccc;--vscode-menu-border:#454545;--vscode-menu-selectionBackground:#37373d;--vscode-menu-selectionForeground:#ffffff;--vscode-scrollbarSlider-background:#4242427f;--vscode-scrollbarSlider-hoverBackground:#5a5a5a99;--vscode-scrollbarSlider-activeBackground:#7a7a7a99;--vscode-badge-background:#4d4d4d;--vscode-badge-foreground:#ffffff;--vscode-banner-background:#2b2a1f;--vscode-progressBar-background:#0e70c0;--vscode-notifications-background:#252526;--vscode-diffEditor-insertedTextBackground:#9ccc2c33;--vscode-diffEditor-removedTextBackground:#ff000033;--vscode-diffEditor-insertedLineBackground:#9bb95533;--vscode-diffEditor-removedLineBackground:#ff000033;--vscode-gitDecoration-addedResourceForeground:#81b88b;--vscode-gitDecoration-deletedResourceForeground:#c74e39;--vscode-problemsErrorIcon-foreground:#f14c4c;--vscode-problemsWarningIcon-foreground:#cca700;--vscode-problemsInfoIcon-foreground:#3794ff;--vscode-inputValidation-infoBorder:#3794ff;--vscode-charts-blue:#3794ff;--vscode-terminal-ansiBlack:#000000;--vscode-terminal-ansiRed:#cd3131;--vscode-terminal-ansiGreen:#0dbc79;--vscode-terminal-ansiYellow:#e5e510;--vscode-terminal-ansiBlue:#2472c8;--vscode-terminal-ansiMagenta:#bc3fbc;--vscode-terminal-ansiCyan:#11a8cd;--vscode-terminal-ansiWhite:#e5e5e5;--vscode-terminal-ansiBrightBlack:#666666;--vscode-keybindingLabel-background:#8080802b;--vscode-keybindingLabel-foreground:#cccccc;--vscode-keybindingLabel-border:#3333337f;--vscode-keybindingLabel-bottomBorder:#4444447f;--vscode-editorGhostText-foreground:#ffffff56;--vscode-editorLineNumber-foreground:#6e7681;--vscode-editor-findMatchBackground:#515c6a;--vscode-editor-findRangeHighlightBackground:#3a3d4166;--vscode-font-family:'Segoe UI',system-ui,sans-serif;--vscode-font-size:13px;--vscode-font-weight:normal;--vscode-editor-font-family:Consolas,'Courier New',monospace;--vscode-editor-font-size:14px;}html,body{background:#1e1e1e;color:#cccccc;}";
+
 const INIT_SCRIPT: &str = r#"
 (() => {
   let state = null;
@@ -100,6 +102,20 @@ const INIT_SCRIPT: &str = r#"
     acquired = true;
     return api;
   };
+  const applyTheme = () => {
+    const root = document.documentElement;
+    if (!root || document.getElementById("__nanti_theme")) return;
+    const style = document.createElement("style");
+    style.id = "__nanti_theme";
+    style.textContent = "__THEME_CSS__";
+    (document.head || root).appendChild(style);
+    root.setAttribute("data-vscode-theme-kind", "vscode-dark");
+    root.setAttribute("data-vscode-theme-id", "Nanti Dark");
+    if (document.body) document.body.classList.add("vscode-dark");
+  };
+  applyTheme();
+  document.addEventListener("readystatechange", applyTheme);
+  document.addEventListener("DOMContentLoaded", applyTheme);
   window.__nantiDeliver = (message) => window.dispatchEvent(new MessageEvent("message", { data: message }));
   // Page errors are surfaced to the host log (diagnostics only; the host ignores them unless asked).
   const diag = (kind, message) => window.ipc.postMessage(JSON.stringify({ type: "diag", kind, message: String(message).slice(0, 300) }));
@@ -142,7 +158,8 @@ impl Panel {
         let ipc_diag = diag_log.clone();
         let webview = WebViewBuilder::new()
             .with_https_scheme(true)
-            .with_initialization_script(INIT_SCRIPT)
+            .with_initialization_script(INIT_SCRIPT.replace("__THEME_CSS__", THEME_CSS))
+            .with_background_color((30, 30, 30, 255))
             .with_custom_protocol("nanti-resource".into(), move |_id, request| {
                 let served = {
                     let st = protocol_state.lock().unwrap();

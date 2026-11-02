@@ -2779,7 +2779,6 @@ impl Workbench {
                     match icon_name {
                         "layout-sidebar" => "layout-sidebar-on",
                         "layout-panel" => "layout-panel-on",
-                        "layout-right" => "layout-right-on",
                         other => other,
                     }
                 } else {
@@ -2847,6 +2846,9 @@ impl Workbench {
                             .id("status-problems")
                             .px_2()
                             .cursor_pointer()
+                            .flex()
+                            .items_center()
+                            .gap_1()
                             .text_color(rgb(if problems > 0 {
                                 0xe5534b
                             } else {
@@ -2856,7 +2858,16 @@ impl Workbench {
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                                 this.apply_command(Command::ShowProblems, window, cx);
                             }))
-                            .child(SharedString::from(format!("✖ {problems}"))),
+                            .child(assets::icon(
+                                "error",
+                                13.,
+                                if problems > 0 {
+                                    0xe5534b
+                                } else {
+                                    theme::TEXT_DIM
+                                },
+                            ))
+                            .child(SharedString::from(problems.to_string())),
                     )
                     .child(
                         div()

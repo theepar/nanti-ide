@@ -54,6 +54,12 @@ fn hide_console() {
 }
 
 fn main() {
+    // The native webview is a child window; the default topmost composition surface would paint over it.
+    // SAFETY: runs first thing in main, before any other thread exists.
+    #[cfg(windows)]
+    unsafe {
+        std::env::set_var("GPUI_DISABLE_DIRECT_COMPOSITION", "1");
+    }
     #[cfg(all(windows, not(debug_assertions)))]
     hide_console();
     Application::new()
