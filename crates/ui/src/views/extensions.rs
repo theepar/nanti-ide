@@ -803,12 +803,79 @@ impl Workbench {
             .into_any_element()
     }
 
+    fn recommended_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let mut rows: Vec<AnyElement> = Vec::new();
+
+        if self.model.marketplace_searching {
+            rows.push(
+                div()
+                    .px_3()
+                    .py(px(4.))
+                    .bg(rgb(theme::PANEL))
+                    .text_size(px(11.))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(rgb(theme::TEXT_DIM))
+                    .child("RECOMMENDED")
+                    .into_any_element(),
+            );
+            rows.push(
+                div()
+                    .px_3()
+                    .py_2()
+                    .text_size(px(12.))
+                    .text_color(rgb(theme::TEXT_DIM))
+                    .child("Loading recommendations from Open VSX...")
+                    .into_any_element(),
+            );
+        } else if !self.model.marketplace_results.is_empty() {
+            rows.push(
+                div()
+                    .px_3()
+                    .py(px(4.))
+                    .bg(rgb(theme::PANEL))
+                    .text_size(px(11.))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(rgb(theme::TEXT_DIM))
+                    .child(SharedString::from(format!(
+                        "RECOMMENDED ({})",
+                        self.model.marketplace_results.len()
+                    )))
+                    .into_any_element(),
+            );
+            for (i, m) in self.model.marketplace_results.iter().enumerate() {
+                rows.push(self.render_marketplace_item(i, m, cx));
+            }
+        } else if let Some(err) = &self.model.marketplace_message {
+            rows.push(
+                div()
+                    .px_3()
+                    .py(px(4.))
+                    .bg(rgb(theme::PANEL))
+                    .text_size(px(11.))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(rgb(theme::TEXT_DIM))
+                    .child("RECOMMENDED")
+                    .into_any_element(),
+            );
+            rows.push(
+                div()
+                    .px_3()
+                    .py_2()
+                    .text_size(px(12.))
+                    .text_color(rgb(0xe5534b))
+                    .child(SharedString::from(err.clone()))
+                    .into_any_element(),
+            );
+        }
+        rows
+    }
+
     pub(crate) fn extensions_panel(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let mut list_rows: Vec<AnyElement> = Vec::new();
         let query = self.model.ext_query.text().trim().to_owned();
 
         if !query.is_empty() {
-            if self.model.marketplace_searching {
+            if self.model.marketplace_searching && self.model.marketplace_results.is_empty() {
                 list_rows.push(
                     div()
                         .px_3()
@@ -841,6 +908,8 @@ impl Workbench {
                             "{} ({})",
                             if self.model.marketplace_recommended {
                                 "RECOMMENDED"
+                            } else if self.model.marketplace_searching {
+                                "UPDATING"
                             } else {
                                 "MARKETPLACE"
                             },
@@ -891,70 +960,6 @@ impl Workbench {
                     .child("No extensions installed. Search above or install a .vsix package.")
                     .into_any_element(),
             );
-
-            if query.is_empty() {
-                if self.model.marketplace_searching {
-                    list_rows.push(
-                        div()
-                            .px_3()
-                            .py(px(4.))
-                            .bg(rgb(theme::PANEL))
-                            .text_size(px(11.))
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(rgb(theme::TEXT_DIM))
-                            .child("RECOMMENDED")
-                            .into_any_element(),
-                    );
-                    list_rows.push(
-                        div()
-                            .px_3()
-                            .py_2()
-                            .text_size(px(12.))
-                            .text_color(rgb(theme::TEXT_DIM))
-                            .child("Loading recommendations from Open VSX...")
-                            .into_any_element(),
-                    );
-                } else if !self.model.marketplace_results.is_empty() {
-                    list_rows.push(
-                        div()
-                            .px_3()
-                            .py(px(4.))
-                            .bg(rgb(theme::PANEL))
-                            .text_size(px(11.))
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(rgb(theme::TEXT_DIM))
-                            .child(SharedString::from(format!(
-                                "RECOMMENDED ({})",
-                                self.model.marketplace_results.len()
-                            )))
-                            .into_any_element(),
-                    );
-                    for (i, m) in self.model.marketplace_results.iter().enumerate() {
-                        list_rows.push(self.render_marketplace_item(i, m, cx));
-                    }
-                } else if let Some(err) = &self.model.marketplace_message {
-                    list_rows.push(
-                        div()
-                            .px_3()
-                            .py(px(4.))
-                            .bg(rgb(theme::PANEL))
-                            .text_size(px(11.))
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(rgb(theme::TEXT_DIM))
-                            .child("RECOMMENDED")
-                            .into_any_element(),
-                    );
-                    list_rows.push(
-                        div()
-                            .px_3()
-                            .py_2()
-                            .text_size(px(12.))
-                            .text_color(rgb(0xe5534b))
-                            .child(SharedString::from(err.clone()))
-                            .into_any_element(),
-                    );
-                }
-            }
         } else {
             for (i, x) in self.model.extensions.iter().enumerate() {
                 let active = self.model.panel_extension.as_deref() == Some(x.dir.as_path());
@@ -1015,6 +1020,10 @@ impl Workbench {
                         .into_any_element(),
                 );
             }
+        }
+
+        if query.is_empty() {
+            list_rows.extend(self.recommended_rows(cx));
         }
 
         let search_field = self.field_widget(

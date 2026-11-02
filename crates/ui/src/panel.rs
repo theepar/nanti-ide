@@ -85,6 +85,9 @@ pub struct HostConfig {
     pub selftest_log: Option<PathBuf>,
 }
 
+/// One script call per tick keeps the shared UI thread free for clicks while a session streams.
+const DELIVER_BYTES_PER_TICK: usize = 192 * 1024;
+
 const THEME_CSS: &str = ":root{color-scheme:dark;--vscode-editor-background:#1e1e1e;--vscode-editor-foreground:#cccccc;--vscode-foreground:#cccccc;--vscode-sideBar-background:#1e1e1e;--vscode-editorWidget-background:#252526;--vscode-editorWidget-foreground:#cccccc;--vscode-editorWidget-border:#454545;--vscode-widget-border:#454545;--vscode-panel-border:#2b2b2b;--vscode-editorHoverWidget-background:#252526;--vscode-editorHoverWidget-foreground:#cccccc;--vscode-editorHoverWidget-border:#454545;--vscode-editorHoverWidget-statusBarBackground:#2c2c2d;--vscode-input-background:#2b2b2b;--vscode-input-foreground:#cccccc;--vscode-input-border:#3c3c3c;--vscode-input-placeholderForeground:#858585;--vscode-button-background:#3a3a3a;--vscode-button-foreground:#ffffff;--vscode-button-hoverBackground:#4a4a4a;--vscode-button-border:transparent;--vscode-button-secondaryBackground:#3a3d41;--vscode-button-secondaryHoverBackground:#45494e;--vscode-focusBorder:#4a4a4a;--vscode-contrastBorder:transparent;--vscode-textLink-foreground:#3794ff;--vscode-textLink-activeForeground:#3794ff;--vscode-editorLink-activeForeground:#4e94ce;--vscode-textCodeBlock-background:#2b2b2b;--vscode-textPreformat-foreground:#d7ba7d;--vscode-textPreformat-background:#3c3c3c;--vscode-descriptionForeground:#9d9d9d;--vscode-disabledForeground:#6b6b6b;--vscode-errorForeground:#f48771;--vscode-icon-foreground:#c5c5c5;--vscode-toolbar-hoverBackground:#2a2d2e;--vscode-list-hoverBackground:#2a2d2e;--vscode-list-activeSelectionBackground:#37373d;--vscode-list-activeSelectionForeground:#ffffff;--vscode-menu-background:#252526;--vscode-menu-foreground:#cccccc;--vscode-menu-border:#454545;--vscode-menu-selectionBackground:#37373d;--vscode-menu-selectionForeground:#ffffff;--vscode-scrollbarSlider-background:#4242427f;--vscode-scrollbarSlider-hoverBackground:#5a5a5a99;--vscode-scrollbarSlider-activeBackground:#7a7a7a99;--vscode-badge-background:#4d4d4d;--vscode-badge-foreground:#ffffff;--vscode-banner-background:#2b2a1f;--vscode-progressBar-background:#b8b8b8;--vscode-list-focusBackground:#37373d;--vscode-list-focusForeground:#ffffff;--vscode-list-inactiveSelectionBackground:#37373d;--vscode-quickInputList-focusBackground:#37373d;--vscode-inputOption-activeBorder:#8a8a8a;--vscode-inputOption-activeBackground:#4a4a4a;--vscode-inputOption-hoverBackground:#3a3a3a;--vscode-toolbar-activeBackground:#3a3a3a;--vscode-notifications-background:#252526;--vscode-diffEditor-insertedTextBackground:#9ccc2c33;--vscode-diffEditor-removedTextBackground:#ff000033;--vscode-diffEditor-insertedLineBackground:#9bb95533;--vscode-diffEditor-removedLineBackground:#ff000033;--vscode-gitDecoration-addedResourceForeground:#81b88b;--vscode-gitDecoration-deletedResourceForeground:#c74e39;--vscode-problemsErrorIcon-foreground:#f14c4c;--vscode-problemsWarningIcon-foreground:#cca700;--vscode-problemsInfoIcon-foreground:#3794ff;--vscode-inputValidation-infoBorder:#3794ff;--vscode-charts-blue:#3794ff;--vscode-terminal-ansiBlack:#000000;--vscode-terminal-ansiRed:#cd3131;--vscode-terminal-ansiGreen:#0dbc79;--vscode-terminal-ansiYellow:#e5e510;--vscode-terminal-ansiBlue:#2472c8;--vscode-terminal-ansiMagenta:#bc3fbc;--vscode-terminal-ansiCyan:#11a8cd;--vscode-terminal-ansiWhite:#e5e5e5;--vscode-terminal-ansiBrightBlack:#666666;--vscode-keybindingLabel-background:#8080802b;--vscode-keybindingLabel-foreground:#cccccc;--vscode-keybindingLabel-border:#3333337f;--vscode-keybindingLabel-bottomBorder:#4444447f;--vscode-editorGhostText-foreground:#ffffff56;--vscode-editorLineNumber-foreground:#6e7681;--vscode-editor-findMatchBackground:#515c6a;--vscode-editor-findRangeHighlightBackground:#3a3d4166;--vscode-font-family:'Segoe UI',system-ui,sans-serif;--vscode-font-size:13px;--vscode-font-weight:normal;--vscode-editor-font-family:Consolas,'Courier New',monospace;--vscode-editor-font-size:14px;}html,body{background:#1e1e1e;color:#cccccc;}";
 
 const INIT_SCRIPT: &str = r#"
@@ -117,6 +120,7 @@ const INIT_SCRIPT: &str = r#"
   document.addEventListener("readystatechange", applyTheme);
   document.addEventListener("DOMContentLoaded", applyTheme);
   window.__nantiDeliver = (message) => window.dispatchEvent(new MessageEvent("message", { data: message }));
+  window.__nantiDeliverBatch = (messages) => { for (const m of messages) window.__nantiDeliver(m); };
   // Page errors are surfaced to the host log (diagnostics only; the host ignores them unless asked).
   const diag = (kind, message) => window.ipc.postMessage(JSON.stringify({ type: "diag", kind, message: String(message).slice(0, 300) }));
   window.addEventListener("error", (e) => diag("error", e.message + " @" + (e.filename || "").slice(-60) + ":" + e.lineno));
@@ -293,10 +297,24 @@ impl Panel {
                     );
                 }
             }
-            for m in self.queued.drain(..) {
+            let mut batch = String::new();
+            let mut taken = 0;
+            for m in &self.queued {
+                let lit = js_literal(m);
+                if taken > 0 && batch.len() + lit.len() > DELIVER_BYTES_PER_TICK {
+                    break;
+                }
+                if taken > 0 {
+                    batch.push(',');
+                }
+                batch.push_str(&lit);
+                taken += 1;
+            }
+            if taken > 0 {
+                self.queued.drain(..taken);
                 let _ = self
                     .webview
-                    .evaluate_script(&format!("window.__nantiDeliver({})", js_literal(&m)));
+                    .evaluate_script(&format!("window.__nantiDeliverBatch([{batch}])"));
             }
         }
         ui

@@ -477,6 +477,12 @@ impl Model {
         self.tabs.retain(|t| t.is_dirty());
         self.active_tab = if self.tabs.is_empty() { None } else { Some(0) };
         self.message = Some(format!("Opened folder {}", self.root.display()));
+        if let (Some(dir), Some(cfg)) = (self.panel_extension.clone(), self.config_dir.clone())
+            && let Some((chosen, view)) = crate::extensions::load_panel_choice(&cfg)
+            && chosen == dir
+        {
+            self.panel_request = Some((dir, view));
+        }
     }
 
     pub fn open_file(&mut self, path: &Path) {
@@ -2123,6 +2129,28 @@ mod tests {
         assert!(!m.layout.panel);
         m.run_command(Command::TogglePanel);
         assert!(m.layout.panel);
+    }
+
+    #[test]
+    fn opening_a_folder_restarts_the_extension_panel_for_that_workspace() {
+        let base = std::env::temp_dir().join(format!("nanti-panelws-{}", std::process::id()));
+        let folder = base.join("project");
+        std::fs::create_dir_all(&folder).unwrap();
+        let ext = base.join("ext");
+        std::fs::create_dir_all(&ext).unwrap();
+        std::fs::write(ext.join("package.json"), "{}").unwrap();
+        crate::extensions::save_panel_choice(&base, &ext, "view").unwrap();
+        let mut m = Model::without_folder();
+        m.config_dir = Some(base.clone());
+        m.open_folder(folder.clone());
+        assert!(
+            m.panel_request.is_none(),
+            "no panel running, nothing to restart"
+        );
+        m.panel_extension = Some(ext.clone());
+        m.open_folder(folder);
+        assert_eq!(m.panel_request, Some((ext, "view".to_owned())));
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

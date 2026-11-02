@@ -597,10 +597,13 @@ impl Model {
 
     pub fn search_marketplace(&mut self, query: &str) {
         let q = query.trim().to_owned();
-        self.marketplace_results.clear();
         self.marketplace_message = None;
+        if self.marketplace_recommended {
+            self.marketplace_results.clear();
+        }
         self.marketplace_recommended = false;
         if q.is_empty() {
+            self.marketplace_results.clear();
             self.marketplace_searching = false;
             self.marketplace_query = None;
             self.marketplace_rx = None;
@@ -812,7 +815,6 @@ impl Model {
             || self.marketplace_searching
             || self.marketplace_query.is_some()
             || !self.marketplace_results.is_empty()
-            || !self.extensions.is_empty()
         {
             return false;
         }
@@ -832,7 +834,7 @@ impl Model {
         use std::sync::mpsc::TryRecvError;
         let mut changed = self.recommend_if_idle();
         if let Some(t) = self.ext_search_debounce
-            && t.elapsed() >= std::time::Duration::from_millis(400)
+            && t.elapsed() >= std::time::Duration::from_millis(150)
         {
             self.ext_search_debounce = None;
             let q = self.ext_query.text().trim().to_owned();

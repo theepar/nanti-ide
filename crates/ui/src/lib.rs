@@ -549,6 +549,8 @@ impl Workbench {
         match Panel::new(window, events, to_host, diag_log) {
             Ok(panel) => {
                 self.panel = Some(panel);
+                self.webview_applied = Some((-1, -1, 0, 0));
+                self.status_items.clear();
                 self.model.panel_extension = Some(dir);
                 self.model.refresh_extensions();
                 self.model.open_extension_tab();
