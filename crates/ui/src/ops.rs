@@ -95,6 +95,9 @@ impl Model {
     }
 
     pub(crate) fn cmd_new(&mut self, folder: bool) {
+        if !self.folder_open {
+            return self.say("Explorer", "Open a folder first");
+        }
         let dir = self.selected_dir();
         let kind = if folder {
             InputKind::NewFolder(dir)
@@ -150,6 +153,42 @@ impl Model {
         }
         #[cfg(not(windows))]
         let _ = p;
+    }
+
+    pub(crate) fn open_branch_picker(&mut self) {
+        if self.scm.status.is_none() {
+            return self.say("Git", "No Git repository");
+        }
+        self.context_menu = None;
+        self.menu_open = None;
+        self.palette = Some(Palette::branches(&self.scm.branches));
+    }
+
+    pub fn confirm_discard(&mut self, rel: &str, untracked: bool) {
+        self.prompt = Some(Prompt::DiscardChanges {
+            rel: rel.to_owned(),
+            untracked,
+        });
+    }
+
+    pub(crate) fn discard_changes(&mut self, rel: &str, untracked: bool) {
+        if !untracked {
+            return self.scm.discard(rel);
+        }
+        let Some(repo_root) = self.scm.repo_root().map(Path::to_path_buf) else {
+            return;
+        };
+        self.delete_item(&repo_root.join(rel.trim_end_matches('/')));
+    }
+
+    pub(crate) fn reload_clean_tabs(&mut self) {
+        for i in 0..self.tabs.len() {
+            let tab = &self.tabs[i];
+            let clean_text = matches!(&tab.content, TabContent::Text(e) if !e.is_dirty());
+            if clean_text && crate::model::DiskStamp::of(&tab.path) != tab.stamp {
+                self.reload_tab(i);
+            }
+        }
     }
 
     pub(crate) fn cmd_go_to_line(&mut self) {
@@ -254,6 +293,14 @@ impl Model {
             InputKind::Rename(from) => {
                 let to = ops::rename(&self.root, &from, text)?;
                 self.after_rename(&from, &to);
+                Ok(())
+            }
+            InputKind::NewBranch => {
+                let name = text.trim();
+                if name.is_empty() {
+                    return Err("enter a branch name".into());
+                }
+                self.scm.new_branch(name);
                 Ok(())
             }
             InputKind::InstallVsix => {

@@ -520,6 +520,12 @@ fn parse_hunk_header(rest: &str) -> (u32, u32) {
     (old, new)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Branch {
+    pub name: String,
+    pub current: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct Repo {
     pub root: PathBuf,
@@ -773,6 +779,78 @@ impl Repo {
                 stderr: text,
             })
         }
+    }
+
+    pub fn branches(&self) -> Result<Vec<Branch>, GitError> {
+        let out = self.exec(
+            &[
+                "for-each-ref",
+                "--format=%(HEAD)%(refname:short)",
+                "refs/heads",
+            ],
+            None,
+            STATUS_TIMEOUT,
+            1024 * 1024,
+            true,
+        )?;
+        if out.code != Some(0) {
+            return Err(GitError::Failed {
+                command: "for-each-ref".into(),
+                code: out.code,
+                stderr: out.stderr,
+            });
+        }
+        let mut list: Vec<Branch> = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter(|l| l.len() > 1)
+            .map(|l| Branch {
+                current: l.starts_with('*'),
+                name: l[1..].to_owned(),
+            })
+            .collect();
+        list.sort_by_key(|b| b.name.to_lowercase());
+        Ok(list)
+    }
+
+    fn check_branch_name(&self, name: &str) -> Result<(), GitError> {
+        if name.is_empty() || name.starts_with('-') || name.chars().any(char::is_whitespace) {
+            return Err(GitError::Rejected(format!(
+                "{name:?} is not a valid branch name"
+            )));
+        }
+        let out = self.exec(
+            &["check-ref-format", "--branch", name],
+            None,
+            STATUS_TIMEOUT,
+            1024,
+            true,
+        )?;
+        if out.code == Some(0) {
+            Ok(())
+        } else {
+            Err(GitError::Rejected(format!(
+                "{name:?} is not a valid branch name"
+            )))
+        }
+    }
+
+    pub fn checkout(&self, name: &str) -> Result<(), GitError> {
+        self.check_branch_name(name)?;
+        self.ok(&["switch", name], WRITE_TIMEOUT).map(|_| ())
+    }
+
+    pub fn create_branch(&self, name: &str) -> Result<(), GitError> {
+        self.check_branch_name(name)?;
+        self.ok(&["switch", "-c", name], WRITE_TIMEOUT).map(|_| ())
+    }
+
+    pub fn discard(&self, paths: &[String]) -> Result<(), GitError> {
+        if paths.is_empty() {
+            return Ok(());
+        }
+        let mut args = vec!["restore", "--"];
+        args.extend(paths.iter().map(String::as_str));
+        self.ok(&args, WRITE_TIMEOUT).map(|_| ())
     }
 }
 
@@ -1345,5 +1423,137 @@ u UU N... 100644 100644 100644 100644 aaaa bbbb cccc conflict.txt\0\
         std::fs::write(repo.root.join(".git/index.lock"), "").unwrap();
         assert!(repo.status().is_ok());
         let _ = std::fs::remove_file(repo.root.join(".git/index.lock"));
+    }
+
+    #[test]
+    fn branches_list_current_first_marker_and_sorted_names() {
+        let (_t, repo) = new_repo("branches");
+        assert!(
+            repo.branches().unwrap().is_empty(),
+            "no commit yet, no branch"
+        );
+        write(&repo, "a.txt", "1\n");
+        commit_all(&repo, "base");
+        sh(&repo.root, &["branch", "Zeta"]);
+        sh(&repo.root, &["branch", "alpha"]);
+        let list = repo.branches().unwrap();
+        let names: Vec<&str> = list.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(names, ["alpha", "main", "Zeta"]);
+        assert_eq!(list.iter().filter(|b| b.current).count(), 1);
+        assert!(list.iter().find(|b| b.name == "main").unwrap().current);
+    }
+
+    #[test]
+    fn create_and_switch_branches_and_see_the_change_in_status() {
+        let (_t, repo) = new_repo("switch");
+        write(&repo, "a.txt", "1\n");
+        commit_all(&repo, "base");
+        repo.create_branch("feature/x").unwrap();
+        assert_eq!(repo.status().unwrap().branch.as_deref(), Some("feature/x"));
+        write(&repo, "b.txt", "2\n");
+        commit_all(&repo, "on feature");
+        repo.checkout("main").unwrap();
+        assert!(!repo.root.join("b.txt").exists());
+        assert_eq!(repo.status().unwrap().branch.as_deref(), Some("main"));
+        assert!(repo.create_branch("feature/x").is_err(), "already exists");
+        repo.checkout("feature/x").unwrap();
+        assert!(repo.root.join("b.txt").exists());
+    }
+
+    #[test]
+    fn bad_branch_names_are_refused_before_git_changes_anything() {
+        let (_t, repo) = new_repo("badnames");
+        write(&repo, "a.txt", "1\n");
+        commit_all(&repo, "base");
+        for bad in [
+            "", "-d", "--force", "a b", "a..b", "x~1", "bad:name", "end.lock", "/lead", "trail/",
+            "q?",
+        ] {
+            assert!(
+                matches!(repo.create_branch(bad), Err(GitError::Rejected(_))),
+                "{bad:?}"
+            );
+            assert!(
+                matches!(repo.checkout(bad), Err(GitError::Rejected(_))),
+                "{bad:?}"
+            );
+        }
+        assert_eq!(repo.branches().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn switching_with_conflicting_local_changes_is_refused_and_keeps_the_work() {
+        let (_t, repo) = new_repo("dirtyswitch");
+        write(&repo, "a.txt", "base\n");
+        commit_all(&repo, "base");
+        repo.create_branch("other").unwrap();
+        write(&repo, "a.txt", "other\n");
+        commit_all(&repo, "other edit");
+        repo.checkout("main").unwrap();
+        write(&repo, "a.txt", "my unsaved work\n");
+        let err = repo.checkout("other").unwrap_err();
+        assert!(matches!(err, GitError::Failed { .. }), "{err:?}");
+        assert_eq!(
+            std::fs::read_to_string(repo.root.join("a.txt")).unwrap(),
+            "my unsaved work\n"
+        );
+        assert_eq!(repo.status().unwrap().branch.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn discard_restores_the_index_version_and_keeps_staged_work() {
+        let (_t, repo) = new_repo("discard");
+        write(&repo, "a.txt", "one\n");
+        write(&repo, "b.txt", "bee\n");
+        write(&repo, "[x].txt", "lit\n");
+        write(&repo, "x.txt", "glob decoy\n");
+        commit_all(&repo, "base");
+        write(&repo, "a.txt", "staged edit\n");
+        sh(&repo.root, &["add", "a.txt"]);
+        write(&repo, "a.txt", "staged edit\nplus unstaged\n");
+        write(&repo, "b.txt", "changed\n");
+        write(&repo, "[x].txt", "changed\n");
+        write(&repo, "x.txt", "changed\n");
+        std::fs::remove_file(repo.root.join("b.txt")).unwrap();
+        repo.discard(&["a.txt".to_owned(), "b.txt".to_owned(), "[x].txt".to_owned()])
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(repo.root.join("a.txt")).unwrap(),
+            "staged edit\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.root.join("b.txt")).unwrap(),
+            "bee\n",
+            "a deleted file comes back"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.root.join("[x].txt")).unwrap(),
+            "lit\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.root.join("x.txt")).unwrap(),
+            "changed\n",
+            "the glob decoy is untouched"
+        );
+        let st = repo.status().unwrap();
+        assert_eq!(
+            st.entry_for("a.txt").unwrap().staged,
+            Some(Change::Modified)
+        );
+        assert_eq!(st.entry_for("a.txt").unwrap().unstaged, None);
+        repo.discard(&[]).unwrap();
+    }
+
+    #[test]
+    fn discard_refuses_untracked_files_and_leaves_them() {
+        let (_t, repo) = new_repo("discarduntracked");
+        write(&repo, "a.txt", "1\n");
+        commit_all(&repo, "base");
+        write(&repo, "new.txt", "keep\n");
+        assert!(repo.discard(&["new.txt".to_owned()]).is_err());
+        assert_eq!(
+            std::fs::read_to_string(repo.root.join("new.txt")).unwrap(),
+            "keep\n"
+        );
     }
 }

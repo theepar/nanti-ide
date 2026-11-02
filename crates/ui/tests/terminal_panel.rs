@@ -196,9 +196,10 @@ fn ctrl_c_interrupts_and_ctrl_v_pastes(cx: &mut TestAppContext) {
             .map(|t| t.lines().filter(|l| l.trim_end().ends_with('>')).count())
             .unwrap_or(0)
     };
-    cx.simulate_input("Start-Sleep 60");
+    cx.simulate_input("echo (\"busy-\"+\"now\"); Start-Sleep 60");
     cx.simulate_keystrokes("enter");
-    std::thread::sleep(Duration::from_millis(800));
+    assert!(wait_text(window, cx, "busy-now", 30), "the command started");
+    std::thread::sleep(Duration::from_millis(300));
     let before = window.update(cx, |wb, _, _| prompts(wb)).unwrap();
     cx.simulate_keystrokes("ctrl-c");
     let start = Instant::now();

@@ -993,8 +993,9 @@ mod tests {
                 .filter(|l| l.trim_end().ends_with('>'))
                 .count()
         };
-        t.send_text("Start-Sleep 60\r");
-        std::thread::sleep(Duration::from_millis(800));
+        t.send_text("echo (\"busy-\"+\"now\"); Start-Sleep 60\r");
+        assert!(wait_for(&t, "busy-now", 30), "the command started");
+        std::thread::sleep(Duration::from_millis(300));
         let before = prompts(&t);
         t.write(encode_key("c", CTRL, false).unwrap());
         let start = Instant::now();

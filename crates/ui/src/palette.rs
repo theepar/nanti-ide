@@ -75,10 +75,11 @@ pub enum Command {
     DeleteLine,
     IndentLines,
     OutdentLines,
+    SwitchBranch,
 }
 
 impl Command {
-    pub const ALL: [Command; 68] = [
+    pub const ALL: [Command; 69] = [
         Command::CommandPalette,
         Command::QuickOpen,
         Command::Save,
@@ -147,6 +148,7 @@ impl Command {
         Command::DeleteLine,
         Command::IndentLines,
         Command::OutdentLines,
+        Command::SwitchBranch,
     ];
 
     pub fn title(self) -> &'static str {
@@ -219,6 +221,7 @@ impl Command {
             Command::DeleteLine => "Edit: Delete Line",
             Command::IndentLines => "Edit: Indent Lines",
             Command::OutdentLines => "Edit: Outdent Lines",
+            Command::SwitchBranch => "Git: Switch Branch...",
         }
     }
 
@@ -477,6 +480,7 @@ impl TextField {
 pub enum PaletteMode {
     Commands,
     Files,
+    Branches,
     Input(InputKind),
 }
 
@@ -487,6 +491,7 @@ pub enum InputKind {
     NewFolder(PathBuf),
     Rename(PathBuf),
     InstallVsix,
+    NewBranch,
 }
 
 impl InputKind {
@@ -497,6 +502,7 @@ impl InputKind {
             InputKind::NewFolder(_) => "Folder name",
             InputKind::Rename(_) => "New name",
             InputKind::InstallVsix => "Full path of a .vsix file",
+            InputKind::NewBranch => "New branch name",
         }
     }
 }
@@ -505,6 +511,8 @@ impl InputKind {
 pub enum PaletteAction {
     Command(Command),
     OpenFile(PathBuf),
+    Checkout(String),
+    NewBranchPrompt,
     Submit(InputKind, String),
 }
 
@@ -560,6 +568,20 @@ impl Palette {
         };
         p.refilter();
         p
+    }
+
+    pub fn branches(list: &[git::Branch]) -> Self {
+        let mut items = vec![PaletteItem {
+            label: "Create new branch...".to_owned(),
+            detail: None,
+            action: PaletteAction::NewBranchPrompt,
+        }];
+        items.extend(list.iter().map(|b| PaletteItem {
+            label: b.name.clone(),
+            detail: b.current.then(|| "current".to_owned()),
+            action: PaletteAction::Checkout(b.name.clone()),
+        }));
+        Self::build(PaletteMode::Branches, items)
     }
 
     pub fn input(kind: InputKind, initial: &str) -> Self {
@@ -630,6 +652,7 @@ impl Palette {
         match &self.mode {
             PaletteMode::Commands => "Type a command",
             PaletteMode::Files => "Type a file name to open",
+            PaletteMode::Branches => "Select a branch to switch to",
             PaletteMode::Input(k) => k.placeholder(),
         }
     }

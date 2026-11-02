@@ -281,8 +281,16 @@ pub struct Workbench {
 
 impl Workbench {
     pub fn new(root: PathBuf, cx: &mut Context<Self>) -> Self {
+        Self::with_model(Model::new(root), cx)
+    }
+
+    pub fn new_empty(cx: &mut Context<Self>) -> Self {
+        Self::with_model(Model::without_folder(), cx)
+    }
+
+    fn with_model(model: Model, cx: &mut Context<Self>) -> Self {
         Self {
-            model: Model::new(root),
+            model,
             panel: None,
             status_items: BTreeMap::new(),
             external_prompt: None,
@@ -348,6 +356,31 @@ impl Workbench {
         self.model.marketplace_enabled = true;
     }
 
+    #[cfg(windows)]
+    fn native_pick(mode: &str, title: &str) -> Option<PathBuf> {
+        static PICKER_BYTES: &[u8] = include_bytes!("../res/nanti-picker.exe");
+        let temp_picker = std::env::temp_dir().join("nanti-picker.exe");
+        if !temp_picker.exists()
+            || temp_picker.metadata().map(|m| m.len()).unwrap_or(0) != PICKER_BYTES.len() as u64
+        {
+            let _ = std::fs::write(&temp_picker, PICKER_BYTES);
+        }
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let output = std::process::Command::new(&temp_picker)
+            .args([mode, title])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .ok()?;
+        if output.status.success() && !output.stdout.is_empty() {
+            let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !s.is_empty() {
+                return Some(PathBuf::from(s));
+            }
+        }
+        None
+    }
+
     pub fn enable_native_dialogs(&mut self) {
         self.model.native_dialogs = true;
     }
@@ -359,40 +392,75 @@ impl Workbench {
         cx: &mut Context<Self>,
     ) {
         use crate::model::PickRequest;
-        let (files, directories, prompt) = match req {
-            PickRequest::File => (true, false, None),
-            PickRequest::Folder => (false, true, Some("Select Folder")),
-            PickRequest::Vsix => (true, false, Some("Install")),
+        let (mode, title) = match req {
+            PickRequest::File => ("file", "Open File"),
+            PickRequest::Folder => ("folder", "Select Workspace Folder"),
+            PickRequest::Vsix => ("vsix", "Install Extension from VSIX"),
         };
-        let chosen = cx.prompt_for_paths(gpui::PathPromptOptions {
-            files,
-            directories,
-            multiple: false,
-            prompt: prompt.map(SharedString::new_static),
-        });
-        cx.spawn_in(window, async move |this, cx| {
-            let Ok(Ok(Some(paths))) = chosen.await else {
-                return;
-            };
-            let Some(path) = paths.into_iter().next() else {
-                return;
-            };
-            this.update_in(cx, |wb, window, cx| {
-                wb.model.apply_picked(req, path);
-                if req == PickRequest::File {
-                    wb.focus_editor(window);
-                }
-                wb.sync_focus(window);
-                wb.reveal_cursor();
-                cx.notify();
+        #[cfg(windows)]
+        {
+            let mode_s = mode.to_string();
+            let title_s = title.to_string();
+            cx.spawn_in(window, async move |this, cx| {
+                let chosen = cx
+                    .background_executor()
+                    .spawn(async move { Self::native_pick(&mode_s, &title_s) })
+                    .await;
+                let Some(path) = chosen else {
+                    return;
+                };
+                this.update_in(cx, |wb, window, cx| {
+                    wb.model.apply_picked(req, path);
+                    if req == PickRequest::File {
+                        wb.focus_editor(window);
+                    }
+                    wb.sync_focus(window);
+                    wb.reveal_cursor();
+                    cx.notify();
+                })
+                .ok();
             })
-            .ok();
-        })
-        .detach();
+            .detach();
+        }
+        #[cfg(not(windows))]
+        {
+            let (files, directories, prompt) = match req {
+                PickRequest::File => (true, false, None),
+                PickRequest::Folder => (false, true, Some("Select Folder")),
+                PickRequest::Vsix => (true, false, Some("Install")),
+            };
+            let chosen = cx.prompt_for_paths(gpui::PathPromptOptions {
+                files,
+                directories,
+                multiple: false,
+                prompt: prompt.map(SharedString::new_static),
+            });
+            cx.spawn_in(window, async move |this, cx| {
+                let Ok(Ok(Some(paths))) = chosen.await else {
+                    return;
+                };
+                let Some(path) = paths.into_iter().next() else {
+                    return;
+                };
+                this.update_in(cx, |wb, window, cx| {
+                    wb.model.apply_picked(req, path);
+                    if req == PickRequest::File {
+                        wb.focus_editor(window);
+                    }
+                    wb.sync_focus(window);
+                    wb.reveal_cursor();
+                    cx.notify();
+                })
+                .ok();
+            })
+            .detach();
+        }
     }
 
     pub fn set_layout_path(&mut self, path: PathBuf) {
         self.model.layout = Layout::load(&path);
+        self.model.layout.panel = false;
+        self.model.layout.panel_maximized = false;
         self.layout_saved = self.model.layout.clone();
         self.layout_path = Some(path);
     }
@@ -464,6 +532,7 @@ impl Workbench {
         if let Some(tab) = self.model.active()
             && let Some(lang) = Language::from_path(&tab.path)
             && matches!(lang, Language::Rust | Language::Go)
+            && self.model.folder_open
             && let Some(server) = self.lsp.ensure_server(lang, &self.model.root)
             && !server.opened.contains(&tab.path)
             && let TabContent::Text(e) = &tab.content
@@ -501,6 +570,7 @@ impl Workbench {
                 } => {
                     if let Some(path) = crate::lsp::uri_to_path(uri)
                         && let Some(lang) = Language::from_path(&path)
+                        && self.model.folder_open
                         && let Some(server) = self.lsp.ensure_server(lang, &self.model.root)
                     {
                         server.did_open(&path, lang, *version, text);
@@ -1574,7 +1644,11 @@ impl Workbench {
     }
 
     fn sidebar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let body: AnyElement = if self.model.activity == Activity::Explorer {
+        let body: AnyElement = if self.model.activity == Activity::Explorer
+            && !self.model.folder_open
+        {
+            self.no_folder_view(cx)
+        } else if self.model.activity == Activity::Explorer {
             let active_path = self.model.active().map(|t| t.path.clone());
             let entries = self.explorer_entries();
             let total = entries.len();
@@ -1917,6 +1991,19 @@ impl Workbench {
                         .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
                 ),
                 "Move to Recycle Bin",
+                "Keep",
+            ),
+            Prompt::DiscardChanges { rel, untracked } => (
+                if *untracked {
+                    format!("Move the new file {rel} to the Recycle Bin?")
+                } else {
+                    format!("Discard all unstaged changes to {rel}? This cannot be undone.")
+                },
+                if *untracked {
+                    "Move to Recycle Bin"
+                } else {
+                    "Discard"
+                },
                 "Keep",
             ),
             Prompt::RemoveExtension(p) => (
@@ -2493,7 +2580,7 @@ impl Workbench {
                             .cursor_pointer()
                             .hover(|s| s.bg(rgb(theme::HOVER)))
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.apply_command(Command::ShowSourceControl, window, cx);
+                                this.apply_command(Command::SwitchBranch, window, cx);
                             }))
                             .child(SharedString::from(branch)),
                     )
@@ -3060,7 +3147,7 @@ impl Workbench {
             let text = match (&s.error, s.is_enabled()) {
                 (Some(e), _) => e.clone(),
                 (None, true) => "Reading the repository status...".to_owned(),
-                (None, false) => "Source control is not active.".to_owned(),
+                (None, false) => "Open a folder to use source control.".to_owned(),
             };
             return div()
                 .flex()
@@ -3233,6 +3320,25 @@ impl Workbench {
                                 .flex_none()
                                 .items_center()
                                 .gap_2()
+                                .children((kind == scm::GroupKind::Changes).then(|| {
+                                    let discard_rel = row.rel.clone();
+                                    let untracked = row.untracked;
+                                    div()
+                                        .id(("scm-discard", rid))
+                                        .px_2()
+                                        .rounded_sm()
+                                        .text_size(px(14.))
+                                        .text_color(rgb(theme::TEXT))
+                                        .hover(|s| s.bg(rgb(theme::SELECTED)))
+                                        .on_click(cx.listener(
+                                            move |this, _: &ClickEvent, _w, cx| {
+                                                cx.stop_propagation();
+                                                this.model.confirm_discard(&discard_rel, untracked);
+                                                cx.notify();
+                                            },
+                                        ))
+                                        .child("\u{21b6}")
+                                }))
                                 .child(
                                     div()
                                         .id(("scm-act", rid))

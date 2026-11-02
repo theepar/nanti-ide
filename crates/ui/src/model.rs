@@ -9,7 +9,7 @@ use crate::find::{FindFocus, FindState};
 use crate::layout::{Layout, PanelPos, Side};
 use crate::menu::MenuKind;
 use crate::output::OutputLog;
-use crate::palette::{Command, Palette, PaletteAction, PaletteMode, TextField};
+use crate::palette::{Command, InputKind, Palette, PaletteAction, PaletteMode, TextField};
 use crate::problems::Problems;
 use crate::scm::{DiffState, DiffView, Job, ScmState};
 use crate::search::SearchState;
@@ -122,6 +122,10 @@ pub enum Prompt {
     QuitDirty,
     DeleteItem(PathBuf),
     RemoveExtension(PathBuf),
+    DiscardChanges {
+        rel: String,
+        untracked: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -191,6 +195,7 @@ pub struct Model {
     pub terminal_request: Option<TerminalRequest>,
     pub search: SearchState,
     pub scm: ScmState,
+    pub folder_open: bool,
     pub explorer_sel: Option<PathBuf>,
     pub explorer_gen: u64,
     pub menu_open: Option<MenuKind>,
@@ -241,6 +246,7 @@ impl Model {
         let (icon_tx, icon_rx) = std::sync::mpsc::channel();
         Self {
             scm: ScmState::new(root.clone()),
+            folder_open: true,
             explorer_sel: None,
             explorer_gen: 0,
             menu_open: None,
@@ -313,6 +319,9 @@ impl Model {
 
     pub fn visible_entries(&self) -> Vec<Entry> {
         let mut out = Vec::new();
+        if !self.folder_open {
+            return out;
+        }
         let root_name = self.root.file_name().map_or_else(
             || self.root.display().to_string(),
             |n| n.to_string_lossy().into_owned(),
@@ -370,11 +379,18 @@ impl Model {
         }
     }
 
+    pub fn without_folder() -> Self {
+        let mut m = Self::new(PathBuf::new());
+        m.folder_open = false;
+        m
+    }
+
     pub fn open_folder(&mut self, folder: PathBuf) {
         if !folder.is_dir() {
             return;
         }
         self.root = folder.clone();
+        self.folder_open = true;
         self.expanded.clear();
         self.expanded.insert(folder.clone());
         self.scm = ScmState::new(folder.clone());
@@ -480,7 +496,9 @@ impl Model {
     }
 
     pub fn enable_source_control(&mut self) {
-        self.scm.enable();
+        if self.folder_open {
+            self.scm.enable();
+        }
     }
 
     pub fn open_diff(&mut self, rel: &str, staged: bool) {
@@ -581,6 +599,9 @@ impl Model {
         }
         if let Some(note) = polled.notices.into_iter().last() {
             self.message = Some(note);
+        }
+        if polled.worktree_changed {
+            self.reload_clean_tabs();
         }
         if polled.status_changed {
             self.reload_diff_tabs();
@@ -726,6 +747,10 @@ impl Model {
                 self.delete_item(&path);
                 false
             }
+            Some(Prompt::DiscardChanges { rel, untracked }) => {
+                self.discard_changes(&rel, untracked);
+                false
+            }
             Some(Prompt::RemoveExtension(dir)) => {
                 self.remove_extension(&dir);
                 false
@@ -772,7 +797,10 @@ impl Model {
                 false
             }
             Some(Prompt::QuitDirty) => true,
-            Some(Prompt::DeleteItem(_) | Prompt::RemoveExtension(_)) | None => false,
+            Some(
+                Prompt::DeleteItem(_) | Prompt::RemoveExtension(_) | Prompt::DiscardChanges { .. },
+            )
+            | None => false,
         }
     }
 
@@ -780,6 +808,7 @@ impl Model {
         self.palette = Some(match mode {
             PaletteMode::Commands => Palette::commands(),
             PaletteMode::Files => Palette::files(&self.root),
+            PaletteMode::Branches => Palette::branches(&self.scm.branches),
             PaletteMode::Input(kind) => Palette::input(kind, ""),
         });
     }
@@ -810,6 +839,14 @@ impl Model {
             }
             PaletteAction::OpenFile(path) => {
                 self.open_file(&path);
+                None
+            }
+            PaletteAction::Checkout(name) => {
+                self.scm.checkout(&name);
+                None
+            }
+            PaletteAction::NewBranchPrompt => {
+                self.open_input(InputKind::NewBranch, "");
                 None
             }
         }
@@ -883,6 +920,7 @@ impl Model {
             Command::OpenFolder => self.cmd_open_folder(),
             Command::GitStageAll => self.scm.stage_all(),
             Command::GitUnstageAll => self.scm.unstage_all(),
+            Command::SwitchBranch => self.open_branch_picker(),
             Command::GitCommit => {
                 self.show_activity(Activity::SourceControl);
                 if self.scm.commit().is_err() && self.scm.message.text().trim().is_empty() {
@@ -1113,6 +1151,9 @@ impl Model {
     }
 
     pub fn run_search(&mut self) {
+        if !self.folder_open {
+            return self.say("Search", "Open a folder first");
+        }
         let root = self.root.clone();
         self.search.run(&root);
     }
@@ -1165,6 +1206,9 @@ impl Model {
     }
 
     pub fn git_branch(&self) -> Option<String> {
+        if !self.folder_open {
+            return None;
+        }
         let head = std::fs::read_to_string(self.root.join(".git").join("HEAD")).ok()?;
         let head = head.trim();
         Some(match head.strip_prefix("ref: refs/heads/") {

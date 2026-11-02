@@ -82,7 +82,14 @@ impl Workbench {
 
     fn spawn_terminal(&mut self) {
         let (cols, rows) = self.grid_size();
-        let mut opts = TerminalOptions::new(self.model.root.clone(), cols, rows);
+        let cwd = if self.model.folder_open {
+            self.model.root.clone()
+        } else {
+            std::env::var_os("USERPROFILE")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(std::env::temp_dir)
+        };
+        let mut opts = TerminalOptions::new(cwd, cols, rows);
         opts.cell_width = self.term_metrics.cell_width.get() as u16;
         opts.cell_height = LINE_HEIGHT as u16;
         match Terminal::spawn(opts) {

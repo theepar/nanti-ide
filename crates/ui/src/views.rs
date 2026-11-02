@@ -387,35 +387,6 @@ impl Workbench {
                     .h_full()
                     .window_control_area(WindowControlArea::Drag),
             )
-            .child(
-                div()
-                    .flex()
-                    .gap_1()
-                    .pr_2()
-                    .child(Self::layout_button(
-                        "top-toggle-sidebar",
-                        "layout-sidebar",
-                        self.model.layout.sidebar,
-                        Command::ToggleSidebar,
-                        cx,
-                    ))
-                    .child(Self::layout_button(
-                        "top-toggle-panel",
-                        "layout-panel",
-                        self.model.layout.panel,
-                        Command::TogglePanel,
-                        cx,
-                    ))
-                    .children(self.panel.is_some().then(|| {
-                        Self::layout_button(
-                            "top-toggle-right",
-                            "layout-right",
-                            self.model.layout.right,
-                            Command::ToggleRightPanel,
-                            cx,
-                        )
-                    })),
-            )
             .child(Self::caption_button(
                 "win-min",
                 WindowControlArea::Min,
@@ -1830,6 +1801,26 @@ impl Workbench {
             PanelTab::Problems => self.problems_view(cx),
             PanelTab::Output => self.output_view(cx),
         }
+    }
+
+    pub(crate) fn no_folder_view(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .items_start()
+            .gap_2()
+            .px_3()
+            .text_size(px(12.))
+            .text_color(rgb(theme::TEXT_DIM))
+            .child("You have not opened a folder yet.")
+            .child(
+                Self::scm_button("explorer-open-folder", "Open Folder", true).on_click(
+                    cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.apply_command(Command::OpenFolder, window, cx);
+                    }),
+                ),
+            )
+            .into_any_element()
     }
 
     pub(crate) fn welcome(&self, cx: &mut Context<Self>) -> AnyElement {

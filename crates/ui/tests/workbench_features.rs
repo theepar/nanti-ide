@@ -794,3 +794,60 @@ fn comment_toggle_reports_file_types_without_line_comments(cx: &mut TestAppConte
         .unwrap();
     assert!(msg.is_some_and(|m| m.contains("no line comment")));
 }
+
+#[test]
+fn starting_without_a_folder_lists_nothing_and_refuses_file_operations() {
+    let mut m = Model::without_folder();
+    assert!(!m.folder_open);
+    assert!(m.visible_entries().is_empty());
+    assert_eq!(m.branch_label(), "no repository");
+    m.run_command(Command::NewFile);
+    assert!(m.palette.is_none());
+    assert_eq!(m.message.as_deref(), Some("Open a folder first"));
+    m.run_search();
+    assert_eq!(m.message.as_deref(), Some("Open a folder first"));
+    m.enable_source_control();
+    assert!(!m.scm.is_enabled());
+    assert!(
+        m.submit_input(InputKind::NewFile(PathBuf::new()), "x.txt")
+            .is_err()
+    );
+    assert!(!Path::new("x.txt").exists());
+
+    let t = ws("openlater");
+    m.open_folder(t.0.clone());
+    assert!(m.folder_open);
+    assert!(m.visible_entries().iter().any(|e| e.name == "a.txt"));
+}
+
+#[gpui::test]
+fn the_app_starts_with_no_folder_and_a_saved_layout_never_reopens_the_bottom_panel(
+    cx: &mut TestAppContext,
+) {
+    let t = ws("startup");
+    let layout_file = t.0.join("layout.json");
+    let saved = ui::layout::Layout {
+        panel: true,
+        sidebar_width: 333.0,
+        ..ui::layout::Layout::default()
+    };
+    saved.save(&layout_file).unwrap();
+    let window = cx.add_window(|_w, cx| Workbench::new_empty(cx));
+    let vcx = VisualTestContext::from_window(window.into(), cx).into_mut();
+    window
+        .update(vcx, |wb, _, _| wb.set_layout_path(layout_file.clone()))
+        .unwrap();
+    vcx.run_until_parked();
+    let (folder_open, panel, width) = window
+        .read_with(vcx, |wb, _| {
+            let m = wb.model();
+            (m.folder_open, m.layout.panel, m.layout.sidebar_width)
+        })
+        .unwrap();
+    assert!(!folder_open);
+    assert!(!panel, "the bottom panel (terminal) is closed at startup");
+    assert!(
+        (width - 333.0).abs() < 1.0,
+        "other layout choices are kept: {width}"
+    );
+}

@@ -30,6 +30,9 @@ pub enum Job {
     Unstage(Vec<String>),
     UnstageAll,
     Commit(String),
+    Checkout(String),
+    NewBranch(String),
+    Discard(Vec<String>),
     Diff(DiffReq),
 }
 
@@ -115,11 +118,14 @@ struct Done {
     notice: Option<(bool, String)>,
     diff: Option<(DiffKey, Result<Diff, String>)>,
     committed: bool,
+    branches: Option<Vec<git::Branch>>,
+    worktree_changed: bool,
 }
 
 #[derive(Default)]
 pub struct Polled {
     pub changed: bool,
+    pub worktree_changed: bool,
     pub status_changed: bool,
     pub diffs: Vec<(DiffKey, Result<Diff, String>)>,
     pub notices: Vec<String>,
@@ -139,6 +145,7 @@ pub struct ScmState {
     enabled: bool,
     repo: Option<Repo>,
     pub status: Option<Status>,
+    pub branches: Vec<git::Branch>,
     pub error: Option<String>,
     pub message: TextField,
     pub focused: bool,
@@ -159,6 +166,7 @@ impl ScmState {
             enabled: false,
             repo: None,
             status: None,
+            branches: Vec::new(),
             error: None,
             message: TextField::default(),
             focused: false,
@@ -278,6 +286,10 @@ impl ScmState {
         if let Some(r) = done.repo {
             self.repo = Some(r);
         }
+        if let Some(b) = done.branches {
+            self.branches = b;
+        }
+        p.worktree_changed = done.worktree_changed;
         if let Some(st) = done.status {
             self.last_refresh = Instant::now();
             match st {
@@ -328,6 +340,18 @@ impl ScmState {
 
     pub fn unstage_all(&mut self) {
         self.request(Job::UnstageAll);
+    }
+
+    pub fn checkout(&mut self, name: &str) {
+        self.request(Job::Checkout(name.to_owned()));
+    }
+
+    pub fn new_branch(&mut self, name: &str) {
+        self.request(Job::NewBranch(name.to_owned()));
+    }
+
+    pub fn discard(&mut self, rel: &str) {
+        self.request(Job::Discard(vec![rel.to_owned()]));
     }
 
     pub fn stage(&mut self, rel: &str) {
@@ -547,6 +571,27 @@ fn execute(root: &Path, repo: Option<Repo>, job: Job) -> Done {
         Job::StageAll => report(&mut done, repo.stage_all()),
         Job::Unstage(p) => report(&mut done, repo.unstage(&p)),
         Job::UnstageAll => report(&mut done, repo.unstage_all()),
+        Job::Checkout(name) => match repo.checkout(&name) {
+            Ok(()) => {
+                done.worktree_changed = true;
+                done.notice = Some((false, format!("Switched to {name}")));
+            }
+            Err(e) => done.notice = Some((true, e.to_string())),
+        },
+        Job::NewBranch(name) => match repo.create_branch(&name) {
+            Ok(()) => {
+                done.worktree_changed = true;
+                done.notice = Some((false, format!("Created and switched to {name}")));
+            }
+            Err(e) => done.notice = Some((true, e.to_string())),
+        },
+        Job::Discard(paths) => match repo.discard(&paths) {
+            Ok(()) => {
+                done.worktree_changed = true;
+                done.notice = Some((false, format!("Discarded changes to {}", paths.join(", "))));
+            }
+            Err(e) => done.notice = Some((true, e.to_string())),
+        },
         Job::Commit(msg) => match repo.commit(&msg) {
             Ok(summary) => {
                 done.committed = true;
@@ -569,6 +614,7 @@ fn execute(root: &Path, repo: Option<Repo>, job: Job) -> Done {
             return done;
         }
     }
+    done.branches = repo.branches().ok();
     done.status = Some(repo.status());
     done
 }

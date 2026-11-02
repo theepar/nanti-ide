@@ -29,6 +29,9 @@ pub fn validate_name(name: &str) -> Result<(), String> {
 }
 
 pub fn resolve_new(root: &Path, dir: &Path, input: &str) -> Result<PathBuf, String> {
+    if root.as_os_str().is_empty() {
+        return Err("open a folder first".into());
+    }
     let input = input.trim();
     if input.is_empty() {
         return Err("enter a name".into());
@@ -83,6 +86,9 @@ pub fn create_folder(path: &Path) -> Result<(), String> {
 }
 
 pub fn rename(root: &Path, from: &Path, new_name: &str) -> Result<PathBuf, String> {
+    if root.as_os_str().is_empty() {
+        return Err("open a folder first".into());
+    }
     let new_name = new_name.trim();
     validate_name(new_name)?;
     if from == root {
@@ -103,6 +109,9 @@ pub fn rename(root: &Path, from: &Path, new_name: &str) -> Result<PathBuf, Strin
 }
 
 pub fn send_to_recycle_bin(root: &Path, path: &Path) -> Result<(), String> {
+    if root.as_os_str().is_empty() {
+        return Err("open a folder first".into());
+    }
     if path == root || !path.starts_with(root) {
         return Err("only items inside the workspace can be deleted".into());
     }
@@ -302,5 +311,16 @@ mod tests {
             send_to_recycle_bin(root, &root.join("dir")).unwrap();
             assert!(!root.join("gone.txt").exists() && !root.join("dir").exists());
         }
+    }
+
+    #[test]
+    fn nothing_works_without_a_workspace_root() {
+        let empty = Path::new("");
+        let t = ws("noroot");
+        std::fs::write(t.0.join("f.txt"), "x").unwrap();
+        assert!(resolve_new(empty, &t.0, "new.txt").is_err());
+        assert!(rename(empty, &t.0.join("f.txt"), "g.txt").is_err());
+        assert!(send_to_recycle_bin(empty, &t.0.join("f.txt")).is_err());
+        assert!(t.0.join("f.txt").exists());
     }
 }

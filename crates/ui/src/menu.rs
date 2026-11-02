@@ -128,7 +128,12 @@ pub fn items(kind: MenuKind) -> Vec<MenuItem> {
             Cmd(C::NextTab),
             Cmd(C::PrevTab),
         ],
-        MenuKind::Run => vec![Cmd(C::RunTask), Sep, Cmd(C::GitRefresh)],
+        MenuKind::Run => vec![
+            Cmd(C::RunTask),
+            Sep,
+            Cmd(C::SwitchBranch),
+            Cmd(C::GitRefresh),
+        ],
         MenuKind::Terminal => vec![
             Cmd(C::NewTerminal),
             Cmd(C::ToggleTerminal),

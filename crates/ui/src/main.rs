@@ -64,18 +64,7 @@ fn main() {
                 .and_then(|p| p.parent().map(std::path::Path::to_path_buf));
             let config = host_config_from_env(config_dir.as_deref());
             let panel_extension = config.as_ref().map(|c| c.extension_dir.clone());
-            let mut root = std::env::var_os("NANTI_WORKSPACE")
-                .map(PathBuf::from)
-                .or_else(|| std::env::current_dir().ok())
-                .unwrap_or_else(|| PathBuf::from("."));
-            if (root.ends_with("target\\debug")
-                || root.ends_with("target/debug")
-                || root.ends_with("target\\release")
-                || root.ends_with("target/release"))
-                && let Some(repo) = root.parent().and_then(|p| p.parent())
-            {
-                root = repo.to_path_buf();
-            }
+            let root = std::env::var_os("NANTI_WORKSPACE").map(PathBuf::from);
             let window = cx
                 .open_window(
                     WindowOptions {
@@ -89,7 +78,10 @@ fn main() {
                     },
                     move |window, cx| {
                         cx.new(|cx| {
-                            let mut workbench = Workbench::new(root, cx);
+                            let mut workbench = match root {
+                                Some(root) => Workbench::new(root, cx),
+                                None => Workbench::new_empty(cx),
+                            };
                             workbench.enable_source_control();
                             workbench.enable_native_dialogs();
                             workbench.enable_marketplace();

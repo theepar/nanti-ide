@@ -574,3 +574,135 @@ fn rendering_every_source_control_state_does_not_panic(cx: &mut TestAppContext) 
         .unwrap();
     assert_eq!(states, [true, true, true]);
 }
+
+fn pick(m: &mut Model, label: &str) {
+    let p = m.palette.as_mut().expect("the picker is open");
+    p.field.insert(label);
+    p.refilter();
+    m.accept_palette();
+}
+
+#[test]
+fn branch_picker_lists_branches_and_switching_reloads_clean_tabs() {
+    let t = repo("pickbranch");
+    git(&t.0, &["switch", "-q", "-c", "feature"]);
+    std::fs::write(t.0.join("a.txt"), "feature text\n").unwrap();
+    git(&t.0, &["commit", "-qam", "feature edit"]);
+    git(&t.0, &["switch", "-q", "main"]);
+    let mut m = model(&t.0);
+    assert_eq!(
+        m.scm
+            .branches
+            .iter()
+            .map(|b| b.name.as_str())
+            .collect::<Vec<_>>(),
+        ["feature", "main"]
+    );
+    m.open_file(&t.0.join("a.txt"));
+    m.run_command(ui::palette::Command::SwitchBranch);
+    let p = m.palette.as_ref().unwrap();
+    let labels: Vec<&str> = p.results().map(|r| r.label.as_str()).collect();
+    assert_eq!(labels, ["Create new branch...", "feature", "main"]);
+    assert_eq!(
+        p.results().last().unwrap().detail.as_deref(),
+        Some("current")
+    );
+    pick(&mut m, "feature");
+    settle(&mut m);
+    assert_eq!(git(&t.0, &["branch", "--show-current"]).trim(), "feature");
+    assert_eq!(m.branch_label(), "\u{2387} feature");
+    assert!(matches!(&m.tabs[0].content, TabContent::Text(e) if e.text() == "feature text\n"));
+    assert!(matches!(&m.scm.notice, Some((false, n)) if n == "Switched to feature"));
+}
+
+#[test]
+fn creating_a_branch_from_the_picker_asks_for_a_name() {
+    let t = repo("newbranch");
+    let mut m = model(&t.0);
+    m.run_command(ui::palette::Command::SwitchBranch);
+    pick(&mut m, "Create new");
+    assert!(m.palette_is_input());
+    let p = m.palette.as_mut().unwrap();
+    p.field.insert("topic/x");
+    assert!(m.accept_palette().is_none());
+    settle(&mut m);
+    assert_eq!(git(&t.0, &["branch", "--show-current"]).trim(), "topic/x");
+    m.run_command(ui::palette::Command::SwitchBranch);
+    pick(&mut m, "Create new");
+    m.palette.as_mut().unwrap().field.insert("bad name");
+    m.accept_palette();
+    settle(&mut m);
+    assert!(matches!(&m.scm.notice, Some((true, n)) if n.contains("not a valid branch name")));
+    assert_eq!(git(&t.0, &["branch", "--show-current"]).trim(), "topic/x");
+}
+
+#[test]
+fn switching_over_local_changes_reports_git_and_keeps_the_editor_text() {
+    let t = repo("dirtybranch");
+    git(&t.0, &["switch", "-q", "-c", "other"]);
+    std::fs::write(t.0.join("a.txt"), "other\n").unwrap();
+    git(&t.0, &["commit", "-qam", "other"]);
+    git(&t.0, &["switch", "-q", "main"]);
+    std::fs::write(t.0.join("a.txt"), "mine\n").unwrap();
+    let mut m = model(&t.0);
+    m.open_file(&t.0.join("a.txt"));
+    m.scm.checkout("other");
+    settle(&mut m);
+    assert!(matches!(&m.scm.notice, Some((true, _))));
+    assert_eq!(git(&t.0, &["branch", "--show-current"]).trim(), "main");
+    assert!(matches!(&m.tabs[0].content, TabContent::Text(e) if e.text() == "mine\n"));
+}
+
+#[test]
+fn the_branch_picker_needs_a_repository() {
+    let root = std::env::temp_dir().join(format!("nanti-ui-git-norepo-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let mut m = model(&root);
+    m.run_command(ui::palette::Command::SwitchBranch);
+    assert!(m.palette.is_none());
+    assert_eq!(m.message.as_deref(), Some("No Git repository"));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn discard_asks_first_and_restores_tracked_files() {
+    let t = repo("discardui");
+    std::fs::write(t.0.join("a.txt"), "scribble\n").unwrap();
+    let mut m = model(&t.0);
+    m.open_file(&t.0.join("a.txt"));
+    m.confirm_discard("a.txt", false);
+    assert!(matches!(
+        m.prompt,
+        Some(ui::model::Prompt::DiscardChanges { .. })
+    ));
+    m.resolve_cancel();
+    assert_eq!(
+        std::fs::read_to_string(t.0.join("a.txt")).unwrap(),
+        "scribble\n"
+    );
+    m.confirm_discard("a.txt", false);
+    m.resolve_save();
+    settle(&mut m);
+    assert_eq!(
+        std::fs::read_to_string(t.0.join("a.txt")).unwrap(),
+        "one\ntwo\nthree\n"
+    );
+    assert!(rels(&m, GroupKind::Changes).is_empty());
+    assert!(matches!(&m.tabs[0].content, TabContent::Text(e) if e.text() == "one\ntwo\nthree\n"));
+}
+
+#[test]
+fn discarding_a_new_file_moves_it_to_the_recycle_bin() {
+    let t = repo("discardnew");
+    std::fs::write(t.0.join("fresh.txt"), "x\n").unwrap();
+    let mut m = model(&t.0);
+    m.open_file(&t.0.join("fresh.txt"));
+    m.confirm_discard("fresh.txt", true);
+    m.resolve_save();
+    settle(&mut m);
+    if cfg!(windows) {
+        assert!(!t.0.join("fresh.txt").exists());
+        assert!(m.tabs.is_empty());
+        assert!(rels(&m, GroupKind::Changes).is_empty());
+    }
+}

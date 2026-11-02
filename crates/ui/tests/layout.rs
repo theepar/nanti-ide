@@ -267,7 +267,10 @@ fn moving_the_sidebar_and_panel_is_saved_and_restored(cx: &mut TestAppContext) {
         (Side::Right, PanelPos::Left)
     );
     let (window, cx) = open(cx, &ws.0, Some(file));
-    assert_eq!(layout(window, cx), saved);
+    let mut expected = saved.clone();
+    expected.panel = false;
+    expected.panel_maximized = false;
+    assert_eq!(layout(window, cx), expected);
     for pos in [Command::PanelTop, Command::PanelRight, Command::PanelBottom] {
         window
             .update(cx, |wb, _, cx| {
