@@ -152,6 +152,15 @@ impl Workbench {
             }
             None => {}
         }
+        // A task from the Run view: type its command line into the active terminal.
+        if let Some(command) = self.model.terminal_run.take() {
+            if self.terminals.is_empty() {
+                self.spawn_terminal();
+            }
+            if let Some(s) = self.terminals.get(self.active_terminal) {
+                s.term.send_text(&format!("{command}\r"));
+            }
+        }
     }
 
     /// Poll for output/exit and keep every PTY the size of the panel. True = redraw needed.

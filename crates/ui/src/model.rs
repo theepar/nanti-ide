@@ -6,11 +6,16 @@ use std::time::SystemTime;
 
 use editor_core::Editor;
 
+use crate::extensions::Extension;
 use crate::find::{FindFocus, FindState};
 use crate::layout::Layout;
+use crate::menu::MenuKind;
+use crate::output::OutputLog;
 use crate::palette::{Command, Palette, PaletteAction, PaletteMode};
+use crate::problems::Problems;
 use crate::scm::{DiffState, DiffView, Job, ScmState};
 use crate::search::SearchState;
+use crate::tasks::Task;
 
 /// Directories never listed in the explorer (heavy or tool-owned).
 const HIDDEN_DIRS: [&str; 3] = [".git", "node_modules", "target"];
@@ -49,7 +54,7 @@ impl Activity {
             Activity::Explorer => "EXPLORER",
             Activity::Search => "SEARCH",
             Activity::SourceControl => "SOURCE CONTROL",
-            Activity::Run => "RUN AND DEBUG",
+            Activity::Run => "RUN",
             Activity::Extensions => "EXTENSIONS",
         }
     }
@@ -59,23 +64,16 @@ impl Activity {
 pub enum PanelTab {
     Problems,
     Output,
-    DebugConsole,
     Terminal,
 }
 
 impl PanelTab {
-    pub const ALL: [PanelTab; 4] = [
-        PanelTab::Problems,
-        PanelTab::Output,
-        PanelTab::DebugConsole,
-        PanelTab::Terminal,
-    ];
+    pub const ALL: [PanelTab; 3] = [PanelTab::Problems, PanelTab::Output, PanelTab::Terminal];
 
     pub fn title(self) -> &'static str {
         match self {
             PanelTab::Problems => "PROBLEMS",
             PanelTab::Output => "OUTPUT",
-            PanelTab::DebugConsole => "DEBUG CONSOLE",
             PanelTab::Terminal => "TERMINAL",
         }
     }
@@ -132,6 +130,19 @@ pub enum Prompt {
     },
     /// Closing the window with unsaved tabs.
     QuitDirty,
+    /// Move a file or folder to the Recycle Bin.
+    DeleteItem(PathBuf),
+    /// Remove an installed extension.
+    RemoveExtension(PathBuf),
+}
+
+/// Right-click menu on an explorer entry, anchored at a window position.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContextMenu {
+    pub path: PathBuf,
+    pub is_dir: bool,
+    pub x: f32,
+    pub y: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,7 +164,7 @@ pub enum TerminalRequest {
 
 pub struct Model {
     pub root: PathBuf,
-    expanded: BTreeSet<PathBuf>,
+    pub(crate) expanded: BTreeSet<PathBuf>,
     pub tabs: Vec<Tab>,
     pub active_tab: Option<usize>,
     pub activity: Activity,
@@ -167,6 +178,25 @@ pub struct Model {
     pub terminal_request: Option<TerminalRequest>,
     pub search: SearchState,
     pub scm: ScmState,
+    /// Explorer entry the file commands act on.
+    pub explorer_sel: Option<PathBuf>,
+    pub menu_open: Option<MenuKind>,
+    pub context_menu: Option<ContextMenu>,
+    pub output: OutputLog,
+    pub problems: Problems,
+    pub tasks: Vec<Task>,
+    pub extensions: Vec<Extension>,
+    /// Where extensions and the panel choice are stored (`None` in unit tests).
+    pub config_dir: Option<PathBuf>,
+    /// Extension folder running in the right-hand panel in this session.
+    pub panel_extension: Option<PathBuf>,
+    /// Text the UI layer must put on the clipboard.
+    pub clipboard_request: Option<String>,
+    /// A command asked the application to quit.
+    pub quit_request: bool,
+    /// Command line the UI layer must type into the terminal.
+    pub terminal_run: Option<String>,
+    pub(crate) outline_cache: std::cell::RefCell<Option<(PathBuf, u64, Vec<syntax::Symbol>)>>,
     /// Last user-visible status ("Saved x", "Save failed: ...").
     pub message: Option<String>,
 }
@@ -177,6 +207,19 @@ impl Model {
         expanded.insert(root.clone());
         Self {
             scm: ScmState::new(root.clone()),
+            explorer_sel: None,
+            menu_open: None,
+            context_menu: None,
+            output: OutputLog::new(),
+            problems: Problems::default(),
+            tasks: Vec::new(),
+            extensions: Vec::new(),
+            config_dir: None,
+            panel_extension: None,
+            clipboard_request: None,
+            quit_request: false,
+            terminal_run: None,
+            outline_cache: std::cell::RefCell::new(None),
             root,
             expanded,
             tabs: Vec::new(),
@@ -418,6 +461,9 @@ impl Model {
                 }
             }
         }
+        for note in &polled.notices {
+            self.output.push("Git", note);
+        }
         if let Some(note) = polled.notices.into_iter().last() {
             self.message = Some(note);
         }
@@ -473,7 +519,9 @@ impl Model {
             Ok(()) => {
                 tab.stamp = DiskStamp::of(&tab.path);
                 editor.mark_saved();
-                self.message = Some(format!("Saved {}", tab.title));
+                let saved = format!("Saved {}", tab.title);
+                self.output.push("Files", &saved);
+                self.message = Some(saved);
                 self.scm.request(Job::Refresh);
                 self.reload_diff_tabs();
                 SaveOutcome::Saved
@@ -546,6 +594,14 @@ impl Model {
                 }
                 false
             }
+            Some(Prompt::DeleteItem(path)) => {
+                self.delete_item(&path);
+                false
+            }
+            Some(Prompt::RemoveExtension(dir)) => {
+                self.remove_extension(&dir);
+                false
+            }
             Some(Prompt::QuitDirty) => {
                 for i in 0..self.tabs.len() {
                     match self.save_tab(i, false) {
@@ -589,7 +645,7 @@ impl Model {
                 false
             }
             Some(Prompt::QuitDirty) => true,
-            None => false,
+            Some(Prompt::DeleteItem(_) | Prompt::RemoveExtension(_)) | None => false,
         }
     }
 
@@ -597,6 +653,7 @@ impl Model {
         self.palette = Some(match mode {
             PaletteMode::Commands => Palette::commands(),
             PaletteMode::Files => Palette::files(&self.root),
+            PaletteMode::Input(kind) => Palette::input(kind, ""),
         });
     }
 
@@ -608,8 +665,21 @@ impl Model {
     /// the entry was a command (opening a file needs no further UI work).
     pub fn accept_palette(&mut self) -> Option<Command> {
         let action = self.palette.as_ref()?.selected_action();
+        if let Some(PaletteAction::Submit(kind, text)) = &action {
+            // A refused prompt stays open and says why; it closes only on success.
+            match self.submit_input(kind.clone(), text) {
+                Ok(()) => self.palette = None,
+                Err(e) => {
+                    if let Some(p) = self.palette.as_mut() {
+                        p.error = Some(e);
+                    }
+                }
+            }
+            return None;
+        }
         self.palette = None;
         match action? {
+            PaletteAction::Submit(..) => None,
             PaletteAction::Command(c) => {
                 self.run_command(c);
                 Some(c)
@@ -652,6 +722,27 @@ impl Model {
             Command::ShowRun => self.show_activity(Activity::Run),
             Command::ShowExtensions => self.show_activity(Activity::Extensions),
             Command::GitRefresh => self.scm.refresh(),
+            Command::NewFile => self.cmd_new(false),
+            Command::NewFolder => self.cmd_new(true),
+            Command::SaveAll => self.save_all(),
+            Command::CloseAllTabs => self.close_all_tabs(),
+            Command::RenameItem => self.cmd_rename(),
+            Command::DeleteItem => self.cmd_delete(),
+            Command::CopyPath => self.cmd_copy_path(),
+            Command::RevealInOs => self.cmd_reveal(),
+            Command::RefreshExplorer => {
+                self.scm.refresh();
+                self.say("Explorer", "Refreshed");
+            }
+            Command::CollapseAll => self.collapse_all(),
+            Command::GoToLine => self.cmd_go_to_line(),
+            Command::ShowProblems => self.show_panel_tab(PanelTab::Problems),
+            Command::ShowOutput => self.show_panel_tab(PanelTab::Output),
+            Command::ClearOutput => self.output.clear(),
+            Command::InstallVsix => self.cmd_install_vsix(),
+            Command::RunTask => self.show_activity(Activity::Run),
+            Command::About => self.open_about(),
+            Command::Exit => self.quit_request = true,
             Command::GitStageAll => self.scm.stage_all(),
             Command::GitUnstageAll => self.scm.unstage_all(),
             Command::GitCommit => {
@@ -884,7 +975,7 @@ impl Model {
         }
     }
 
-    fn show_terminal_panel(&mut self) {
+    pub(crate) fn show_terminal_panel(&mut self) {
         self.layout.panel = true;
         self.panel_tab = PanelTab::Terminal;
         self.terminal_focused = true;
@@ -894,11 +985,14 @@ impl Model {
         self.search.focused = false;
     }
 
-    fn show_activity(&mut self, activity: Activity) {
+    pub(crate) fn show_activity(&mut self, activity: Activity) {
         self.activity = activity;
         self.layout.sidebar = true;
-        if activity == Activity::SourceControl {
-            self.scm.refresh();
+        match activity {
+            Activity::SourceControl => self.scm.refresh(),
+            Activity::Run => self.refresh_tasks(),
+            Activity::Extensions => self.refresh_extensions(),
+            _ => {}
         }
     }
 

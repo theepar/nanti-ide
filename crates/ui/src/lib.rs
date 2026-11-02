@@ -22,15 +22,23 @@ use gpui::{
 use syntax::{Language, LineSpan, SyntaxHighlighter, Token};
 use terminal_ui::{GridMetrics, TerminalSession};
 
+pub mod extensions;
 pub mod find;
 pub mod layout;
+pub mod menu;
 pub mod model;
+mod ops;
+pub mod output;
 pub mod palette;
 pub mod panel;
+pub mod problems;
 pub mod resource;
 pub mod scm;
 pub mod search;
+pub mod tasks;
 mod terminal_ui;
+mod views;
+pub mod workspace_ops;
 
 use find::FindFocus;
 use layout::Layout;
@@ -46,6 +54,8 @@ use panel::{Panel, UiEvent};
 
 const AI_PANEL_HEADER: f32 = 30.0;
 const STATUS_BAR_HEIGHT: f32 = 22.0;
+/// Height of the menu bar at the top of the window.
+const MENU_BAR_HEIGHT: f32 = 30.0;
 /// Width of the draggable splitter between regions.
 const SPLITTER: f32 = 5.0;
 const ACTIVITY_BAR_WIDTH: f32 = 48.0;
@@ -256,6 +266,8 @@ pub struct Workbench {
     highlighter: RefCell<SyntaxHighlighter>,
     hl_cache: RefCell<Option<HlCache>>,
     scroll: ScrollHandle,
+    /// Outline section of the explorer is expanded.
+    outline_open: bool,
     dragging: bool,
     /// Set once the user confirmed leaving, so closing the window is not intercepted again.
     quitting: bool,
@@ -287,6 +299,7 @@ impl Workbench {
             highlighter: RefCell::new(SyntaxHighlighter::new()),
             hl_cache: RefCell::new(None),
             scroll: ScrollHandle::new(),
+            outline_open: true,
             dragging: false,
             quitting: false,
         }
@@ -308,6 +321,13 @@ impl Workbench {
 
     pub fn editor_focus(&self) -> &FocusHandle {
         &self.focus
+    }
+
+    /// Where extensions and the right-panel choice live; `panel_extension` is the folder loaded now.
+    pub fn set_config_dir(&mut self, dir: PathBuf, panel_extension: Option<PathBuf>) {
+        self.model.config_dir = Some(dir);
+        self.model.panel_extension = panel_extension;
+        self.model.refresh_extensions();
     }
 
     /// Start using git for the workspace (status, diffs, stage/commit). The app calls this at startup.
@@ -360,6 +380,7 @@ impl Workbench {
         }
         let mut changed = self.pump_terminals();
         changed |= self.model.pump_scm();
+        changed |= self.model.pump_problems();
         let Some(panel) = self.panel.as_mut() else {
             return changed;
         };
@@ -537,6 +558,13 @@ impl Workbench {
         self.sync_focus(window);
     }
 
+    /// Run task `index` of the Run view in the integrated terminal (same as clicking it).
+    pub fn run_task(&mut self, index: usize, window: &mut Window) {
+        self.model.run_task(index);
+        self.process_terminal_request();
+        self.focus_target(Target::Terminal, window);
+    }
+
     /// Put the caret in the Source Control commit message (same as clicking it).
     pub fn focus_commit_message(&mut self, window: &mut Window) {
         self.focus_target(Target::Commit, window);
@@ -563,9 +591,20 @@ impl Workbench {
         }
     }
 
+    /// Do what a command asked of the UI layer: clipboard, quit.
+    fn drain_requests(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(text) = self.model.clipboard_request.take() {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+        }
+        if std::mem::take(&mut self.model.quit_request) && self.model.request_quit() {
+            self.finish_quit(window, cx);
+        }
+    }
+
     fn apply_command(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
         self.model.run_command(command);
         self.process_terminal_request();
+        self.drain_requests(window, cx);
         self.sync_focus(window);
         self.reveal_cursor();
         cx.notify();
@@ -574,6 +613,7 @@ impl Workbench {
     fn accept_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.model.accept_palette();
         self.process_terminal_request();
+        self.drain_requests(window, cx);
         self.sync_focus(window);
         self.reveal_cursor();
         cx.notify();
@@ -828,6 +868,13 @@ impl Workbench {
             return self.run_and_stop(Command::ToggleRightPanel, window, cx);
         }
 
+        if (self.model.menu_open.is_some() || self.model.context_menu.is_some()) && key == "escape"
+        {
+            self.model.close_menus();
+            cx.stop_propagation();
+            return cx.notify();
+        }
+
         match self.target() {
             Target::Palette => return self.on_palette_key(ev, window, cx),
             Target::FindQuery | Target::FindReplace => return self.on_find_key(ev, window, cx),
@@ -850,6 +897,9 @@ impl Workbench {
             return cx.notify();
         }
 
+        if key == "f2" && !m.control && !m.alt {
+            return self.run_and_stop(Command::RenameItem, window, cx);
+        }
         if key == "f3" {
             let command = if m.shift {
                 Command::FindPrev
@@ -1008,7 +1058,10 @@ impl Workbench {
                 l.set_sidebar_width(x - left, vw);
             }
             Drag::Right => l.set_right_width(vw - x, vw),
-            Drag::Panel => l.set_panel_height(vh - status - y, vh - status - TAB_BAR_HEIGHT),
+            Drag::Panel => l.set_panel_height(
+                vh - status - y,
+                vh - status - TAB_BAR_HEIGHT - MENU_BAR_HEIGHT,
+            ),
         }
         cx.notify();
     }
@@ -1031,7 +1084,12 @@ impl Workbench {
         div()
             .id(id)
             .flex_none()
-            .bg(rgba(if active { 0x3b82f6aa } else { 0x00000000 }))
+            // Never transparent: an unpainted gap shows whatever is behind the window.
+            .bg(if active {
+                rgba(0x3b82f6aa)
+            } else {
+                rgb(theme::BORDER)
+            })
             .hover(|s| s.bg(rgba(0x3b82f680)))
             .when(vertical, |d| d.w(px(SPLITTER)).h_full().cursor_col_resize())
             .when(!vertical, |d| {
@@ -1072,8 +1130,11 @@ impl Workbench {
             .gap_1()
             .children(Activity::ALL.into_iter().enumerate().map(|(i, a)| {
                 let selected = a == self.model.activity && self.model.layout.sidebar;
+                let badge = (a == Activity::SourceControl && self.model.scm.change_count() > 0)
+                    .then(|| self.model.scm.change_count());
                 div()
                     .id(("activity", i))
+                    .relative()
                     .flex()
                     .items_center()
                     .justify_center()
@@ -1093,85 +1154,125 @@ impl Workbench {
                         cx.notify();
                     }))
                     .child(activity_glyph(a))
+                    .children(badge.map(|n| {
+                        div()
+                            .absolute()
+                            .right(px(1.))
+                            .bottom(px(3.))
+                            .min_w(px(16.))
+                            .h(px(16.))
+                            .px_1()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_full()
+                            .bg(rgb(theme::ACCENT))
+                            .text_color(rgb(0xffffff))
+                            .text_size(px(10.))
+                            .child(SharedString::from(if n > 99 {
+                                "99+".to_owned()
+                            } else {
+                                n.to_string()
+                            }))
+                    }))
             }))
     }
 
     fn sidebar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let body: AnyElement = if self.model.activity == Activity::Explorer {
-            let active_path = self.model.active().map(|t| t.path.clone());
-            div()
-                .id("explorer-list")
-                .flex_1()
-                .min_h_0()
-                .overflow_y_scroll()
-                .children(
-                    self.model
-                        .visible_entries()
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, e)| {
-                            let selected = !e.is_dir && active_path.as_ref() == Some(&e.path);
-                            let marker = match (e.is_dir, e.expanded) {
-                                (true, true) => "▾ ",
-                                (true, false) => "▸ ",
-                                (false, _) => "  ",
-                            };
-                            let path = e.path.clone();
-                            let is_dir = e.is_dir;
-                            let decor = self.model.scm.decor_for(&e.path, e.is_dir);
-                            let name_color = decor.map_or(theme::TEXT, |d| tone_color(d.tone));
-                            div()
-                                .id(("entry", i))
-                                .flex()
-                                .justify_between()
-                                .pl(px(8. + 12. * e.depth as f32))
-                                .pr_2()
-                                .py(px(2.))
-                                .text_size(px(13.))
-                                .text_color(rgb(name_color))
-                                .cursor_pointer()
-                                .when(selected, |d| d.bg(rgb(theme::SELECTED)))
-                                .hover(|s| s.bg(rgb(theme::HOVER)))
-                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                    if is_dir {
-                                        this.model.toggle_dir(&path);
-                                    } else {
-                                        this.model.open_file(&path);
-                                        this.focus_editor(window);
-                                    }
-                                    cx.notify();
-                                }))
-                                .child(
-                                    div()
-                                        .whitespace_nowrap()
-                                        .overflow_hidden()
-                                        .child(SharedString::from(format!("{marker}{}", e.name))),
-                                )
-                                .children(decor.map(|d| {
-                                    div()
-                                        .flex_none()
-                                        .pl_2()
-                                        .text_size(px(11.))
-                                        .child(SharedString::from(d.letter.to_string()))
-                                }))
-                        }),
-                )
-                .into_any_element()
-        } else if self.model.activity == Activity::Search {
-            self.search_panel(window, cx)
-        } else if self.model.activity == Activity::SourceControl {
-            self.scm_panel(window, cx)
-        } else {
-            div()
-                .px_3()
-                .text_size(px(12.))
-                .text_color(rgb(theme::TEXT_DIM))
-                .child(SharedString::from(format!(
-                    "{} is not implemented yet.",
-                    self.model.activity.title().to_lowercase()
-                )))
-                .into_any_element()
-        };
+        let body: AnyElement =
+            if self.model.activity == Activity::Explorer {
+                let active_path = self.model.active().map(|t| t.path.clone());
+                let list =
+                    div()
+                        .id("explorer-list")
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .children(self.model.visible_entries().into_iter().enumerate().map(
+                            |(i, e)| {
+                                let selected = (!e.is_dir && active_path.as_ref() == Some(&e.path))
+                                    || self.model.explorer_sel.as_deref() == Some(e.path.as_path());
+                                let marker = match (e.is_dir, e.expanded) {
+                                    (true, true) => "▾ ",
+                                    (true, false) => "▸ ",
+                                    (false, _) => "  ",
+                                };
+                                let path = e.path.clone();
+                                let is_dir = e.is_dir;
+                                let decor = self.model.scm.decor_for(&e.path, e.is_dir);
+                                let name_color = decor.map_or(theme::TEXT, |d| tone_color(d.tone));
+                                div()
+                                    .id(("entry", i))
+                                    .flex()
+                                    .justify_between()
+                                    .pl(px(8. + 12. * e.depth as f32))
+                                    .pr_2()
+                                    .py(px(2.))
+                                    .text_size(px(13.))
+                                    .text_color(rgb(name_color))
+                                    .cursor_pointer()
+                                    .on_mouse_down(
+                                        MouseButton::Right,
+                                        cx.listener({
+                                            let path = path.clone();
+                                            move |this, ev: &MouseDownEvent, _w, cx| {
+                                                this.model.open_context_menu(
+                                                    &path,
+                                                    is_dir,
+                                                    f32::from(ev.position.x),
+                                                    f32::from(ev.position.y),
+                                                );
+                                                cx.notify();
+                                            }
+                                        }),
+                                    )
+                                    .when(selected, |d| d.bg(rgb(theme::SELECTED)))
+                                    .hover(|s| s.bg(rgb(theme::HOVER)))
+                                    .on_click(cx.listener(
+                                        move |this, _: &ClickEvent, window, cx| {
+                                            this.model.select_entry(&path);
+                                            if is_dir {
+                                                this.model.toggle_dir(&path);
+                                            } else {
+                                                this.model.open_file(&path);
+                                                this.focus_editor(window);
+                                            }
+                                            cx.notify();
+                                        },
+                                    ))
+                                    .child(
+                                        div().whitespace_nowrap().overflow_hidden().child(
+                                            SharedString::from(format!("{marker}{}", e.name)),
+                                        ),
+                                    )
+                                    .children(decor.map(|d| {
+                                        div()
+                                            .flex_none()
+                                            .pl_2()
+                                            .text_size(px(11.))
+                                            .child(SharedString::from(d.letter.to_string()))
+                                    }))
+                            },
+                        ))
+                        .into_any_element();
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h_0()
+                    .child(self.explorer_toolbar(cx))
+                    .child(list)
+                    .child(self.outline_section(cx))
+                    .into_any_element()
+            } else if self.model.activity == Activity::Search {
+                self.search_panel(window, cx)
+            } else if self.model.activity == Activity::SourceControl {
+                self.scm_panel(window, cx)
+            } else if self.model.activity == Activity::Run {
+                self.run_panel(cx)
+            } else {
+                self.extensions_panel(cx)
+            };
         div()
             .flex()
             .flex_col()
@@ -1284,6 +1385,24 @@ impl Workbench {
                 format!("{} file(s) have unsaved changes.", self.model.dirty_count()),
                 "Save All & Quit",
                 "Discard & Quit",
+            ),
+            Prompt::DeleteItem(p) => (
+                format!(
+                    "Move {} to the Recycle Bin? You can restore it from there.",
+                    p.file_name()
+                        .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+                ),
+                "Move to Recycle Bin",
+                "Keep",
+            ),
+            Prompt::RemoveExtension(p) => (
+                format!(
+                    "Remove the extension {}? Its files are deleted.",
+                    p.file_name()
+                        .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+                ),
+                "Remove",
+                "Keep",
             ),
         };
         let button = |id: &'static str, label: &'static str| {
@@ -1420,15 +1539,7 @@ impl Workbench {
                 .flex_col()
                 .items_center()
                 .justify_center()
-                .gap_2()
-                .font_family("Segoe UI")
-                .child(div().text_size(px(22.)).child("nanti."))
-                .child(
-                    div()
-                        .text_size(px(13.))
-                        .text_color(rgb(theme::TEXT_DIM))
-                        .child("Code now. Not later. Open a file from the Explorer."),
-                ),
+                .child(self.welcome(cx)),
             Some(TabContent::Unavailable(reason)) => base
                 .px_4()
                 .text_color(rgb(theme::TEXT_DIM))
@@ -1591,35 +1702,9 @@ impl Workbench {
         let panel_h = self
             .model
             .layout
-            .effective_panel(vh - status - TAB_BAR_HEIGHT);
+            .effective_panel(vh - status - TAB_BAR_HEIGHT - MENU_BAR_HEIGHT);
         let maximized = self.model.layout.panel_maximized;
-        let body: AnyElement = if self.model.panel_tab == PanelTab::Terminal {
-            div()
-                .flex()
-                .flex_col()
-                .flex_1()
-                .min_h_0()
-                .child(self.terminal_strip(cx))
-                .child(self.terminal_view(window, cx))
-                .into_any_element()
-        } else {
-            let note = match self.model.panel_tab {
-                PanelTab::Problems => {
-                    "Problems: not implemented yet (needs LSP diagnostics, ED-10)."
-                }
-                PanelTab::Output => {
-                    "Output: not implemented yet (extension output channels arrive from the host)."
-                }
-                _ => "Debug console: not implemented yet (needs DAP, DB-04).",
-            };
-            div()
-                .px_3()
-                .py_1()
-                .text_size(px(13.))
-                .text_color(rgb(theme::TEXT_DIM))
-                .child(note)
-                .into_any_element()
-        };
+        let body: AnyElement = self.panel_body(window, cx);
         div()
             .flex()
             .flex_col()
@@ -1741,7 +1826,7 @@ impl Workbench {
                     .px_3()
                     .text_size(px(12.))
                     .text_color(rgb(theme::TEXT_DIM))
-                    .child("No extension view loaded (set NANTI_EXTENSION and NANTI_VIEW)")
+                    .child("No extension is set for this panel. Install one in the Extensions view and choose Use in right panel.")
             }))
     }
 
@@ -1768,6 +1853,7 @@ impl Workbench {
 
     fn status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let branch = self.model.branch_label();
+        let problems = self.model.problems.total();
         let (position, eol, lang) = match self.model.active() {
             Some(t) => {
                 let (pos, eol) = match &t.content {
@@ -1817,6 +1903,22 @@ impl Workbench {
                     )
                     .child(
                         div()
+                            .id("status-problems")
+                            .px_2()
+                            .cursor_pointer()
+                            .text_color(rgb(if problems > 0 {
+                                0xe5534b
+                            } else {
+                                theme::TEXT_DIM
+                            }))
+                            .hover(|s| s.bg(rgb(theme::HOVER)))
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.apply_command(Command::ShowProblems, window, cx);
+                            }))
+                            .child(SharedString::from(format!("✖ {problems}"))),
+                    )
+                    .child(
+                        div()
                             .id("status-commands")
                             .px_2()
                             .cursor_pointer()
@@ -1842,7 +1944,17 @@ impl Workbench {
                             .values()
                             .map(|t| div().child(SharedString::from(t.clone()))),
                     )
-                    .children(position.map(SharedString::from))
+                    .children(position.map(|p| {
+                        div()
+                            .id("status-position")
+                            .px_2()
+                            .cursor_pointer()
+                            .hover(|s| s.bg(rgb(theme::HOVER)))
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.apply_command(Command::GoToLine, window, cx);
+                            }))
+                            .child(SharedString::from(p))
+                    }))
                     .children(lang.map(|_| "UTF-8"))
                     .children(eol)
                     .children(lang)
@@ -2822,7 +2934,16 @@ impl Workbench {
                     .into_any_element()
             })
             .collect();
-        let empty = (p.result_count() == 0).then(|| {
+        let is_input = matches!(p.mode, palette::PaletteMode::Input(_));
+        let error = p.error.clone().map(|e| {
+            div()
+                .px_3()
+                .py_2()
+                .text_size(px(12.))
+                .text_color(rgb(0xe5534b))
+                .child(SharedString::from(e))
+        });
+        let empty = (p.result_count() == 0 && !is_input).then(|| {
             div()
                 .px_3()
                 .py_2()
@@ -2907,7 +3028,8 @@ impl Workbench {
                                 .child(input_canvas),
                         )
                         .children(rows)
-                        .children(empty),
+                        .children(empty)
+                        .children(error),
                 ),
         )
     }
@@ -3170,9 +3292,9 @@ impl Render for Workbench {
             if right_shown {
                 panel.set_area(
                     (vw - right_w + 1.0) as i32,
-                    AI_PANEL_HEADER as i32,
+                    (AI_PANEL_HEADER + MENU_BAR_HEIGHT) as i32,
                     (right_w - 1.0) as i32,
-                    (vh - status_h - AI_PANEL_HEADER) as i32,
+                    (vh - status_h - AI_PANEL_HEADER - MENU_BAR_HEIGHT) as i32,
                 );
             }
         }
@@ -3212,17 +3334,21 @@ impl Render for Workbench {
             self.find_bar(window, cx)
         };
         let palette = self.palette_overlay(window, cx);
+        let menu_bar = self.menu_bar(cx);
+        let menus = self.menus_overlay(window, cx);
         let status_bar = layout.status_bar.then(|| self.status_bar(cx));
         div()
             .relative()
             .flex()
             .flex_col()
             .size_full()
+            .bg(rgb(theme::EDITOR))
             .track_focus(&self.root_focus)
             .on_key_down(cx.listener(Self::on_key_down))
             .on_mouse_move(cx.listener(Self::on_root_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_root_mouse_up))
             .text_color(rgb(theme::TEXT))
+            .child(menu_bar)
             .child(
                 div()
                     .flex()
@@ -3249,6 +3375,7 @@ impl Render for Workbench {
                     .children(right_panel),
             )
             .children(status_bar)
+            .children(menus)
             .children(palette)
     }
 }

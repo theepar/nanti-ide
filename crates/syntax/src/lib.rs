@@ -12,6 +12,9 @@ use std::path::Path;
 
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
+mod analysis;
+pub use analysis::{Diagnostic, Symbol, diagnostics, outline};
+
 /// Files larger than this are shown unhighlighted (re-parsing on every edit would lag).
 pub const MAX_BYTES: usize = 1_500_000;
 

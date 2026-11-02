@@ -9,7 +9,7 @@ const SKIP_DIRS: [&str; 3] = [".git", "node_modules", "target"];
 /// Quick open never lists more than this many files.
 pub const MAX_FILES: usize = 20_000;
 /// The palette shows at most this many matches.
-pub const MAX_RESULTS: usize = 50;
+pub const MAX_RESULTS: usize = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
@@ -46,11 +46,29 @@ pub enum Command {
     GitStageAll,
     GitUnstageAll,
     GitCommit,
+    NewFile,
+    NewFolder,
+    SaveAll,
+    CloseAllTabs,
+    RenameItem,
+    DeleteItem,
+    CopyPath,
+    RevealInOs,
+    RefreshExplorer,
+    CollapseAll,
+    GoToLine,
+    ShowProblems,
+    ShowOutput,
+    ClearOutput,
+    InstallVsix,
+    RunTask,
+    About,
+    Exit,
 }
 
 impl Command {
     /// Every command shown in the palette. Only things that really work are listed.
-    pub const ALL: [Command; 33] = [
+    pub const ALL: [Command; 51] = [
         Command::CommandPalette,
         Command::QuickOpen,
         Command::Save,
@@ -84,6 +102,24 @@ impl Command {
         Command::GitStageAll,
         Command::GitUnstageAll,
         Command::GitCommit,
+        Command::NewFile,
+        Command::NewFolder,
+        Command::SaveAll,
+        Command::CloseAllTabs,
+        Command::RenameItem,
+        Command::DeleteItem,
+        Command::CopyPath,
+        Command::RevealInOs,
+        Command::RefreshExplorer,
+        Command::CollapseAll,
+        Command::GoToLine,
+        Command::ShowProblems,
+        Command::ShowOutput,
+        Command::ClearOutput,
+        Command::InstallVsix,
+        Command::RunTask,
+        Command::About,
+        Command::Exit,
     ];
 
     pub fn title(self) -> &'static str {
@@ -98,7 +134,7 @@ impl Command {
             Command::ShowExplorer => "View: Show Explorer",
             Command::ShowSearch => "View: Show Search",
             Command::ShowSourceControl => "View: Show Source Control",
-            Command::ShowRun => "View: Show Run and Debug",
+            Command::ShowRun => "View: Show Run",
             Command::ShowExtensions => "View: Show Extensions",
             Command::Undo => "Edit: Undo",
             Command::Redo => "Edit: Redo",
@@ -121,7 +157,31 @@ impl Command {
             Command::GitStageAll => "Git: Stage All Changes",
             Command::GitUnstageAll => "Git: Unstage All Changes",
             Command::GitCommit => "Git: Commit Staged Changes",
+            Command::NewFile => "File: New File...",
+            Command::NewFolder => "File: New Folder...",
+            Command::SaveAll => "File: Save All",
+            Command::CloseAllTabs => "File: Close All Tabs",
+            Command::RenameItem => "File: Rename...",
+            Command::DeleteItem => "File: Delete (Recycle Bin)...",
+            Command::CopyPath => "Explorer: Copy Path",
+            Command::RevealInOs => "Explorer: Reveal in File Explorer",
+            Command::RefreshExplorer => "Explorer: Refresh",
+            Command::CollapseAll => "Explorer: Collapse Folders",
+            Command::GoToLine => "Go: Go to Line...",
+            Command::ShowProblems => "View: Show Problems",
+            Command::ShowOutput => "View: Show Output",
+            Command::ClearOutput => "Output: Clear",
+            Command::InstallVsix => "Extensions: Install from VSIX...",
+            Command::RunTask => "Run: Show Tasks",
+            Command::About => "Help: About nanti.",
+            Command::Exit => "File: Exit",
         }
+    }
+
+    /// Title without its category (`File: Save` -> `Save`), for menus.
+    pub fn menu_label(self) -> &'static str {
+        let t = self.title();
+        t.split_once(": ").map_or(t, |(_, rest)| rest)
     }
 
     pub fn keybinding(self) -> Option<&'static str> {
@@ -147,6 +207,8 @@ impl Command {
             Command::MaximizePanel => Some("Ctrl+Shift+M"),
             Command::ToggleRightPanel => Some("Ctrl+Alt+B"),
             Command::ShowSourceControl => Some("Ctrl+Shift+G"),
+            Command::GoToLine => Some("Ctrl+G"),
+            Command::RenameItem => Some("F2"),
             _ => None,
         }
     }
@@ -167,6 +229,7 @@ impl Command {
             ("f", true) => Command::FindInFiles,
             ("f", false) => Command::Find,
             ("g", true) => Command::ShowSourceControl,
+            ("g", false) => Command::GoToLine,
             ("h", _) => Command::Replace,
             ("`", true) => Command::NewTerminal,
             ("`", false) => Command::ToggleTerminal,
@@ -367,12 +430,38 @@ impl TextField {
 pub enum PaletteMode {
     Commands,
     Files,
+    /// A single-line prompt (no list): Enter submits the text.
+    Input(InputKind),
+}
+
+/// What a single-line prompt is asking for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InputKind {
+    GoToLine,
+    /// Name or relative path for a new file inside this folder.
+    NewFile(PathBuf),
+    NewFolder(PathBuf),
+    Rename(PathBuf),
+    InstallVsix,
+}
+
+impl InputKind {
+    pub fn placeholder(&self) -> &'static str {
+        match self {
+            InputKind::GoToLine => "Line number, or line:column",
+            InputKind::NewFile(_) => "File name (a/b/c.rs creates folders too)",
+            InputKind::NewFolder(_) => "Folder name",
+            InputKind::Rename(_) => "New name",
+            InputKind::InstallVsix => "Full path of a .vsix file",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PaletteAction {
     Command(Command),
     OpenFile(PathBuf),
+    Submit(InputKind, String),
 }
 
 #[derive(Debug, Clone)]
@@ -389,6 +478,8 @@ pub struct Palette {
     /// Indices into `items`, best match first.
     filtered: Vec<usize>,
     pub selected: usize,
+    /// Why the last Enter in an input prompt was refused (shown under the field).
+    pub error: Option<String>,
 }
 
 impl Palette {
@@ -424,13 +515,25 @@ impl Palette {
             items,
             filtered: Vec::new(),
             selected: 0,
+            error: None,
         };
         p.refilter();
         p
     }
 
+    /// A prompt without a list, optionally prefilled.
+    pub fn input(kind: InputKind, initial: &str) -> Self {
+        let mut p = Self::build(PaletteMode::Input(kind), Vec::new());
+        p.field.insert(initial);
+        p
+    }
+
     /// Recompute matches after the query changed.
     pub fn refilter(&mut self) {
+        self.error = None;
+        if matches!(self.mode, PaletteMode::Input(_)) {
+            return;
+        }
         let q = self.field.text().trim().to_owned();
         let mut scored: Vec<(i32, usize)> = self
             .items
@@ -473,15 +576,22 @@ impl Palette {
     }
 
     pub fn selected_action(&self) -> Option<PaletteAction> {
+        if let PaletteMode::Input(kind) = &self.mode {
+            return Some(PaletteAction::Submit(
+                kind.clone(),
+                self.field.text().to_owned(),
+            ));
+        }
         self.filtered
             .get(self.selected)
             .map(|&i| self.items[i].action.clone())
     }
 
     pub fn placeholder(&self) -> &'static str {
-        match self.mode {
+        match &self.mode {
             PaletteMode::Commands => "Type a command",
             PaletteMode::Files => "Type a file name to open",
+            PaletteMode::Input(k) => k.placeholder(),
         }
     }
 }
@@ -591,7 +701,10 @@ mod tests {
         // every shown keybinding string has a matching key handler for its first-listed shortcut
         for c in Command::ALL {
             if let Some(kb) = c.keybinding() {
-                assert!(kb.contains("Ctrl+") || kb.contains("F3"), "{kb}");
+                assert!(
+                    kb.contains("Ctrl+") || kb.contains("F3") || kb == "F2",
+                    "{kb}"
+                );
             }
         }
     }

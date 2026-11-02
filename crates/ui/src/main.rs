@@ -5,11 +5,21 @@ use gpui::{App, AppContext, Application, Bounds, WindowBounds, WindowOptions, px
 use ui::Workbench;
 use ui::panel::{HostConfig, Panel, spawn_worker};
 
-/// `NANTI_EXTENSION` (extension dir) + `NANTI_VIEW` (webview view type) pick the extension shown in
-/// the right panel. `NANTI_SELFTEST_LOG` makes the run self-verifying against the mock extension.
-fn host_config_from_env() -> Option<HostConfig> {
-    let extension_dir = PathBuf::from(std::env::var_os("NANTI_EXTENSION")?);
-    let view_type = std::env::var("NANTI_VIEW").ok()?;
+/// The extension shown in the right panel: `NANTI_EXTENSION` + `NANTI_VIEW` win; otherwise the one
+/// chosen in the Extensions view (saved in the config folder). `NANTI_SELFTEST_LOG` makes the run
+/// self-verifying against the mock extension.
+fn panel_choice(config_dir: Option<&std::path::Path>) -> Option<(PathBuf, String)> {
+    if let (Some(dir), Ok(view)) = (
+        std::env::var_os("NANTI_EXTENSION"),
+        std::env::var("NANTI_VIEW"),
+    ) {
+        return Some((PathBuf::from(dir), view));
+    }
+    ui::extensions::load_panel_choice(config_dir?)
+}
+
+fn host_config_from_env(config_dir: Option<&std::path::Path>) -> Option<HostConfig> {
+    let (extension_dir, view_type) = panel_choice(config_dir)?;
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     Some(HostConfig {
         node: std::env::var("NANTI_NODE").unwrap_or_else(|_| "node".into()),
@@ -24,7 +34,10 @@ fn host_config_from_env() -> Option<HostConfig> {
 fn main() {
     Application::new().run(|cx: &mut App| {
         let bounds = Bounds::centered(None, size(px(1280.), px(800.)), cx);
-        let config = host_config_from_env();
+        let config_dir =
+            ui::layout::layout_path().and_then(|p| p.parent().map(std::path::Path::to_path_buf));
+        let config = host_config_from_env(config_dir.as_deref());
+        let panel_extension = config.as_ref().map(|c| c.extension_dir.clone());
         let root = std::env::var_os("NANTI_WORKSPACE")
             .map(PathBuf::from)
             .or_else(|| std::env::current_dir().ok())
@@ -39,6 +52,9 @@ fn main() {
                     cx.new(|cx| {
                         let mut workbench = Workbench::new(root, cx);
                         workbench.enable_source_control();
+                        if let Some(dir) = config_dir.clone() {
+                            workbench.set_config_dir(dir, panel_extension.clone());
+                        }
                         // Visibility and sizes of every region are remembered between runs.
                         if let Some(path) = ui::layout::layout_path() {
                             workbench.set_layout_path(path);
