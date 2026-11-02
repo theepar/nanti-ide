@@ -218,11 +218,29 @@ fn palette_navigation_backspace_and_escape(cx: &mut TestAppContext) {
     );
 }
 
+fn wait_index(window: WindowHandle<Workbench>, cx: &mut VisualTestContext) {
+    let start = std::time::Instant::now();
+    while window
+        .update(cx, |wb, _, _| {
+            wb.pump();
+            wb.model().index_rx.is_some()
+        })
+        .unwrap()
+    {
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(30),
+            "the file index never arrived"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
 #[gpui::test]
 fn quick_open_opens_a_file_chosen_by_fuzzy_query(cx: &mut TestAppContext) {
     let ws = workspace("pal3", &[("a.txt", "A"), ("notes.md", "NOTES")]);
     let (window, cx) = open(cx, &ws.0, "a.txt");
     cx.simulate_keystrokes("ctrl-p");
+    wait_index(window, cx);
     cx.simulate_input("nts");
     cx.simulate_keystrokes("enter");
     let title = window
@@ -246,6 +264,7 @@ fn palette_runs_save_and_tab_switch_commands(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("enter");
     assert_eq!(std::fs::read_to_string(ws.0.join("a.txt")).unwrap(), "1A");
     cx.simulate_keystrokes("ctrl-p");
+    wait_index(window, cx);
     cx.simulate_input("b.txt");
     cx.simulate_keystrokes("enter");
     assert_eq!(text(window, cx), "B");

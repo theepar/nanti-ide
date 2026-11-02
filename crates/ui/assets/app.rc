@@ -12,8 +12,8 @@ BEGIN
     BEGIN
       VALUE "FileDescription", "nanti."
       VALUE "ProductName", "nanti."
-      VALUE "InternalName", "nanti-ui"
-      VALUE "OriginalFilename", "nanti-ui.exe"
+      VALUE "InternalName", "nanti"
+      VALUE "OriginalFilename", "nanti.exe"
       VALUE "FileVersion", "0.0.1"
       VALUE "ProductVersion", "0.0.1"
     END

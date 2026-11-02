@@ -721,6 +721,7 @@ pub fn remove_dir_force(dir: &Path) -> std::io::Result<()> {
             if let Ok(metadata) = std::fs::metadata(&path) {
                 let mut perms = metadata.permissions();
                 if perms.readonly() {
+                    #[allow(clippy::permissions_set_readonly_false)]
                     perms.set_readonly(false);
                     let _ = std::fs::set_permissions(&path, perms);
                 }
@@ -1042,12 +1043,25 @@ pub fn vsix_cache_dir(config_dir: &Path) -> PathBuf {
 }
 
 fn cache_file_name(url: &str) -> Option<String> {
-    let name = url.split(['?', '#']).next()?.rsplit('/').next()?;
-    let plain = name
+    let last = url.split(['?', '#']).next()?.rsplit('/').next()?;
+    if last.len() <= 5 || !last.to_ascii_lowercase().ends_with(".vsix") {
+        return None;
+    }
+    let safe: String = last
         .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+'));
-    (plain && name.len() > 5 && name.to_ascii_lowercase().ends_with(".vsix"))
-        .then(|| name.to_owned())
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in url.bytes() {
+        hash = (hash ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
+    }
+    Some(format!("{hash:016x}-{}", safe.trim_start_matches('.')))
 }
 
 fn cached_is_complete(path: &Path, expected: u64) -> bool {
@@ -1076,7 +1090,7 @@ pub fn prune_vsix_cache(dir: &Path, keep: usize) {
             let _ = std::fs::remove_file(&path);
         }
     }
-    packages.sort_by(|a, b| b.0.cmp(&a.0));
+    packages.sort_by_key(|p| std::cmp::Reverse(p.0));
     for (_, path) in packages.into_iter().skip(keep) {
         let _ = std::fs::remove_file(path);
     }
@@ -1178,7 +1192,7 @@ pub fn prefetch_package(
         return Err("refusing to download from an address that is not Open VSX".into());
     }
     let (url, size) = resolve_package(publisher, name, listed_url)?;
-    if size > PREFETCH_MAX_BYTES || cache_file_name(&url).is_none() {
+    if size > PREFETCH_MAX_BYTES {
         return Ok(());
     }
     if !in_flight()
@@ -1578,19 +1592,37 @@ mod tests {
     #[test]
     fn package_cache_names_are_plain_vsix_file_names_only() {
         let ok = "https://open-vsx.org/api/a/b/1.0.0/file/a.b-1.0.0.vsix";
-        assert_eq!(cache_file_name(ok).as_deref(), Some("a.b-1.0.0.vsix"));
-        assert_eq!(
-            cache_file_name(&format!("{ok}?x=1")).as_deref(),
-            Some("a.b-1.0.0.vsix")
+        let name = cache_file_name(ok).unwrap();
+        assert!(
+            name.ends_with("-a.b-1.0.0.vsix") && name.len() == 16 + 1 + "a.b-1.0.0.vsix".len(),
+            "{name}"
+        );
+        assert_ne!(
+            cache_file_name(ok),
+            cache_file_name(&ok.replace("1.0.0", "2.0.0")),
+            "versions never share a file"
+        );
+        let platform = "https://open-vsx.org/api/anthropic/claude-code/win32-x64/2.1.316/file/anthropic.claude-code-2.1.316@win32-x64.vsix";
+        let name = cache_file_name(platform).expect("platform packages are accepted");
+        assert!(
+            name.ends_with("anthropic.claude-code-2.1.316_win32-x64.vsix"),
+            "{name}"
         );
         for bad in [
             "https://open-vsx.org/api/a/b/file/a.zip",
             "https://open-vsx.org/api/a/b/file/",
-            "https://open-vsx.org/api/a/b/file/..%2F..%2Fevil.vsix",
-            "https://open-vsx.org/api/a/b/file/a b.vsix",
             "https://open-vsx.org/api/a/b/file/.vsix",
         ] {
             assert_eq!(cache_file_name(bad), None, "{bad}");
+        }
+        for tricky in [
+            "https://open-vsx.org/api/a/b/file/..%2F..%2Fevil.vsix",
+            "https://open-vsx.org/api/a/b/file/a b.vsix",
+            "https://open-vsx.org/api/a/b/file/con:x.vsix",
+        ] {
+            let n = cache_file_name(tricky).expect("sanitized, not refused");
+            assert!(!n.contains(['/', '\\', ':', ' ', '%', '@']), "{n}");
+            assert!(!n.starts_with('.'));
         }
     }
 
@@ -1599,7 +1631,7 @@ mod tests {
         let dir = tmp("vsixcache");
         let cfg = dir.0.join("cfg");
         let url = "https://open-vsx.org/api/a/b/1.0.0/file/a.b-1.0.0.vsix";
-        let cached = vsix_cache_dir(&cfg).join("a.b-1.0.0.vsix");
+        let cached = vsix_cache_dir(&cfg).join(cache_file_name(url).unwrap());
         std::fs::create_dir_all(cached.parent().unwrap()).unwrap();
         std::fs::write(&cached, b"12345").unwrap();
         assert_eq!(

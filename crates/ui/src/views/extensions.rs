@@ -409,8 +409,7 @@ impl Workbench {
     ) -> AnyElement {
         use crate::extensions::Readme;
         let installed = self.model.extensions.iter().find(|e| {
-            e.id.eq_ignore_ascii_case(&d.id)
-                || e.display_name.eq_ignore_ascii_case(&d.display_name)
+            e.id.eq_ignore_ascii_case(&d.id) || e.display_name.eq_ignore_ascii_case(&d.display_name)
         });
         let installed_root = self
             .model

@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use editor_core::Editor;
@@ -1652,9 +1652,13 @@ impl Workbench {
                         this.model.select_activity(a);
                         if this.model.activity == a && this.model.layout.sidebar {
                             match a {
-                                Activity::Extensions => this.focus_target(Target::ExtSearch, window),
+                                Activity::Extensions => {
+                                    this.focus_target(Target::ExtSearch, window)
+                                }
                                 Activity::Search => this.focus_target(Target::Search, window),
-                                Activity::SourceControl => this.focus_target(Target::Commit, window),
+                                Activity::SourceControl => {
+                                    this.focus_target(Target::Commit, window)
+                                }
                                 _ => {}
                             }
                         }
@@ -2964,7 +2968,10 @@ impl Workbench {
         {
             return spans.clone();
         }
-        if let Some((p, v, spans)) = st.ready.take_if(|(p, v, _)| p == &tab.path && *v == version) {
+        if let Some((p, v, spans)) = st
+            .ready
+            .take_if(|(p, v, _)| p == &tab.path && *v == version)
+        {
             let spans = spans.map(Rc::new);
             if let Some(s) = &spans {
                 st.last_good = Some((p.clone(), s.clone()));
@@ -2973,6 +2980,10 @@ impl Workbench {
             return spans;
         }
         let text = editor.text();
+        if text.split('\n').count() != editor.buffer().len_lines() {
+            st.exact = Some((tab.path.clone(), version, None));
+            return None;
+        }
         if text.len() <= HIGHLIGHT_SYNC_BYTES {
             let spans = self
                 .highlighter
