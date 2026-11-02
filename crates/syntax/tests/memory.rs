@@ -55,6 +55,7 @@ fn sample(lang: Language) -> String {
         Language::Json => "{\"a\": [1, 2, {\"b\": null}], \"c\": \"text\"}\n",
         Language::Dart => "void main() { print('hi'); }\nclass A { final int x; A(this.x); }\n",
         Language::Markdown => "# Title\n\nSome *text* and `code`.\n\n- item\n",
+        _ => "x = \"hi\" # note\nfoo(bar, 1)\n",
     };
     unit.repeat(2000)
 }
@@ -62,16 +63,7 @@ fn sample(lang: Language) -> String {
 #[test]
 #[ignore = "prints memory numbers; run with --ignored --nocapture"]
 fn memory_cost_of_each_language() {
-    let all = [
-        Language::Rust,
-        Language::JavaScript,
-        Language::TypeScript,
-        Language::Tsx,
-        Language::Go,
-        Language::Json,
-        Language::Dart,
-        Language::Markdown,
-    ];
+    let all = Language::ALL;
     let mut h = SyntaxHighlighter::new();
     let base = private_kib();
     println!("baseline private memory: {base} KiB (all grammars are linked in, none loaded)");
@@ -88,7 +80,7 @@ fn memory_cost_of_each_language() {
         prev = now;
     }
     println!(
-        "total after using all 8 languages: +{} KiB",
+        "total after using every language: +{} KiB",
         prev.saturating_sub(base)
     );
     let _ = Path::new(".");

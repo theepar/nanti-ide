@@ -19,10 +19,82 @@ pub enum Language {
     Json,
     Dart,
     Markdown,
+    Python,
+    C,
+    Cpp,
+    CSharp,
+    Java,
+    Ruby,
+    Php,
+    Html,
+    Css,
+    Yaml,
+    Toml,
+    Bash,
+    PowerShell,
+    Lua,
+    Sql,
+    Xml,
+    Make,
+    CMake,
+    Batch,
+    Ini,
+    Properties,
+    Diff,
+    R,
+    Zig,
+    Elixir,
+    Erlang,
+    Nix,
 }
 
 impl Language {
+    pub const ALL: [Language; 35] = [
+        Language::Rust,
+        Language::JavaScript,
+        Language::TypeScript,
+        Language::Tsx,
+        Language::Go,
+        Language::Json,
+        Language::Dart,
+        Language::Markdown,
+        Language::Python,
+        Language::C,
+        Language::Cpp,
+        Language::CSharp,
+        Language::Java,
+        Language::Ruby,
+        Language::Php,
+        Language::Html,
+        Language::Css,
+        Language::Yaml,
+        Language::Toml,
+        Language::Bash,
+        Language::PowerShell,
+        Language::Lua,
+        Language::Sql,
+        Language::Xml,
+        Language::Make,
+        Language::CMake,
+        Language::Batch,
+        Language::Ini,
+        Language::Properties,
+        Language::Diff,
+        Language::R,
+        Language::Zig,
+        Language::Elixir,
+        Language::Erlang,
+        Language::Nix,
+    ];
+
     pub fn from_path(path: &Path) -> Option<Self> {
+        if let Some(lang) = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(Self::from_file_name)
+        {
+            return Some(lang);
+        }
         let ext = path.extension()?.to_str()?.to_ascii_lowercase();
         Some(match ext.as_str() {
             "rs" => Language::Rust,
@@ -33,8 +105,112 @@ impl Language {
             "json" => Language::Json,
             "dart" => Language::Dart,
             "md" | "markdown" => Language::Markdown,
+            "py" | "pyw" | "pyi" => Language::Python,
+            "c" | "h" => Language::C,
+            "cc" | "cpp" | "cxx" | "hpp" | "hh" | "hxx" | "ino" => Language::Cpp,
+            "cs" => Language::CSharp,
+            "java" => Language::Java,
+            "rb" | "rake" | "gemspec" => Language::Ruby,
+            "php" | "phtml" => Language::Php,
+            "html" | "htm" | "xhtml" => Language::Html,
+            "css" => Language::Css,
+            "yaml" | "yml" => Language::Yaml,
+            "toml" => Language::Toml,
+            "sh" | "bash" | "zsh" => Language::Bash,
+            "ps1" | "psm1" | "psd1" => Language::PowerShell,
+            "lua" => Language::Lua,
+            "sql" => Language::Sql,
+            "xml" | "xsl" | "xslt" | "svg" | "plist" | "csproj" | "props" | "targets" => {
+                Language::Xml
+            }
+            "mk" | "mak" => Language::Make,
+            "cmake" => Language::CMake,
+            "bat" | "cmd" => Language::Batch,
+            "ini" | "cfg" => Language::Ini,
+            "properties" => Language::Properties,
+            "diff" | "patch" => Language::Diff,
+            "r" => Language::R,
+            "zig" => Language::Zig,
+            "ex" | "exs" => Language::Elixir,
+            "erl" | "hrl" => Language::Erlang,
+            "nix" => Language::Nix,
             _ => return None,
         })
+    }
+
+    fn from_file_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "Makefile" | "makefile" | "GNUmakefile" => Language::Make,
+            "CMakeLists.txt" => Language::CMake,
+            "Gemfile" | "Rakefile" | "Guardfile" => Language::Ruby,
+            ".bashrc" | ".bash_profile" | ".zshrc" | ".profile" => Language::Bash,
+            "Cargo.lock" => Language::Toml,
+            _ => return None,
+        })
+    }
+
+    pub fn reports_syntax_errors(self) -> bool {
+        matches!(
+            self,
+            Language::Rust
+                | Language::JavaScript
+                | Language::TypeScript
+                | Language::Tsx
+                | Language::Go
+                | Language::Json
+                | Language::Dart
+                | Language::Python
+                | Language::C
+                | Language::Cpp
+                | Language::CSharp
+                | Language::Java
+                | Language::Ruby
+                | Language::Css
+                | Language::Yaml
+                | Language::Toml
+                | Language::Lua
+                | Language::Zig
+        )
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Language::Rust => "Rust",
+            Language::JavaScript => "JavaScript",
+            Language::TypeScript => "TypeScript",
+            Language::Tsx => "TypeScript React",
+            Language::Go => "Go",
+            Language::Json => "JSON",
+            Language::Dart => "Dart",
+            Language::Markdown => "Markdown",
+            Language::Python => "Python",
+            Language::C => "C",
+            Language::Cpp => "C++",
+            Language::CSharp => "C#",
+            Language::Java => "Java",
+            Language::Ruby => "Ruby",
+            Language::Php => "PHP",
+            Language::Html => "HTML",
+            Language::Css => "CSS",
+            Language::Yaml => "YAML",
+            Language::Toml => "TOML",
+            Language::Bash => "Shell Script",
+            Language::PowerShell => "PowerShell",
+            Language::Lua => "Lua",
+            Language::Sql => "SQL",
+            Language::Xml => "XML",
+            Language::Make => "Makefile",
+            Language::CMake => "CMake",
+            Language::Batch => "Batch",
+            Language::Ini => "INI",
+            Language::Properties => "Properties",
+            Language::Diff => "Diff",
+            Language::R => "R",
+            Language::Zig => "Zig",
+            Language::Elixir => "Elixir",
+            Language::Erlang => "Erlang",
+            Language::Nix => "Nix",
+        }
     }
 }
 
@@ -127,6 +303,16 @@ fn build(
     Some(c)
 }
 
+fn build_first(
+    language: tree_sitter::Language,
+    name: &str,
+    queries: &[&str],
+) -> Option<HighlightConfiguration> {
+    queries
+        .iter()
+        .find_map(|q| build(language.clone(), name, q, "", ""))
+}
+
 fn config_for(lang: Language) -> Option<HighlightConfiguration> {
     match lang {
         Language::Rust => build(
@@ -198,6 +384,228 @@ fn config_for(lang: Language) -> Option<HighlightConfiguration> {
             tree_sitter_dart::HIGHLIGHTS_QUERY,
             "",
             tree_sitter_dart::LOCALS_QUERY,
+        ),
+        Language::Python => build(
+            tree_sitter_python::LANGUAGE.into(),
+            "python",
+            tree_sitter_python::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ),
+        Language::C => build(
+            tree_sitter_c::LANGUAGE.into(),
+            "c",
+            tree_sitter_c::HIGHLIGHT_QUERY,
+            "",
+            "",
+        ),
+        Language::Cpp => build(
+            tree_sitter_cpp::LANGUAGE.into(),
+            "cpp",
+            &format!(
+                "{}\n{}",
+                tree_sitter_c::HIGHLIGHT_QUERY,
+                tree_sitter_cpp::HIGHLIGHT_QUERY
+            ),
+            "",
+            "",
+        )
+        .or_else(|| {
+            build(
+                tree_sitter_cpp::LANGUAGE.into(),
+                "cpp",
+                tree_sitter_cpp::HIGHLIGHT_QUERY,
+                "",
+                "",
+            )
+        }),
+        Language::CSharp => build(
+            tree_sitter_c_sharp::LANGUAGE.into(),
+            "csharp",
+            tree_sitter_c_sharp::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ),
+        Language::Java => build(
+            tree_sitter_java::LANGUAGE.into(),
+            "java",
+            tree_sitter_java::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ),
+        Language::Ruby => build(
+            tree_sitter_ruby::LANGUAGE.into(),
+            "ruby",
+            tree_sitter_ruby::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ),
+        Language::Php => build(
+            tree_sitter_php::LANGUAGE_PHP.into(),
+            "php",
+            tree_sitter_php::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ),
+        Language::Html => build(
+            tree_sitter_html::LANGUAGE.into(),
+            "html",
+            tree_sitter_html::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ),
+        Language::Css => build(
+            tree_sitter_css::LANGUAGE.into(),
+            "css",
+            tree_sitter_css::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ),
+        Language::Yaml => build(
+            tree_sitter_yaml::LANGUAGE.into(),
+            "yaml",
+            tree_sitter_yaml::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ),
+        Language::Toml => build(
+            tree_sitter_toml_ng::LANGUAGE.into(),
+            "toml",
+            tree_sitter_toml_ng::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ),
+        Language::Bash => build(
+            tree_sitter_bash::LANGUAGE.into(),
+            "bash",
+            tree_sitter_bash::HIGHLIGHT_QUERY,
+            "",
+            "",
+        ),
+        Language::PowerShell => build(
+            tree_sitter_powershell::LANGUAGE.into(),
+            "powershell",
+            tree_sitter_powershell::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ),
+        Language::Lua => build(
+            tree_sitter_lua::LANGUAGE.into(),
+            "lua",
+            tree_sitter_lua::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ),
+        Language::Sql => build_first(
+            tree_sitter_sequel::LANGUAGE.into(),
+            "sql",
+            &[
+                &format!(
+                    "{}
+(comment) @comment",
+                    tree_sitter_sequel::HIGHLIGHTS_QUERY
+                ),
+                tree_sitter_sequel::HIGHLIGHTS_QUERY,
+            ],
+        ),
+        Language::Xml => build(
+            tree_sitter_xml::LANGUAGE_XML.into(),
+            "xml",
+            tree_sitter_xml::XML_HIGHLIGHT_QUERY,
+            "",
+            "",
+        ),
+        Language::Make => build_first(
+            tree_sitter_make::LANGUAGE.into(),
+            "make",
+            &[
+                &format!(
+                    "{}
+(comment) @comment",
+                    tree_sitter_make::HIGHLIGHTS_QUERY
+                ),
+                tree_sitter_make::HIGHLIGHTS_QUERY,
+            ],
+        ),
+        Language::CMake => build_first(
+            tree_sitter_cmake::LANGUAGE.into(),
+            "cmake",
+            &[
+                &format!(
+                    "{}
+[(line_comment) (bracket_comment)] @comment",
+                    tree_sitter_cmake::HIGHLIGHTS_QUERY
+                ),
+                tree_sitter_cmake::HIGHLIGHTS_QUERY,
+            ],
+        ),
+        Language::Batch => build(
+            tree_sitter_batch::LANGUAGE.into(),
+            "batch",
+            tree_sitter_batch::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ),
+        Language::Ini => build_first(
+            tree_sitter_ini::LANGUAGE.into(),
+            "ini",
+            &[
+                &format!(
+                    "{}
+(comment) @comment",
+                    tree_sitter_ini::HIGHLIGHTS_QUERY
+                ),
+                tree_sitter_ini::HIGHLIGHTS_QUERY,
+            ],
+        ),
+        Language::Properties => build(
+            tree_sitter_properties::LANGUAGE.into(),
+            "properties",
+            tree_sitter_properties::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ),
+        Language::Diff => build(
+            tree_sitter_diff::LANGUAGE.into(),
+            "diff",
+            tree_sitter_diff::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ),
+        Language::R => build(
+            tree_sitter_r::LANGUAGE.into(),
+            "r",
+            tree_sitter_r::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ),
+        Language::Zig => build(
+            tree_sitter_zig::LANGUAGE.into(),
+            "zig",
+            tree_sitter_zig::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ),
+        Language::Elixir => build(
+            tree_sitter_elixir::LANGUAGE.into(),
+            "elixir",
+            tree_sitter_elixir::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ),
+        Language::Erlang => build(
+            tree_sitter_erlang::LANGUAGE.into(),
+            "erlang",
+            tree_sitter_erlang::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ),
+        Language::Nix => build(
+            tree_sitter_nix::LANGUAGE.into(),
+            "nix",
+            tree_sitter_nix::HIGHLIGHTS_QUERY,
+            "",
+            "",
         ),
         Language::Markdown => build(
             tree_sitter_md::LANGUAGE.into(),
@@ -467,7 +875,11 @@ mod tests {
     #[test]
     fn unknown_language_oversized_and_empty_inputs() {
         assert_eq!(Language::from_path(Path::new("a.txt")), None);
-        assert_eq!(Language::from_path(Path::new("Makefile")), None);
+        assert_eq!(
+            Language::from_path(Path::new("Makefile")),
+            Some(Language::Make)
+        );
+        assert_eq!(Language::from_path(Path::new("LICENSE")), None);
         assert_eq!(Language::from_path(Path::new("X.RS")), Some(Language::Rust));
         assert_eq!(
             Language::from_path(Path::new("a.test.tsx")),

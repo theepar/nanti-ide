@@ -9,9 +9,9 @@ Project), tree-sitter and its grammars (MIT), ropey (MIT), wry (MIT OR Apache-2.
 Crates that offer a choice of licenses (for example `MIT OR Apache-2.0`) are used under the permissive option.
 MPL-2.0 components are used unmodified; their source is available from the repositories listed.
 
-## Rust crates (846)
+## Rust crates (873)
 
-Licenses in use: MIT OR Apache-2.0 (378), MIT (210), Apache-2.0 OR MIT (75), MIT/Apache-2.0 (37), Apache-2.0 (22), Unicode-3.0 (18), Zlib OR Apache-2.0 OR MIT (11), BSD-3-Clause (10), MIT OR Apache-2.0 OR Zlib (8), Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT (8), Unlicense OR MIT (7), Apache-2.0/MIT (7), MPL-2.0 (7), Zlib (5), BSD-2-Clause (4), MIT / Apache-2.0 (4), Apache-2.0 OR ISC OR MIT (4), ISC (3), Apache-2.0 WITH LLVM-exception (2), CC0-1.0 (2), MIT OR Zlib OR Apache-2.0 (2), BSD-3-Clause OR Apache-2.0 (2), BSD-3-Clause OR MIT OR Apache-2.0 (2), MIT OR Apache-2.0 OR LGPL-2.1-or-later (2), Unlicense/MIT (2), (MIT OR Apache-2.0) AND Unicode-3.0 (2), BSD-2-Clause OR Apache-2.0 OR MIT (2), 0BSD OR MIT OR Apache-2.0 (1), Apache-2.0 AND MIT (1), CC0-1.0 OR MIT-0 OR Apache-2.0 (1), (Apache-2.0 OR MIT) AND BSD-3-Clause (1), Apache-2.0 / MIT (1), CC0-1.0 OR Apache-2.0 (1), (MIT OR Apache-2.0) AND NCSA (1), Apache-2.0 AND ISC (1), Apache-2.0 OR BSL-1.0 (1), Apache-2.0 OR GPL-2.0-only (1)
+Licenses in use: MIT OR Apache-2.0 (378), MIT (235), Apache-2.0 OR MIT (75), MIT/Apache-2.0 (37), Apache-2.0 (24), Unicode-3.0 (18), Zlib OR Apache-2.0 OR MIT (11), BSD-3-Clause (10), MIT OR Apache-2.0 OR Zlib (8), Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT (8), Unlicense OR MIT (7), Apache-2.0/MIT (7), MPL-2.0 (7), Zlib (5), BSD-2-Clause (4), MIT / Apache-2.0 (4), Apache-2.0 OR ISC OR MIT (4), ISC (3), Apache-2.0 WITH LLVM-exception (2), CC0-1.0 (2), MIT OR Zlib OR Apache-2.0 (2), BSD-3-Clause OR Apache-2.0 (2), BSD-3-Clause OR MIT OR Apache-2.0 (2), MIT OR Apache-2.0 OR LGPL-2.1-or-later (2), Unlicense/MIT (2), (MIT OR Apache-2.0) AND Unicode-3.0 (2), BSD-2-Clause OR Apache-2.0 OR MIT (2), 0BSD OR MIT OR Apache-2.0 (1), Apache-2.0 AND MIT (1), CC0-1.0 OR MIT-0 OR Apache-2.0 (1), (Apache-2.0 OR MIT) AND BSD-3-Clause (1), Apache-2.0 / MIT (1), CC0-1.0 OR Apache-2.0 (1), (MIT OR Apache-2.0) AND NCSA (1), Apache-2.0 AND ISC (1), Apache-2.0 OR BSL-1.0 (1), Apache-2.0 OR GPL-2.0-only (1)
 
 | Crate | Version | License | Source |
 |---|---|---|---|
@@ -93,7 +93,7 @@ Licenses in use: MIT OR Apache-2.0 (378), MIT (210), Apache-2.0 OR MIT (75), MIT
 | calloop-wayland-source | 0.3.0 | MIT | https://github.com/smithay/calloop-wayland-source |
 | cbc | 0.1.2 | MIT OR Apache-2.0 | https://github.com/RustCrypto/block-modes |
 | cbindgen | 0.28.0 | MPL-2.0 | https://github.com/mozilla/cbindgen |
-| cc | 1.10.0 | MIT OR Apache-2.0 | https://github.com/rust-lang/cc-rs |
+| cc | 1.2.67 | MIT OR Apache-2.0 | https://github.com/rust-lang/cc-rs |
 | cesu8 | 1.1.0 | Apache-2.0/MIT | https://github.com/emk/cesu8-rs |
 | cexpr | 0.6.0 | Apache-2.0/MIT | https://github.com/jethrogb/rust-cexpr |
 | cfg_aliases | 0.2.2 | MIT | https://github.com/katharostech/cfg_aliases |
@@ -659,15 +659,42 @@ Licenses in use: MIT OR Apache-2.0 (378), MIT (210), Apache-2.0 OR MIT (75), MIT
 | tracing-attributes | 0.1.31 | MIT | https://github.com/tokio-rs/tracing |
 | tracing-core | 0.1.36 | MIT | https://github.com/tokio-rs/tracing |
 | tree-sitter | 0.27.1 | MIT | https://github.com/tree-sitter/tree-sitter |
+| tree-sitter-bash | 0.25.1 | MIT | https://github.com/tree-sitter/tree-sitter-bash |
+| tree-sitter-batch | 0.11.1 | MIT | https://github.com/wharflab/tree-sitter-batch |
+| tree-sitter-c | 0.24.2 | MIT | https://github.com/tree-sitter/tree-sitter-c |
+| tree-sitter-c-sharp | 0.23.5 | MIT | https://github.com/tree-sitter/tree-sitter-c-sharp |
+| tree-sitter-cmake | 0.7.6 | MIT | https://github.com/uyha/tree-sitter-cmake |
+| tree-sitter-cpp | 0.23.4 | MIT | https://github.com/tree-sitter/tree-sitter-cpp |
+| tree-sitter-css | 0.25.0 | MIT | https://github.com/tree-sitter/tree-sitter-css |
 | tree-sitter-dart | 0.3.0 | MIT | https://github.com/nielsenko/tree-sitter-dart |
+| tree-sitter-diff | 0.1.0 | MIT | https://github.com/tree-sitter/tree-sitter-diff |
+| tree-sitter-elixir | 0.3.5 | Apache-2.0 | https://github.com/elixir-lang/tree-sitter-elixir |
+| tree-sitter-erlang | 0.21.0 | MIT | https://github.com/WhatsApp/tree-sitter-erlang |
 | tree-sitter-go | 0.25.0 | MIT | https://github.com/tree-sitter/tree-sitter-go |
 | tree-sitter-highlight | 0.27.1 | MIT | https://github.com/tree-sitter/tree-sitter |
+| tree-sitter-html | 0.23.2 | MIT | https://github.com/tree-sitter/tree-sitter-html |
+| tree-sitter-ini | 1.4.0 | Apache-2.0 | https://github.com/justinmk/tree-sitter-ini |
+| tree-sitter-java | 0.23.5 | MIT | https://github.com/tree-sitter/tree-sitter-java |
 | tree-sitter-javascript | 0.25.0 | MIT | https://github.com/tree-sitter/tree-sitter-javascript |
 | tree-sitter-json | 0.24.8 | MIT | https://github.com/tree-sitter/tree-sitter-json |
 | tree-sitter-language | 0.1.9 | MIT | https://github.com/tree-sitter/tree-sitter |
+| tree-sitter-lua | 0.5.0 | MIT | https://github.com/tree-sitter-grammars/tree-sitter-lua |
+| tree-sitter-make | 1.1.1 | MIT | https://github.com/tree-sitter-grammars/tree-sitter-make |
 | tree-sitter-md | 0.5.4 | MIT | https://github.com/tree-sitter-grammars/tree-sitter-markdown |
+| tree-sitter-nix | 0.3.0 | MIT | https://github.com/nix-community/tree-sitter-nix |
+| tree-sitter-php | 0.25.1 | MIT | https://github.com/tree-sitter/tree-sitter-php |
+| tree-sitter-powershell | 0.26.6 | MIT | https://github.com/airbus-cert/tree-sitter-powershell |
+| tree-sitter-properties | 0.3.0 | MIT | https://github.com/tree-sitter-grammars/tree-sitter-properties |
+| tree-sitter-python | 0.25.0 | MIT | https://github.com/tree-sitter/tree-sitter-python |
+| tree-sitter-r | 1.3.0 | MIT | https://github.com/r-lib/tree-sitter-r |
+| tree-sitter-ruby | 0.23.1 | MIT | https://github.com/tree-sitter/tree-sitter-ruby |
 | tree-sitter-rust | 0.24.2 | MIT | https://github.com/tree-sitter/tree-sitter-rust |
+| tree-sitter-sequel | 0.3.11 | MIT | https://github.com/derekstride/tree-sitter-sql.git |
+| tree-sitter-toml-ng | 0.7.0 | MIT | https://github.com/tree-sitter-grammars/tree-sitter-toml |
 | tree-sitter-typescript | 0.23.2 | MIT | https://github.com/tree-sitter/tree-sitter-typescript |
+| tree-sitter-xml | 0.7.0 | MIT | https://github.com/tree-sitter-grammars/tree-sitter-xml |
+| tree-sitter-yaml | 0.7.2 | MIT | https://github.com/tree-sitter-grammars/tree-sitter-yaml |
+| tree-sitter-zig | 1.1.2 | MIT | https://github.com/tree-sitter-grammars/tree-sitter-zig |
 | try-lock | 0.2.5 | MIT | https://github.com/seanmonstar/try-lock |
 | ttf-parser | 0.20.0 | MIT OR Apache-2.0 | https://github.com/RazrFalcon/ttf-parser |
 | ttf-parser | 0.21.1 | MIT OR Apache-2.0 | https://github.com/RazrFalcon/ttf-parser |

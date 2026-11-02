@@ -31,6 +31,33 @@ fn ts_language(lang: Language) -> tree_sitter::Language {
         Language::Json => tree_sitter_json::LANGUAGE.into(),
         Language::Dart => tree_sitter_dart::LANGUAGE.into(),
         Language::Markdown => tree_sitter_md::LANGUAGE.into(),
+        Language::Python => tree_sitter_python::LANGUAGE.into(),
+        Language::C => tree_sitter_c::LANGUAGE.into(),
+        Language::Cpp => tree_sitter_cpp::LANGUAGE.into(),
+        Language::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
+        Language::Java => tree_sitter_java::LANGUAGE.into(),
+        Language::Ruby => tree_sitter_ruby::LANGUAGE.into(),
+        Language::Php => tree_sitter_php::LANGUAGE_PHP.into(),
+        Language::Html => tree_sitter_html::LANGUAGE.into(),
+        Language::Css => tree_sitter_css::LANGUAGE.into(),
+        Language::Yaml => tree_sitter_yaml::LANGUAGE.into(),
+        Language::Toml => tree_sitter_toml_ng::LANGUAGE.into(),
+        Language::Bash => tree_sitter_bash::LANGUAGE.into(),
+        Language::PowerShell => tree_sitter_powershell::LANGUAGE.into(),
+        Language::Lua => tree_sitter_lua::LANGUAGE.into(),
+        Language::Sql => tree_sitter_sequel::LANGUAGE.into(),
+        Language::Xml => tree_sitter_xml::LANGUAGE_XML.into(),
+        Language::Make => tree_sitter_make::LANGUAGE.into(),
+        Language::CMake => tree_sitter_cmake::LANGUAGE.into(),
+        Language::Batch => tree_sitter_batch::LANGUAGE.into(),
+        Language::Ini => tree_sitter_ini::LANGUAGE.into(),
+        Language::Properties => tree_sitter_properties::LANGUAGE.into(),
+        Language::Diff => tree_sitter_diff::LANGUAGE.into(),
+        Language::R => tree_sitter_r::LANGUAGE.into(),
+        Language::Zig => tree_sitter_zig::LANGUAGE.into(),
+        Language::Elixir => tree_sitter_elixir::LANGUAGE.into(),
+        Language::Erlang => tree_sitter_erlang::LANGUAGE.into(),
+        Language::Nix => tree_sitter_nix::LANGUAGE.into(),
     }
 }
 
@@ -58,6 +85,9 @@ fn line_starts(source: &str) -> Vec<usize> {
 }
 
 pub fn diagnostics(lang: Language, source: &str) -> Vec<Diagnostic> {
+    if !lang.reports_syntax_errors() {
+        return Vec::new();
+    }
     let Some(tree) = parse(lang, source) else {
         return Vec::new();
     };
@@ -254,6 +284,28 @@ mod tests {
         assert!(d
             .windows(2)
             .all(|w| (w[0].line, w[0].col) <= (w[1].line, w[1].col)));
+    }
+
+    #[test]
+    fn newer_languages_report_errors_only_where_the_grammar_is_trustworthy() {
+        assert!(!diagnostics(Language::Python, "def f(:\n  pass\n").is_empty());
+        assert!(!diagnostics(Language::C, "int main( { return 0; }\n").is_empty());
+        assert!(diagnostics(Language::Python, "def f(x):\n    return x\n").is_empty());
+        for lang in [
+            Language::Html,
+            Language::Xml,
+            Language::Php,
+            Language::Make,
+            Language::Batch,
+            Language::Sql,
+            Language::Bash,
+            Language::Nix,
+        ] {
+            assert!(
+                diagnostics(lang, "<a><b></a> ((( {{{ 'x").is_empty(),
+                "{lang:?}"
+            );
+        }
     }
 
     #[test]

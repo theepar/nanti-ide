@@ -1267,14 +1267,29 @@ pub fn comment_prefix(path: &Path) -> Option<&'static str> {
     Some(match ext.as_str() {
         "rs" | "js" | "mjs" | "cjs" | "jsx" | "ts" | "tsx" | "mts" | "cts" | "go" | "dart"
         | "java" | "c" | "h" | "cpp" | "hpp" | "cs" | "kt" | "swift" | "scala" | "php" => "//",
-        "py" | "rb" | "sh" | "bash" | "ps1" | "toml" | "yaml" | "yml" | "conf" | "gitignore"
-        | "r" | "pl" => "#",
+        "py" | "pyw" | "pyi" | "rb" | "rake" | "sh" | "bash" | "zsh" | "ps1" | "psm1" | "toml"
+        | "yaml" | "yml" | "conf" | "gitignore" | "r" | "pl" | "nix" | "ex" | "exs" | "mk"
+        | "cmake" | "properties" => "#",
         "sql" | "lua" | "hs" => "--",
-        _ => return None,
+        "zig" | "cc" | "cxx" | "hh" | "hxx" | "ino" => "//",
+        "ini" | "cfg" => ";",
+        "erl" | "hrl" => "%",
+        _ => match path.file_name().and_then(|n| n.to_str())? {
+            "Makefile" | "makefile" | "GNUmakefile" | "CMakeLists.txt" | "Gemfile" | "Rakefile"
+            | ".bashrc" | ".zshrc" | ".profile" => "#",
+            _ => return None,
+        },
     })
 }
 
 pub fn language_of(path: &Path) -> &'static str {
+    if let Some(lang) = syntax::Language::from_path(path)
+        && !path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("jsx"))
+    {
+        return lang.display_name();
+    }
     match path
         .extension()
         .and_then(|e| e.to_str())

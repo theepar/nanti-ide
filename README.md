@@ -83,7 +83,7 @@ graph TD
 - Atomic file writes (temporary file + rename) with external modification conflict detection.
 
 ### Language Intelligence & Syntax
-- **Tree-sitter Grammars:** Built-in syntax highlighting for Rust, TypeScript, JavaScript, Go, JSON, Dart, and Markdown.
+- **Tree-sitter Grammars:** Built-in syntax highlighting for 35 languages: Rust, TypeScript/TSX, JavaScript, Go, JSON, Dart, Markdown, Python, C, C++, C#, Java, Ruby, PHP, HTML, CSS, YAML, TOML, Bash, PowerShell, Lua, SQL, XML, Make, CMake, Batch, INI, Properties, Diff, R, Zig, Elixir, Erlang and Nix. A grammar is loaded only when a file of that language is opened.
 - **Live LSP Diagnostics:** Connected to native language servers (`rust-analyzer`, `gopls`) with real-time squiggle underlines and line-number error markers.
 - **Problems Panel:** Dedicated tab aggregating syntax and semantic diagnostics across open files.
 
