@@ -6,9 +6,7 @@
 
   <p>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
-    <img src="https://img.shields.io/badge/privacy-100%25%20Zero%20Telemetry-success.svg" alt="Zero Telemetry" />
-    <img src="https://img.shields.io/badge/footprint-~50MB%20RAM-brightgreen.svg" alt="~50MB RAM" />
-    <img src="https://img.shields.io/badge/cold%20start-%3C100ms-blueviolet.svg" alt="<100ms Cold Start" />
+    <img src="https://img.shields.io/badge/privacy-zero--telemetry-success.svg" alt="Zero Telemetry" />
     <img src="https://img.shields.io/badge/rust-2021%20edition-orange.svg" alt="Rust 2021" />
     <img src="https://img.shields.io/badge/platform-Windows%2010%20%2F%2011%20x64-0078d4.svg" alt="Platform: Windows" />
     <img src="https://img.shields.io/badge/graphics-GPUI%20(DirectX%20%2F%20Vulkan)-6366f1.svg" alt="Graphics: GPUI" />
@@ -19,37 +17,24 @@
 
 ## Overview
 
-**`nanti.`** is an ultra-fast, native desktop code editor and developer environment built from the ground up in Rust. Designed as an uncompromised, featherweight alternative to resource-heavy Electron editors, `nanti.` is centered on two fundamental engineering commitments: **Absolute Privacy (Zero Telemetry)** and **Featherweight Native Performance (< 100ms startup, ~50MB RAM)**.
+**`nanti.`** is an ultra-fast, native desktop code editor and developer environment built from the ground up in Rust. `nanti.` is centered on two fundamental engineering commitments: **Absolute Privacy (Zero Telemetry)** and **Featherweight Native Performance**.
 
 ---
 
-## Why nanti.? (The Two Core Pillars)
+## Core Engineering Pillars
 
-### 🛡️ 1. Absolute Privacy & 100% Local-First
+### 1. Absolute Privacy & Local-First Processing
 - **Strictly Zero Telemetry:** `nanti.` collects **no metrics, no telemetry pings, no usage analytics, and no crash beacons**. It never phones home.
 - **Data Sovereignty:** Your source code, open files, keystrokes, Git credentials, and terminal command history **never leave your machine**.
 - **Transparent & Auditable:** 100% open-source under the MIT license with clean-room architecture. Every network and IPC boundary is transparent and inspectable.
 - **Explicit Consent Isolation:** Out-of-process extensions are sandboxed; any external URL navigation (`env.openExternal`) prompts the user for explicit confirmation before executing.
 
-### 🍃 2. Featherweight Architecture (No Electron Bloat)
+### 2. Featherweight Native Architecture
 - **Instant Cold Start (< 100 ms):** Launches immediately upon invocation—no splash screens, no loading spinners, and no framework startup delays.
-- **Tiny Memory Footprint (~40–70 MB RAM):** Idles at under 70 MB of RAM, leaving maximum system memory available for your compilers, Docker containers, and test suites.
-- **Native GPU Rendering (60fps):** Directly driven by Zed's hardware-accelerated GPUI engine (DirectX/Vulkan on Windows). Smooth typing and scrolling with zero web-DOM layout overhead.
+- **Tiny Memory Footprint (~40–70 MB RAM):** Idles at under 70 MB of RAM, leaving maximum system memory available for your compilers, containers, and tools.
+- **Native GPU Rendering (60fps):** Directly driven by hardware-accelerated GPUI engine (DirectX / Vulkan on Windows). Smooth typing and scrolling with zero web-DOM layout overhead.
 - **Zero CPU at Idle:** GPU repaints only occur when content is modified or animations are active. Conserves battery life on laptops.
 - **Compact Standalone Binary:** The entire release executable is a compact single file (`~23 MB`).
-
----
-
-## Performance & Privacy Comparison
-
-| Metric / Dimension | `nanti.` | Typical Electron IDEs (VS Code, Cursor, Windsurf) |
-|---|---|---|
-| **Cold Startup Time** | **< 100 ms** (instantaneous) | 1.5 s – 5.0 s+ |
-| **Idle RAM Usage** | **~40 – 70 MB** | 400 MB – 1.2 GB+ |
-| **Telemetry & Tracking** | **0% (Zero Telemetry, Local-First)** | Enabled by default (device IDs, event analytics) |
-| **Rendering Pipeline** | **Native GPUI (Direct GPU Text Layout)** | Chromium Blink DOM + Compositor Layers |
-| **Binary / Install Size** | **~23 MB standalone executable** | 250 MB – 600 MB+ installed footprint |
-| **Code Privacy** | **Air-gap capable; code stays local** | Often paired with proprietary cloud sync & telemetry |
 
 ---
 
@@ -92,35 +77,35 @@ graph TD
 
 ## Key Features
 
-### ⚡ Ultra-Fast Native Core
+### Ultra-Fast Native Core
 - Starts in under **100 ms** and uses **~40–70 MB RAM** at idle.
 - UTF-8 and CRLF line ending preservation with piece-tree/rope data structures (`ropey`).
 - Atomic file writes (temporary file + rename) with external modification conflict detection.
 
-### 🧠 Language Intelligence & Syntax
+### Language Intelligence & Syntax
 - **Tree-sitter Grammars:** Built-in syntax highlighting for Rust, TypeScript, JavaScript, Go, JSON, Dart, and Markdown.
 - **Live LSP Diagnostics:** Connected to native language servers (`rust-analyzer`, `gopls`) with real-time squiggle underlines and line-number error markers.
 - **Problems Panel:** Dedicated tab aggregating syntax and semantic diagnostics across open files.
 
-### 💻 ConPTY Integrated Terminal
+### ConPTY Integrated Terminal
 - Full Windows ConPTY backend launching PowerShell or custom shells.
 - Vertical side-tabs for switching between multiple concurrent terminal sessions.
 - Process exit code tracking, clean interrupt (`Ctrl+C`), and IME composition pre-edit display.
 
-### 🧩 Extension Compatibility & Open VSX
+### Extension Compatibility & Open VSX
 - Out-of-process Node.js runtime executing extension logic in the background.
 - Direct search against the **Open VSX Marketplace** with one-click download and automated `.vsix` extraction.
 - Local `.vsix` package installation via native Windows file dialogs.
 - Sandboxed WebView2 webview panels for rich extension interfaces.
 
-### 🔍 Search, Navigation & Command Palette
+### Search, Navigation & Command Palette
 - **Fuzzy Quick Open (`Ctrl+P`):** Fast file indexing across repositories.
 - **Command Palette (`Ctrl+Shift+P`):** Instant access to every IDE action.
 - **Fast Find & Replace (`Ctrl+F` / `Ctrl+H`):** Regex support, match highlighting, and case/whole-word toggling.
 - **Workspace Search (`Ctrl+Shift+F`):** Rapid multi-file regex search grouped by file.
 
-### 🎨 Modern Dark Theme
-- Tailored dark palette (`#181818` / `#1e1e1e`) aligned with VS Code Dark Modern.
+### Modern Dark Theme
+- Tailored dark palette (`#181818` / `#1e1e1e`) with clean borders and subtle contrast.
 - Subtle active line highlight (`rgba(255, 255, 255, 0.04)`) and highlighted active line numbers.
 - Embedded SVG vector icons for activity bar, explorer items, and layout controls.
 
