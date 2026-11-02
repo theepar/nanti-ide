@@ -917,9 +917,9 @@ impl Workbench {
                     .mb_2()
                     .child(
                         div()
-                            .text_size(px(26.))
+                            .text_size(px(22.))
                             .text_color(rgb(0xffffff))
-                            .child("N."),
+                            .child("< >"),
                     ),
             )
             .child(

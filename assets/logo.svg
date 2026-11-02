@@ -1,93 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
-  <defs>
-    <!-- Monochrome Background Gradient (Pure Black & Dark Charcoal) -->
-    <linearGradient id="mono-bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#141414"/>
-      <stop offset="50%" stop-color="#0a0a0a"/>
-      <stop offset="100%" stop-color="#000000"/>
-    </linearGradient>
+  <!-- Full Pure Black Background, No Outer Border -->
+  <rect width="512" height="512" rx="112" ry="112" fill="#000000"/>
 
-    <!-- Monochrome Border Gradient -->
-    <linearGradient id="mono-border" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#383838" stop-opacity="0.9"/>
-      <stop offset="50%" stop-color="#222222" stop-opacity="0.6"/>
-      <stop offset="100%" stop-color="#141414" stop-opacity="0.9"/>
-    </linearGradient>
+  <!-- Logo Inward Wings: Pure White (#ffffff) -->
+  <g>
+    <!-- Right Wing -->
+    <polygon points="373.8,153.6 263.7,256.0 373.8,358.4 317.4,358.4 207.4,256.0 317.4,153.6"
+             fill="#ffffff" stroke="#ffffff" stroke-width="2" stroke-linejoin="round"/>
 
-    <!-- Pure White / Silver Gradient for Main N Stems -->
-    <linearGradient id="mono-glyph" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="40%" stop-color="#e5e5e5"/>
-      <stop offset="75%" stop-color="#a3a3a3"/>
-      <stop offset="100%" stop-color="#737373"/>
-    </linearGradient>
-
-    <!-- High-Contrast Monochrome Diagonal Cut -->
-    <linearGradient id="mono-diagonal" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="60%" stop-color="#d4d4d4"/>
-      <stop offset="100%" stop-color="#737373"/>
-    </linearGradient>
-
-    <filter id="mono-shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#000000" flood-opacity="0.8"/>
-    </filter>
-
-    <filter id="white-glow" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur stdDeviation="12" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-  </defs>
-
-  <!-- 1:1 Squircle Base Frame (Pure Black) -->
-  <rect x="24" y="24" width="464" height="464" rx="108" ry="108" fill="url(#mono-bg)" stroke="url(#mono-border)" stroke-width="2"/>
-
-  <!-- Inner Subtle Rim Highlight -->
-  <rect x="25" y="25" width="462" height="462" rx="107" ry="107" fill="none" stroke="rgba(255, 255, 255, 0.06)" stroke-width="1"/>
-
-  <!-- Iconic 'N' Glyph (Pure Monochrome) -->
-  <g filter="url(#mono-shadow)">
-    <!-- Left Pillar (Column / Buffer) -->
-    <path d="M 124 130
-             C 124 121 131 114 140 114
-             L 168 114
-             C 177 114 184 121 184 130
-             L 184 372
-             C 184 381 177 388 168 388
-             L 140 388
-             C 131 388 124 381 124 372
-             Z"
-          fill="url(#mono-glyph)"/>
-
-    <!-- Sharp Diagonal Slash (High-Velocity Code Cut) -->
-    <path d="M 174 134
-             L 326 352
-             C 331 360 341 364 350 361
-             L 358 358
-             L 358 320
-             L 204 118
-             C 197 110 185 110 178 116
-             Z"
-          fill="url(#mono-diagonal)"/>
-
-    <!-- Right Pillar (Offset for the signature dot) -->
-    <path d="M 328 130
-             C 328 121 335 114 344 114
-             L 372 114
-             C 381 114 388 121 388 130
-             L 388 304
-             C 388 313 381 320 372 320
-             L 344 320
-             C 335 320 328 313 328 304
-             Z"
-          fill="url(#mono-glyph)"/>
+    <!-- Left Wing (Overlapping cleanly in front) -->
+    <polygon points="138.2,153.6 248.3,256.0 138.2,358.4 194.6,358.4 304.6,256.0 194.6,153.6"
+             fill="#ffffff" stroke="#000000" stroke-width="3" stroke-linejoin="round"/>
   </g>
-
-  <!-- The Iconic Period Dot of 'nanti.' (Pure White) -->
-  <circle cx="366" cy="374" r="22" fill="#ffffff" opacity="0.25" filter="url(#white-glow)"/>
-  <circle cx="366" cy="374" r="18" fill="#ffffff" filter="url(#white-glow)"/>
-  <circle cx="363" cy="370" r="5" fill="#ffffff" opacity="0.95"/>
 </svg>
