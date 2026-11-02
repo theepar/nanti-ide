@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/editor-core", "crates/app", "crates/ui-spike", "crates/ui"]
+members = ["crates/editor-core", "crates/app", "crates/ui-spike", "crates/ui", "crates/syntax", "crates/terminal", "crates/git"]
 
 [workspace.package]
 version = "0.0.1"
@@ -16,3 +16,23 @@ thiserror = "2"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+# Tree-sitter parsers are CPU-heavy and re-run on edits; keep them fast in debug builds too.
+[profile.dev.package.tree-sitter]
+opt-level = 3
+[profile.dev.package.tree-sitter-highlight]
+opt-level = 3
+[profile.dev.package.tree-sitter-rust]
+opt-level = 3
+[profile.dev.package.tree-sitter-javascript]
+opt-level = 3
+[profile.dev.package.tree-sitter-typescript]
+opt-level = 3
+[profile.dev.package.tree-sitter-go]
+opt-level = 3
+[profile.dev.package.tree-sitter-json]
+opt-level = 3
+[profile.dev.package.tree-sitter-dart]
+opt-level = 3
+[profile.dev.package.tree-sitter-md]
+opt-level = 3

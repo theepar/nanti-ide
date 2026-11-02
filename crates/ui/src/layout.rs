@@ -1,0 +1,322 @@
+//! Workbench layout: what is visible, how big each region is, persisted between runs.
+//! Pure data, no GUI types. Sizes are clamped so the editor can never be squeezed out.
+
+use std::path::{Path, PathBuf};
+
+use serde_json::{Value, json};
+
+pub const SIDEBAR_MIN: f32 = 160.0;
+pub const SIDEBAR_MAX: f32 = 700.0;
+pub const SIDEBAR_DEFAULT: f32 = 260.0;
+pub const RIGHT_MIN: f32 = 200.0;
+pub const RIGHT_MAX: f32 = 900.0;
+pub const RIGHT_DEFAULT: f32 = 320.0;
+pub const PANEL_MIN: f32 = 80.0;
+pub const PANEL_DEFAULT: f32 = 240.0;
+/// The editor column always keeps at least this much room.
+pub const EDITOR_MIN_WIDTH: f32 = 240.0;
+pub const EDITOR_MIN_HEIGHT: f32 = 120.0;
+const ACTIVITY_BAR_WIDTH: f32 = 48.0;
+const VERSION: u64 = 1;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Layout {
+    pub activity_bar: bool,
+    pub sidebar: bool,
+    pub sidebar_width: f32,
+    /// The bottom panel (terminal, problems, output).
+    pub panel: bool,
+    pub panel_height: f32,
+    /// The bottom panel fills the whole editor column.
+    pub panel_maximized: bool,
+    /// The right-hand extension panel (AI chat, webviews).
+    pub right: bool,
+    pub right_width: f32,
+    pub status_bar: bool,
+}
+
+impl Default for Layout {
+    fn default() -> Self {
+        Self {
+            activity_bar: true,
+            sidebar: true,
+            sidebar_width: SIDEBAR_DEFAULT,
+            panel: true,
+            panel_height: PANEL_DEFAULT,
+            panel_maximized: false,
+            right: true,
+            right_width: RIGHT_DEFAULT,
+            status_bar: true,
+        }
+    }
+}
+
+impl Layout {
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    pub fn set_sidebar_width(&mut self, w: f32, window_width: f32) {
+        let room = window_width
+            - EDITOR_MIN_WIDTH
+            - if self.activity_bar {
+                ACTIVITY_BAR_WIDTH
+            } else {
+                0.0
+            }
+            - if self.right { self.right_width } else { 0.0 };
+        self.sidebar_width = w.clamp(SIDEBAR_MIN, SIDEBAR_MAX.min(room.max(SIDEBAR_MIN)));
+    }
+
+    pub fn set_right_width(&mut self, w: f32, window_width: f32) {
+        let room = window_width
+            - EDITOR_MIN_WIDTH
+            - if self.activity_bar {
+                ACTIVITY_BAR_WIDTH
+            } else {
+                0.0
+            }
+            - if self.sidebar {
+                self.sidebar_width
+            } else {
+                0.0
+            };
+        self.right_width = w.clamp(RIGHT_MIN, RIGHT_MAX.min(room.max(RIGHT_MIN)));
+    }
+
+    /// `window_height` is the height of the area the editor column lives in (status bar excluded).
+    pub fn set_panel_height(&mut self, h: f32, window_height: f32) {
+        let max = (window_height - EDITOR_MIN_HEIGHT).max(PANEL_MIN);
+        self.panel_height = h.clamp(PANEL_MIN, max);
+    }
+
+    /// Sizes to actually draw in a window of this size: stored sizes shrink if the window did.
+    pub fn effective_sidebar(&self, window_width: f32) -> f32 {
+        let room = window_width
+            - EDITOR_MIN_WIDTH
+            - if self.activity_bar {
+                ACTIVITY_BAR_WIDTH
+            } else {
+                0.0
+            }
+            - if self.right {
+                self.right_width.min(RIGHT_MAX)
+            } else {
+                0.0
+            };
+        self.sidebar_width
+            .min(room.max(SIDEBAR_MIN))
+            .max(SIDEBAR_MIN.min(self.sidebar_width))
+    }
+
+    pub fn effective_right(&self, window_width: f32) -> f32 {
+        let room = window_width
+            - EDITOR_MIN_WIDTH
+            - if self.activity_bar {
+                ACTIVITY_BAR_WIDTH
+            } else {
+                0.0
+            }
+            - if self.sidebar {
+                self.effective_sidebar(window_width)
+            } else {
+                0.0
+            };
+        self.right_width
+            .min(room.max(RIGHT_MIN))
+            .max(RIGHT_MIN.min(self.right_width))
+    }
+
+    pub fn effective_panel(&self, column_height: f32) -> f32 {
+        if self.panel_maximized {
+            return column_height;
+        }
+        self.panel_height
+            .min((column_height - EDITOR_MIN_HEIGHT).max(PANEL_MIN))
+    }
+
+    pub fn to_json(&self) -> String {
+        serde_json::to_string_pretty(&json!({
+            "version": VERSION,
+            "activityBar": self.activity_bar,
+            "sidebar": self.sidebar,
+            "sidebarWidth": self.sidebar_width,
+            "panel": self.panel,
+            "panelHeight": self.panel_height,
+            "panelMaximized": self.panel_maximized,
+            "right": self.right,
+            "rightWidth": self.right_width,
+            "statusBar": self.status_bar,
+        }))
+        .unwrap_or_default()
+    }
+
+    /// Parse persisted layout. Unknown fields are ignored, missing or invalid ones fall back to
+    /// the defaults, and sizes are clamped, so a hand-edited or corrupt file can never break the UI.
+    pub fn from_json(text: &str) -> Self {
+        let mut l = Self::default();
+        let Ok(v) = serde_json::from_str::<Value>(text) else {
+            return l;
+        };
+        let flag = |k: &str, d: bool| v.get(k).and_then(Value::as_bool).unwrap_or(d);
+        let num = |k: &str, d: f32, lo: f32, hi: f32| {
+            v.get(k)
+                .and_then(Value::as_f64)
+                .filter(|n| n.is_finite())
+                .map_or(d, |n| (n as f32).clamp(lo, hi))
+        };
+        l.activity_bar = flag("activityBar", l.activity_bar);
+        l.sidebar = flag("sidebar", l.sidebar);
+        l.sidebar_width = num("sidebarWidth", l.sidebar_width, SIDEBAR_MIN, SIDEBAR_MAX);
+        l.panel = flag("panel", l.panel);
+        l.panel_height = num("panelHeight", l.panel_height, PANEL_MIN, 4000.0);
+        l.panel_maximized = flag("panelMaximized", l.panel_maximized);
+        l.right = flag("right", l.right);
+        l.right_width = num("rightWidth", l.right_width, RIGHT_MIN, RIGHT_MAX);
+        l.status_bar = flag("statusBar", l.status_bar);
+        l
+    }
+
+    pub fn load(path: &Path) -> Self {
+        std::fs::read_to_string(path)
+            .map(|t| Self::from_json(&t))
+            .unwrap_or_default()
+    }
+
+    /// Write atomically (temp file + rename) so a crash cannot leave a half-written config.
+    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, self.to_json())?;
+        std::fs::rename(&tmp, path).inspect_err(|_| {
+            let _ = std::fs::remove_file(&tmp);
+        })
+    }
+}
+
+/// Where user settings live: `NANTI_CONFIG_DIR`, else `%APPDATA%\nanti`, else `~/.nanti`.
+pub fn config_dir() -> Option<PathBuf> {
+    if let Some(d) = std::env::var_os("NANTI_CONFIG_DIR") {
+        return Some(PathBuf::from(d));
+    }
+    if let Some(d) = std::env::var_os("APPDATA") {
+        return Some(PathBuf::from(d).join("nanti"));
+    }
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".nanti"))
+}
+
+pub fn layout_path() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("layout.json"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_roundtrip_preserves_everything() {
+        let l = Layout {
+            activity_bar: false,
+            sidebar: false,
+            sidebar_width: 333.0,
+            panel: true,
+            panel_height: 150.0,
+            panel_maximized: true,
+            right: false,
+            right_width: 410.0,
+            status_bar: false,
+        };
+        assert_eq!(Layout::from_json(&l.to_json()), l);
+    }
+
+    #[test]
+    fn corrupt_or_hostile_files_fall_back_safely() {
+        assert_eq!(Layout::from_json("not json"), Layout::default());
+        assert_eq!(Layout::from_json(""), Layout::default());
+        assert_eq!(Layout::from_json("[1,2,3]"), Layout::default());
+        let hostile = Layout::from_json(
+            r#"{"sidebarWidth": 99999, "rightWidth": -5, "panelHeight": "tall", "sidebar": "yes", "extra": 1}"#,
+        );
+        assert_eq!(hostile.sidebar_width, SIDEBAR_MAX);
+        assert_eq!(hostile.right_width, RIGHT_MIN);
+        assert_eq!(
+            hostile.panel_height, PANEL_DEFAULT,
+            "wrong type uses the default"
+        );
+        assert!(hostile.sidebar, "wrong type uses the default");
+        let partial = Layout::from_json(r#"{"panel": false}"#);
+        assert!(!partial.panel && partial.sidebar);
+    }
+
+    #[test]
+    fn dragging_is_clamped_and_never_squeezes_the_editor_out() {
+        let mut l = Layout::default();
+        l.set_sidebar_width(10.0, 1280.0);
+        assert_eq!(l.sidebar_width, SIDEBAR_MIN);
+        l.set_sidebar_width(5000.0, 1280.0);
+        // 1280 - editor min 240 - activity 48 - right 320 = 672
+        assert_eq!(l.sidebar_width, 672.0);
+        l.set_right_width(5000.0, 1280.0);
+        // 1280 - 240 - 48 - 672 = 320, never below the minimum
+        assert_eq!(l.right_width, 320.0);
+        let mut tiny = Layout::default();
+        tiny.set_sidebar_width(400.0, 300.0);
+        assert_eq!(
+            tiny.sidebar_width, SIDEBAR_MIN,
+            "even in a tiny window the minimum holds"
+        );
+        l.set_panel_height(5.0, 800.0);
+        assert_eq!(l.panel_height, PANEL_MIN);
+        l.set_panel_height(9999.0, 800.0);
+        assert_eq!(l.panel_height, 800.0 - EDITOR_MIN_HEIGHT);
+    }
+
+    #[test]
+    fn effective_sizes_shrink_with_the_window_without_losing_the_stored_size() {
+        let l = Layout::default();
+        assert_eq!(l.effective_sidebar(1280.0), 260.0);
+        assert!(l.effective_sidebar(700.0) < 260.0 + 1.0);
+        assert!(l.effective_right(600.0) >= RIGHT_MIN);
+        assert_eq!(l.sidebar_width, 260.0, "stored size untouched");
+        assert_eq!(l.effective_panel(800.0), 240.0);
+        assert_eq!(
+            l.effective_panel(250.0),
+            PANEL_MIN.max(250.0 - EDITOR_MIN_HEIGHT)
+        );
+        let max = Layout {
+            panel_maximized: true,
+            ..Layout::default()
+        };
+        assert_eq!(max.effective_panel(500.0), 500.0);
+    }
+
+    #[test]
+    fn save_and_load_through_a_file_atomically() {
+        let dir = std::env::temp_dir().join(format!("nanti-layout-{}", std::process::id()));
+        let path = dir.join("sub").join("layout.json");
+        let l = Layout {
+            sidebar_width: 301.0,
+            right: false,
+            ..Layout::default()
+        };
+        l.save(&path).unwrap();
+        assert_eq!(Layout::load(&path), l);
+        assert!(!path.with_extension("json.tmp").exists());
+        assert_eq!(Layout::load(&dir.join("missing.json")), Layout::default());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reset_restores_defaults() {
+        let mut l = Layout {
+            sidebar: false,
+            panel_maximized: true,
+            sidebar_width: 500.0,
+            ..Layout::default()
+        };
+        l.reset();
+        assert_eq!(l, Layout::default());
+    }
+}

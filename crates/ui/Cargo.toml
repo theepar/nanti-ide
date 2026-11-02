@@ -12,9 +12,16 @@ path = "src/main.rs"
 [dependencies]
 app = { path = "../app" }
 editor-core = { path = "../editor-core" }
+git = { path = "../git" }
 gpui = "=0.2.2"
 serde_json.workspace = true
+syntax = { path = "../syntax" }
+terminal = { path = "../terminal" }
+url = "=2.5.8"
 wry = "=0.57.1"
+
+[dev-dependencies]
+gpui = { version = "=0.2.2", features = ["test-support"] }
 
 [lints]
 workspace = true

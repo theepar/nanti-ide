@@ -25,6 +25,10 @@ fn main() {
     Application::new().run(|cx: &mut App| {
         let bounds = Bounds::centered(None, size(px(1280.), px(800.)), cx);
         let config = host_config_from_env();
+        let root = std::env::var_os("NANTI_WORKSPACE")
+            .map(PathBuf::from)
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| PathBuf::from("."));
         let window = cx
             .open_window(
                 WindowOptions {
@@ -32,22 +36,39 @@ fn main() {
                     ..Default::default()
                 },
                 move |window, cx| {
-                    let root = std::env::var_os("NANTI_WORKSPACE")
-                        .map(PathBuf::from)
-                        .or_else(|| std::env::current_dir().ok())
-                        .unwrap_or_else(|| PathBuf::from("."));
-                    let mut workbench = Workbench::new(root);
-                    if let Some(cfg) = config {
-                        let diag_log = cfg.selftest_log.clone();
-                        let (events, to_host, _shutdown) = spawn_worker(cfg);
-                        match Panel::new(window, events, to_host, diag_log) {
-                            Ok(panel) => workbench.attach_panel(panel),
-                            Err(e) => eprintln!("cannot create WebView2 panel: {e}"),
+                    cx.new(|cx| {
+                        let mut workbench = Workbench::new(root, cx);
+                        workbench.enable_source_control();
+                        // Visibility and sizes of every region are remembered between runs.
+                        if let Some(path) = ui::layout::layout_path() {
+                            workbench.set_layout_path(path);
                         }
-                    }
-                    cx.new(|_| workbench)
+                        if let Some(cfg) = config {
+                            let diag_log = cfg.selftest_log.clone();
+                            let (events, to_host, _shutdown) = spawn_worker(cfg);
+                            match Panel::new(window, events, to_host, diag_log) {
+                                Ok(panel) => workbench.attach_panel(panel),
+                                Err(e) => eprintln!("cannot create WebView2 panel: {e}"),
+                            }
+                        }
+                        workbench
+                    })
                 },
             )
+            .unwrap();
+
+        // Closing the window with unsaved tabs must ask first (CT-001).
+        window
+            .update(cx, |_, window, cx| {
+                let entity = cx.entity();
+                window.on_window_should_close(cx, move |_window, cx| {
+                    entity.update(cx, |wb, cx| {
+                        let ok = wb.allow_window_close();
+                        cx.notify();
+                        ok
+                    })
+                });
+            })
             .unwrap();
 
         // Poll the extension host a few times per frame budget; redraw only when needed.

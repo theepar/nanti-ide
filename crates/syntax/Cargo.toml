@@ -1,0 +1,20 @@
+[package]
+name = "syntax"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+tree-sitter = "0.27"
+tree-sitter-highlight = "0.27"
+tree-sitter-rust = "0.24"
+tree-sitter-javascript = "0.25"
+tree-sitter-typescript = "0.23"
+tree-sitter-go = "0.25"
+tree-sitter-json = "0.24"
+tree-sitter-dart = "0.3"
+tree-sitter-md = "0.5"
+
+[lints]
+workspace = true
