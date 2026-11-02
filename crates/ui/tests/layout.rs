@@ -88,7 +88,7 @@ fn shortcuts_and_palette_toggle_every_region_and_reset_restores_defaults(cx: &mu
     cx.simulate_keystrokes("ctrl-j");
     cx.simulate_keystrokes("ctrl-alt-b");
     let l = layout(window, cx);
-    assert!(!l.sidebar && !l.panel && !l.right);
+    assert!(!l.sidebar && l.panel && !l.right, "the panel starts hidden, so Ctrl+J shows it");
     for query in ["toggle activity bar", "toggle status bar"] {
         cx.simulate_keystrokes("ctrl-shift-p");
         cx.simulate_input(query);
@@ -98,7 +98,7 @@ fn shortcuts_and_palette_toggle_every_region_and_reset_restores_defaults(cx: &mu
     assert!(!l.activity_bar && !l.status_bar);
     cx.simulate_keystrokes("ctrl-b ctrl-j ctrl-alt-b");
     let l = layout(window, cx);
-    assert!(l.sidebar && l.panel && l.right && !l.activity_bar && !l.status_bar);
+    assert!(l.sidebar && !l.panel && l.right && !l.activity_bar && !l.status_bar);
     cx.simulate_keystrokes("ctrl-shift-p");
     cx.simulate_input("reset layout");
     cx.simulate_keystrokes("enter");
@@ -137,6 +137,7 @@ fn dragging_the_right_and_bottom_splitters(cx: &mut TestAppContext) {
     window
         .update(cx, |wb, _, cx| {
             wb.show_empty_right_panel_for_tests();
+            wb.model_mut().layout.panel = true;
             cx.notify();
         })
         .unwrap();
@@ -326,7 +327,7 @@ fn shortcuts_work_before_anything_was_focused_and_after_the_editor_is_hidden(
     cx.run_until_parked();
     cx.simulate_keystrokes("ctrl-j");
     assert!(
-        !layout(window, cx).panel,
+        layout(window, cx).panel,
         "Ctrl+J works with nothing focused"
     );
     cx.simulate_keystrokes("ctrl-shift-m");
