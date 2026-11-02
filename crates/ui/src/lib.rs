@@ -16,6 +16,7 @@ use syntax::{Language, LineSpan, SyntaxHighlighter, Token};
 use terminal_ui::{GridMetrics, TerminalSession};
 
 pub mod assets;
+pub mod discord;
 pub mod extensions;
 pub mod find;
 pub mod launch;
@@ -382,6 +383,7 @@ impl Workbench {
 
     pub fn set_config_dir(&mut self, dir: PathBuf, panel_extension: Option<PathBuf>) {
         self.model.config_dir = Some(dir);
+        self.model.load_discord_settings();
         self.model.panel_extension = panel_extension;
         self.model.refresh_extensions();
     }
@@ -582,6 +584,7 @@ impl Workbench {
         changed |= self.pump_highlight();
         changed |= self.model.pump_problems();
         changed |= self.model.pump_marketplace();
+        changed |= self.model.pump_discord();
 
         if let Some(tab) = self.model.active()
             && let TabContent::Text(e) = &tab.content

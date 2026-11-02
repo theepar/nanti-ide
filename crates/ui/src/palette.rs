@@ -77,10 +77,16 @@ pub enum Command {
     OutdentLines,
     SwitchBranch,
     ChangeLanguageMode,
+    ToggleDiscord,
+    DiscordSetApplicationId,
+    DiscordReconnect,
+    ToggleDiscordFile,
+    ToggleDiscordWorkspace,
+    ToggleDiscordTime,
 }
 
 impl Command {
-    pub const ALL: [Command; 70] = [
+    pub const ALL: [Command; 76] = [
         Command::CommandPalette,
         Command::QuickOpen,
         Command::Save,
@@ -141,6 +147,12 @@ impl Command {
         Command::About,
         Command::Exit,
         Command::OpenSettings,
+        Command::ToggleDiscord,
+        Command::DiscordSetApplicationId,
+        Command::DiscordReconnect,
+        Command::ToggleDiscordFile,
+        Command::ToggleDiscordWorkspace,
+        Command::ToggleDiscordTime,
         Command::ToggleComment,
         Command::MoveLineUp,
         Command::MoveLineDown,
@@ -215,6 +227,12 @@ impl Command {
             Command::About => "Help: About nanti.",
             Command::Exit => "File: Exit",
             Command::OpenSettings => "Preferences: Open Settings",
+            Command::ToggleDiscord => "Discord: Toggle Rich Presence",
+            Command::DiscordSetApplicationId => "Discord: Set Application ID...",
+            Command::DiscordReconnect => "Discord: Reconnect",
+            Command::ToggleDiscordFile => "Discord: Toggle Showing the File Name",
+            Command::ToggleDiscordWorkspace => "Discord: Toggle Showing the Workspace",
+            Command::ToggleDiscordTime => "Discord: Toggle Showing Elapsed Time",
             Command::ToggleComment => "Edit: Toggle Line Comment",
             Command::MoveLineUp => "Edit: Move Line Up",
             Command::MoveLineDown => "Edit: Move Line Down",
@@ -1178,6 +1196,7 @@ pub enum InputKind {
     Rename(PathBuf),
     InstallVsix,
     NewBranch,
+    DiscordApplicationId,
 }
 
 impl InputKind {
@@ -1189,6 +1208,7 @@ impl InputKind {
             InputKind::Rename(_) => "New name",
             InputKind::InstallVsix => "Full path of a .vsix file",
             InputKind::NewBranch => "New branch name",
+            InputKind::DiscordApplicationId => "Application ID (17 to 20 digits)",
         }
     }
 }

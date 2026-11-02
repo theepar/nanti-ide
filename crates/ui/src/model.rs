@@ -222,6 +222,7 @@ pub struct Model {
     pub config_dir: Option<PathBuf>,
     pub panel_extension: Option<PathBuf>,
     pub panel_icon: Option<PathBuf>,
+    pub discord: crate::discord::DiscordState,
     pub clipboard_request: Option<String>,
     pub quit_request: bool,
     pub pick_request: Option<PickRequest>,
@@ -279,6 +280,7 @@ impl Model {
             config_dir: None,
             panel_extension: None,
             panel_icon: None,
+            discord: crate::discord::DiscordState::default(),
             clipboard_request: None,
             quit_request: false,
             pick_request: None,
@@ -1080,6 +1082,12 @@ impl Model {
                     self.say("Extensions", "No extension panel is set; install one first");
                 }
             }
+            Command::ToggleDiscord
+            | Command::DiscordSetApplicationId
+            | Command::DiscordReconnect
+            | Command::ToggleDiscordFile
+            | Command::ToggleDiscordWorkspace
+            | Command::ToggleDiscordTime => self.run_discord_command(command),
             Command::OpenSettings => {
                 self.settings_open = true;
                 self.ext_detail = None;

@@ -104,6 +104,10 @@ graph TD
 - **Fast Find & Replace (`Ctrl+F` / `Ctrl+H`):** Regex support, match highlighting, and case/whole-word toggling.
 - **Workspace Search (`Ctrl+Shift+F`):** Rapid multi-file regex search grouped by file.
 
+### Discord Rich Presence (opt-in)
+- Off by default. Settings > Discord connects to the Discord desktop app over its local pipe (no password, no network, no token): you create a free application at discord.com/developers and paste its Application ID.
+- When on, the file name, language, workspace folder name and elapsed time are shown in your Discord status; each can be switched off. Nothing is sent anywhere except to the local Discord app, which shows it on your profile.
+
 ### Modern Dark Theme
 - Tailored dark palette (`#181818` / `#1e1e1e`) with clean borders and subtle contrast.
 - Subtle active line highlight (`rgba(255, 255, 255, 0.04)`) and highlighted active line numbers.

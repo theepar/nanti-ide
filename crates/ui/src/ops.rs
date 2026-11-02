@@ -289,6 +289,13 @@ impl Model {
                 self.after_rename(&from, &to);
                 Ok(())
             }
+            InputKind::DiscordApplicationId => {
+                let id = crate::discord::valid_client_id(text)
+                    .ok_or("an Application ID is 17 to 20 digits")?;
+                self.discord.settings.client_id = id;
+                self.discord_changed();
+                Ok(())
+            }
             InputKind::NewBranch => {
                 let name = text.trim();
                 if name.is_empty() {
@@ -961,6 +968,95 @@ impl Model {
         let symbols = syntax::outline(lang, &e.text());
         *self.outline_cache.borrow_mut() = Some((tab.path.clone(), version, symbols.clone()));
         symbols
+    }
+
+    pub(crate) fn run_discord_command(&mut self, command: crate::palette::Command) {
+        use crate::palette::Command as C;
+        match command {
+            C::ToggleDiscord => {
+                if !self.discord.settings.enabled && self.discord.settings.client_id.is_empty() {
+                    self.discord.settings.enabled = true;
+                    self.discord_changed();
+                    self.open_input(InputKind::DiscordApplicationId, "");
+                    return;
+                }
+                self.discord.settings.enabled = !self.discord.settings.enabled;
+            }
+            C::DiscordSetApplicationId => {
+                let current = self.discord.settings.client_id.clone();
+                self.open_input(InputKind::DiscordApplicationId, &current);
+                return;
+            }
+            C::DiscordReconnect => {
+                self.discord.reconnect();
+                return;
+            }
+            C::ToggleDiscordFile => {
+                self.discord.settings.show_file = !self.discord.settings.show_file;
+            }
+            C::ToggleDiscordWorkspace => {
+                self.discord.settings.show_workspace = !self.discord.settings.show_workspace;
+            }
+            C::ToggleDiscordTime => {
+                self.discord.settings.show_time = !self.discord.settings.show_time;
+            }
+            _ => return,
+        }
+        self.discord_changed();
+    }
+
+    fn discord_changed(&mut self) {
+        if let Some(dir) = self.config_dir.clone()
+            && let Err(e) = self.discord.settings.save(&dir)
+        {
+            self.say("Discord", &format!("Cannot save the Discord settings: {e}"));
+        }
+        self.discord.reconfigure();
+    }
+
+    pub fn load_discord_settings(&mut self) {
+        if let Some(dir) = self.config_dir.clone() {
+            self.discord.settings = crate::discord::DiscordSettings::load(&dir);
+            self.discord.reconfigure();
+        }
+    }
+
+    fn discord_presence(&self) -> crate::discord::Presence {
+        let s = &self.discord.settings;
+        let tab = self
+            .active()
+            .filter(|t| matches!(t.content, TabContent::Text(_)));
+        let details = match (tab, s.show_file) {
+            (Some(t), true) => format!("Editing {}", t.title),
+            _ => "Working in nanti.".to_owned(),
+        };
+        let mut parts: Vec<String> = Vec::new();
+        if s.show_workspace && self.folder_open {
+            let name = self.root.file_name().map_or_else(
+                || self.root.display().to_string(),
+                |n| n.to_string_lossy().into_owned(),
+            );
+            parts.push(format!("Workspace: {name}"));
+        }
+        if s.show_file
+            && let Some(t) = tab
+        {
+            parts.push(crate::model::tab_language(t));
+        }
+        crate::discord::Presence {
+            details,
+            state: (!parts.is_empty()).then(|| parts.join(" · ")),
+            start_ms: s.show_time.then_some(self.discord.started_ms),
+        }
+    }
+
+    pub fn pump_discord(&mut self) -> bool {
+        let wanted = self
+            .discord
+            .settings
+            .enabled
+            .then(|| self.discord_presence());
+        self.discord.pump(wanted)
     }
 
     pub fn palette_is_input(&self) -> bool {

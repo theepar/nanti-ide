@@ -9,7 +9,7 @@ use crate::{Workbench, theme};
 impl Workbench {
     pub(crate) fn setting_row(
         title: &'static str,
-        hint: &'static str,
+        hint: impl Into<SharedString>,
         control: AnyElement,
     ) -> AnyElement {
         div()
@@ -30,7 +30,7 @@ impl Workbench {
                         div()
                             .text_size(px(12.))
                             .text_color(rgb(theme::TEXT_DIM))
-                            .child(hint),
+                            .child(hint.into()),
                     ),
             )
             .child(control)
@@ -149,6 +149,13 @@ impl Workbench {
             ],
             cx,
         );
+        let d = &self.model.discord;
+        let discord_status = d.status().describe();
+        let discord_app_hint = if d.settings.client_id.is_empty() {
+            "Not set. Create a free application at discord.com/developers and paste its Application ID."
+        } else {
+            "Set. Names and images shown in Discord come from this application."
+        };
         let saved_in = crate::layout::layout_path()
             .map_or_else(|| "memory only".to_owned(), |p| p.display().to_string());
         let page = div()
@@ -213,6 +220,65 @@ impl Workbench {
                         "Status bar",
                         "The bar at the bottom of the window.",
                         self.switch("set-status", l.status_bar, Command::ToggleStatusBar, cx),
+                    ))
+                    .child(section("DISCORD"))
+                    .child(Self::setting_row(
+                        "Rich Presence",
+                        "Show what you are working on in your Discord status. Off by default.",
+                        self.switch(
+                            "set-discord",
+                            d.settings.enabled,
+                            Command::ToggleDiscord,
+                            cx,
+                        ),
+                    ))
+                    .child(Self::setting_row(
+                        "Account",
+                        discord_status,
+                        Self::flat_button("set-discord-reconnect", "Reconnect")
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.apply_command(Command::DiscordReconnect, window, cx);
+                            }))
+                            .into_any_element(),
+                    ))
+                    .child(Self::setting_row(
+                        "Application ID",
+                        discord_app_hint,
+                        Self::flat_button("set-discord-id", "Set...")
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.apply_command(Command::DiscordSetApplicationId, window, cx);
+                            }))
+                            .into_any_element(),
+                    ))
+                    .child(Self::setting_row(
+                        "Show the file name",
+                        "The file you are editing and its language.",
+                        self.switch(
+                            "set-discord-file",
+                            d.settings.show_file,
+                            Command::ToggleDiscordFile,
+                            cx,
+                        ),
+                    ))
+                    .child(Self::setting_row(
+                        "Show the workspace",
+                        "The name of the folder you opened.",
+                        self.switch(
+                            "set-discord-workspace",
+                            d.settings.show_workspace,
+                            Command::ToggleDiscordWorkspace,
+                            cx,
+                        ),
+                    ))
+                    .child(Self::setting_row(
+                        "Show elapsed time",
+                        "How long this session has been open.",
+                        self.switch(
+                            "set-discord-time",
+                            d.settings.show_time,
+                            Command::ToggleDiscordTime,
+                            cx,
+                        ),
                     ))
                     .child(
                         div()
