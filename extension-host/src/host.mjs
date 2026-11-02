@@ -112,6 +112,10 @@ export function createHost({ notify = () => {} } = {}) {
      * IDE delivers a URI callback (OAuth login, VH-07). The authority must be the target extension id;
      * a mismatch is rejected instead of being broadcast to other extensions.
      */
+    "workspace.didOpenTextDocument": (params) => vscodeApi?.syncOpenDocument(params) ?? null,
+    "workspace.didChangeTextDocument": (params) => vscodeApi?.syncChangeDocument(params) ?? null,
+    "workspace.didSaveTextDocument": (params) => vscodeApi?.syncSaveDocument(params) ?? null,
+    "workspace.didCloseTextDocument": (params) => vscodeApi?.syncCloseDocument(params) ?? null,
     async "uri.handle"({ uri }) {
       if (!vscodeApi) throw new Error("host not initialized");
       const parsed = vscodeApi.vscode.Uri.parse(uri);

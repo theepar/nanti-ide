@@ -201,6 +201,19 @@ export class NotebookCellOutputItem {
   }
 }
 
+export const TerminalLocation = Object.freeze({
+  Panel: 1,
+  Editor: 2,
+});
+
+export const TerminalExitReason = Object.freeze({
+  Unknown: 0,
+  Shutdown: 1,
+  Process: 2,
+  User: 3,
+  Extension: 4,
+});
+
 // Public top-level `vscode` exports we do not implement. Bundlers (`__toESM`) snapshot only own
 // keys, so unlisted names would become `undefined` and fail with a misleading TypeError.
 // Each is exposed as an own getter that yields an "unsupported" proxy (throws on use).
@@ -232,7 +245,7 @@ const UNSUPPORTED_TOP_LEVEL = [
   "SourceBreakpoint", "StatusBarAlignment", "SymbolInformation", "SymbolKind", "TabInputCustom",
   "TabInputNotebook", "TabInputNotebookDiff", "TabInputTerminal", "TabInputText", "TabInputTextDiff",
   "TabInputWebview", "Task", "TaskGroup", "TaskPanelKind", "TaskRevealKind", "TaskScope",
-  "TerminalExitReason", "TerminalLink", "TerminalLocation", "TerminalProfile", "TestMessage",
+  "TerminalLink", "TerminalProfile", "TestMessage",
   "TestRunProfileKind", "TestRunRequest", "TestTag", "TextEdit", "TextEditorCursorStyle",
   "TextEditorLineNumbersStyle", "TextEditorRevealType", "TextEditorSelectionChangeKind", "ThemeColor",
   "ThemeIcon", "TreeItem", "TreeItemCheckboxState", "TreeItemCollapsibleState", "TypeHierarchyItem",
@@ -307,6 +320,90 @@ export function createVscode({ workspaceFolders = [], notify, settings = {}, get
   // open", it does not mirror IDE buffers. `openTextDocument` reads from DISK, so unsaved IDE
   // edits are NOT visible to extensions yet (tracked limitation, see api-compatibility-matrix).
   const state = { documents: new Map(), visibleEditors: [], activeEditor: undefined };
+
+  let termSeq = 0;
+  const terminals = [];
+  let activeTerminal = undefined;
+
+  function syncOpenDocument({ uri, languageId, version, text }) {
+    const parsed = typeof uri === "string" ? Uri.parse(uri) : uri;
+    const key = parsed.toString();
+    const doc = {
+      uri: parsed,
+      fileName: parsed.fsPath,
+      languageId: languageId || LANGUAGE_BY_EXT[path.extname(parsed.fsPath).toLowerCase()] || "plaintext",
+      version: version ?? 1,
+      isDirty: false,
+      isUntitled: false,
+      isClosed: false,
+      lineCount: text === "" ? 1 : text.split(/\r\n|\r|\n/).length,
+      getText(range) {
+        if (range !== undefined) throw new UnsupportedCapability("vscode.TextDocument.getText(range)");
+        return text;
+      },
+    };
+    state.documents.set(key, doc);
+    state.activeEditor = {
+      document: doc,
+      selection: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+      selections: [],
+      visibleRanges: [],
+    };
+    state.visibleEditors = [state.activeEditor];
+    emitter("onDidOpenTextDocument").fire(doc);
+    emitter("onDidChangeActiveTextEditor").fire(state.activeEditor);
+    return { ok: true };
+  }
+
+  function syncChangeDocument({ uri, version, text, contentChanges }) {
+    const parsed = typeof uri === "string" ? Uri.parse(uri) : uri;
+    const key = parsed.toString();
+    let doc = state.documents.get(key);
+    if (!doc) {
+      return syncOpenDocument({ uri: parsed, version, text });
+    }
+    doc.version = version ?? (doc.version + 1);
+    doc.isDirty = true;
+    doc.lineCount = text === "" ? 1 : text.split(/\r\n|\r|\n/).length;
+    doc.getText = (range) => {
+      if (range !== undefined) throw new UnsupportedCapability("vscode.TextDocument.getText(range)");
+      return text;
+    };
+    emitter("onDidChangeTextDocument").fire({
+      document: doc,
+      contentChanges: contentChanges || [{ text }],
+      reason: undefined,
+    });
+    return { ok: true };
+  }
+
+  function syncSaveDocument({ uri }) {
+    const parsed = typeof uri === "string" ? Uri.parse(uri) : uri;
+    const key = parsed.toString();
+    const doc = state.documents.get(key);
+    if (doc) {
+      doc.isDirty = false;
+      emitter("onDidSaveTextDocument").fire(doc);
+    }
+    return { ok: true };
+  }
+
+  function syncCloseDocument({ uri }) {
+    const parsed = typeof uri === "string" ? Uri.parse(uri) : uri;
+    const key = parsed.toString();
+    const doc = state.documents.get(key);
+    if (doc) {
+      doc.isClosed = true;
+      state.documents.delete(key);
+      if (state.activeEditor?.document === doc) {
+        state.activeEditor = undefined;
+        state.visibleEditors = [];
+        emitter("onDidChangeActiveTextEditor").fire(undefined);
+      }
+      emitter("onDidCloseTextDocument").fire(doc);
+    }
+    return { ok: true };
+  }
 
   const config = new ConfigStore({
     settings,
@@ -405,11 +502,14 @@ export function createVscode({ workspaceFolders = [], notify, settings = {}, get
       return [...state.documents.values()];
     },
     async openTextDocument(arg) {
-      const uri = typeof arg === "string" ? Uri.file(arg) : arg;
+      const uri = typeof arg === "string" ? (arg.startsWith("file:") ? Uri.parse(arg) : Uri.file(arg)) : arg;
       if (!uri || typeof uri !== "object" || uri.scheme !== "file") {
         throw new UnsupportedCapability("vscode.workspace.openTextDocument(non-file or content)");
       }
       const key = uri.toString();
+      if (state.documents.has(key)) {
+        return state.documents.get(key);
+      }
       const text = await fs.readFile(uri.fsPath, "utf8");
       const doc = {
         uri,
@@ -445,6 +545,97 @@ export function createVscode({ workspaceFolders = [], notify, settings = {}, get
 
   const window = strict("vscode.window", {
     tabGroups,
+    get terminals() {
+      return [...terminals];
+    },
+    get activeTerminal() {
+      return activeTerminal;
+    },
+    onDidChangeActiveTerminal: emitter("window.onDidChangeActiveTerminal").event,
+    onDidOpenTerminal: emitter("window.onDidOpenTerminal").event,
+    onDidCloseTerminal: emitter("window.onDidCloseTerminal").event,
+    onDidChangeTerminalState: emitter("window.onDidChangeTerminalState").event,
+    createTerminal(nameOrOptions, shellPath, shellArgs) {
+      const options =
+        typeof nameOrOptions === "string"
+          ? { name: nameOrOptions, shellPath, shellArgs }
+          : (nameOrOptions ?? {});
+      const id = `term-${++termSeq}`;
+      const name = options.name || "Terminal";
+      const cwd =
+        options.cwd instanceof Uri
+          ? options.cwd.fsPath
+          : options.cwd
+            ? String(options.cwd)
+            : undefined;
+      const args =
+        typeof options.shellArgs === "string"
+          ? [options.shellArgs]
+          : options.shellArgs;
+      notify("terminal.create", {
+        id,
+        name,
+        shellPath: options.shellPath,
+        shellArgs: args,
+        cwd,
+        env: options.env,
+        hideFromUser: Boolean(options.hideFromUser),
+      });
+
+      let isDisposed = false;
+      let isInteractedWith = false;
+      let exitStatus = undefined;
+      const term = {
+        name,
+        processId: Promise.resolve(process.pid),
+        creationOptions: Object.freeze({ ...options }),
+        get exitStatus() {
+          return exitStatus;
+        },
+        get state() {
+          return { isInteractedWith };
+        },
+        sendText(text, addNewLine = true) {
+          if (isDisposed) return;
+          isInteractedWith = true;
+          notify("terminal.sendText", {
+            id,
+            text: String(text),
+            addNewLine: Boolean(addNewLine),
+          });
+        },
+        show(preserveFocus = false) {
+          if (isDisposed) return;
+          activeTerminal = term;
+          emitter("window.onDidChangeActiveTerminal").fire(term);
+          notify("terminal.show", { id, preserveFocus: Boolean(preserveFocus) });
+        },
+        hide() {
+          if (isDisposed) return;
+          notify("terminal.hide", { id });
+        },
+        dispose() {
+          if (isDisposed) return;
+          isDisposed = true;
+          const idx = terminals.indexOf(term);
+          if (idx !== -1) terminals.splice(idx, 1);
+          if (activeTerminal === term) {
+            activeTerminal = terminals[terminals.length - 1];
+            emitter("window.onDidChangeActiveTerminal").fire(activeTerminal);
+          }
+          emitter("window.onDidCloseTerminal").fire(term);
+          notify("terminal.dispose", { id });
+        },
+      };
+
+      if (!options.hideFromUser) {
+        terminals.push(term);
+        activeTerminal = term;
+        emitter("window.onDidOpenTerminal").fire(term);
+        emitter("window.onDidChangeActiveTerminal").fire(term);
+      }
+      return term;
+    },
     get activeTextEditor() {
       return state.activeEditor;
     },
@@ -574,6 +765,8 @@ export function createVscode({ workspaceFolders = [], notify, settings = {}, get
     ExtensionMode: EXTENSION_MODE,
     ConfigurationTarget: CONFIGURATION_TARGET,
     StatusBarAlignment: Object.freeze({ Left: 1, Right: 2 }),
+    TerminalLocation,
+    TerminalExitReason,
     RelativePattern,
     // Honest: the host's own version, NOT a VS Code version (PRD 5.4: no spoofed API version).
     // Extensions that gate on `vscode.version` will see an old/unknown editor and degrade or fail;
@@ -634,5 +827,9 @@ export function createVscode({ workspaceFolders = [], notify, settings = {}, get
     uriHandlers,
     contextKeys,
     resolveExternal,
+    syncOpenDocument,
+    syncChangeDocument,
+    syncSaveDocument,
+    syncCloseDocument,
   };
 }

@@ -121,6 +121,7 @@ test("ExtensionContext provides storage URIs, mode, and persistent Memento", asy
   await c.globalState.update("k", undefined);
   assert.deepEqual(mk().globalState.keys(), []);
   fs.rmSync(root, { recursive: true });
+
 });
 
 test("secrets stay unsupported until backed by the OS credential store (PRD 7.2)", async () => {
@@ -130,6 +131,7 @@ test("secrets stay unsupported until backed by the OS credential store (PRD 7.2)
   assert.throws(() => c.secrets.get("token"), /UnsupportedCapability.*secrets/);
   assert.equal(c.storageUri, undefined);
   fs.rmSync(root, { recursive: true });
+
 });
 
 test("basic classes: EventEmitter, Uri, ExtensionMode, NotebookCellOutputItem, env constants", async () => {
@@ -425,4 +427,87 @@ test("environmentVariableCollection records mutations (not applied to terminals 
   assert.equal(coll.get("A"), undefined);
   assert.equal(coll.getScoped({}), coll);
   fs.rmSync(root, { recursive: true });
+
+});
+
+
+test("window.createTerminal and terminal operations (TR-04 / VH-10)", async () => {
+  const { createVscode } = await import("../src/vscode-api.mjs");
+  const notes = [];
+  const { vscode } = createVscode({ notify: (method, params) => notes.push({ method, params }) });
+
+  const opened = [];
+  const closed = [];
+  vscode.window.onDidOpenTerminal((t) => opened.push(t.name));
+  vscode.window.onDidCloseTerminal((t) => closed.push(t.name));
+
+  const term = vscode.window.createTerminal("build-term");
+  assert.equal(term.name, "build-term");
+  assert.equal(vscode.window.terminals.length, 1);
+  assert.equal(vscode.window.activeTerminal, term);
+  assert.deepEqual(opened, ["build-term"]);
+
+  term.sendText("cargo build", true);
+  term.show();
+  term.dispose();
+
+  assert.equal(vscode.window.terminals.length, 0);
+  assert.deepEqual(closed, ["build-term"]);
+
+  const createNote = notes.find((n) => n.method === "terminal.create");
+  assert.ok(createNote);
+  assert.equal(createNote.params.name, "build-term");
+
+  const sendNote = notes.find((n) => n.method === "terminal.sendText");
+  assert.ok(sendNote);
+  assert.equal(sendNote.params.text, "cargo build");
+  assert.equal(sendNote.params.addNewLine, true);
+
+  const showNote = notes.find((n) => n.method === "terminal.show");
+  assert.ok(showNote);
+
+  const disposeNote = notes.find((n) => n.method === "terminal.dispose");
+  assert.ok(disposeNote);
+});
+
+test("live editor buffer sync between IDE and host (AI-04 / AI-05 / VH-04)", async () => {
+  const { host } = await setup();
+  const fileUri = "file:///C:/workspace/test.rs";
+
+  // IDE opens document with unsaved live content
+  await host.handle(req(1, "workspace.didOpenTextDocument", {
+    uri: fileUri,
+    languageId: "rust",
+    version: 1,
+    text: 'fn main() { println!("live"); }',
+  }));
+
+  // Direct host handles
+  const { createVscode } = await import("../src/vscode-api.mjs");
+  const api = createVscode({ notify() {} });
+  api.syncOpenDocument({
+    uri: fileUri,
+    languageId: "rust",
+    version: 1,
+    text: 'fn main() { println!("live"); }',
+  });
+  const doc = await api.vscode.workspace.openTextDocument(fileUri);
+  assert.equal(doc.getText(), 'fn main() { println!("live"); }');
+  assert.equal(doc.isDirty, false);
+
+  api.syncChangeDocument({
+    uri: fileUri,
+    version: 2,
+    text: 'fn main() { println!("edited"); }',
+  });
+  assert.equal(doc.getText(), 'fn main() { println!("edited"); }');
+  assert.equal(doc.isDirty, true);
+
+  api.syncSaveDocument({ uri: fileUri });
+  assert.equal(doc.isDirty, false);
+
+  api.syncCloseDocument({ uri: fileUri });
+  assert.equal(doc.isClosed, true);
+  assert.equal(api.vscode.workspace.textDocuments.length, 0);
+
 });
