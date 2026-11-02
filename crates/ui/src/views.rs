@@ -180,7 +180,7 @@ impl Workbench {
                     .flex_none()
                     .pl_3()
                     .text_size(px(13.))
-                    .text_color(rgb(theme::ACCENT))
+                    .text_color(rgb(theme::TEXT))
                     .child("nanti."),
             )
             .children(MenuKind::ALL.into_iter().enumerate().map(|(i, k)| {
@@ -911,14 +911,14 @@ impl Workbench {
                     .w(px(52.))
                     .h(px(52.))
                     .rounded_xl()
-                    .bg(rgb(0x131a26))
+                    .bg(rgb(0x1c1c1c))
                     .border_1()
-                    .border_color(rgb(0x27354a))
+                    .border_color(rgb(0x383838))
                     .mb_2()
                     .child(
                         div()
                             .text_size(px(26.))
-                            .text_color(rgb(theme::ACCENT))
+                            .text_color(rgb(0xffffff))
                             .child("N."),
                     ),
             )
