@@ -1,8 +1,9 @@
-# nanti.
-
-> Code now. Not later.
-
-A lightweight, extensible code editor built natively in Rust.
+<div align="center">
+  <img src="assets/nanti-logo.png" width="128" height="128" alt="nanti. logo" style="border-radius: 28px;" />
+  <h1>nanti.</h1>
+  <p><strong>Code now. Not later.</strong></p>
+  <p><em>A lightweight, extensible native code editor built in Rust.</em></p>
+</div>
 
 ---
 

@@ -905,6 +905,25 @@ impl Workbench {
             .font_family("Segoe UI")
             .child(
                 div()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .w(px(52.))
+                    .h(px(52.))
+                    .rounded_xl()
+                    .bg(rgb(0x131a26))
+                    .border_1()
+                    .border_color(rgb(0x27354a))
+                    .mb_2()
+                    .child(
+                        div()
+                            .text_size(px(26.))
+                            .text_color(rgb(theme::ACCENT))
+                            .child("N."),
+                    ),
+            )
+            .child(
+                div()
                     .text_size(px(30.))
                     .text_color(rgb(theme::TEXT))
                     .child("nanti."),
