@@ -53,10 +53,13 @@ const SPLITTER: f32 = 1.0;
 const SPLITTER_GRAB: f32 = 4.0;
 const ACTIVITY_BAR_WIDTH: f32 = 48.0;
 const TAB_BAR_HEIGHT: f32 = 35.0;
-const MAX_RENDERED_LINES: usize = 2000;
+const MAX_RENDERED_LINES: usize = 20_000;
+const DIFF_NOTE_H: f32 = 24.0;
 const EDITOR_MAX_LINES: usize = 100_000;
 const OVERSCAN_ROWS: usize = 10;
 const EXPLORER_ROW_H: f32 = 22.0;
+const SCM_ROW_H: f32 = 22.0;
+const SCM_HEADER_H: f32 = 24.0;
 const EXPLORER_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(2);
 const LINE_HEIGHT: f32 = 20.0;
 const GUTTER_WIDTH: f32 = 56.0;
@@ -128,6 +131,49 @@ fn activity_icon(a: Activity) -> &'static str {
         Activity::SourceControl => "git",
         Activity::Run => "run",
         Activity::Extensions => "extensions",
+    }
+}
+
+struct DiffWindow {
+    rows: Vec<AnyElement>,
+    y: f32,
+    gap: f32,
+    lo: f32,
+    hi: f32,
+}
+
+impl DiffWindow {
+    fn new(lo: f32, hi: f32) -> Self {
+        Self {
+            rows: Vec::new(),
+            y: 0.0,
+            gap: 0.0,
+            lo,
+            hi,
+        }
+    }
+
+    fn flush(&mut self) {
+        if self.gap > 0.0 {
+            self.rows
+                .push(div().h(px(self.gap)).flex_none().into_any_element());
+            self.gap = 0.0;
+        }
+    }
+
+    fn push(&mut self, h: f32, make: impl FnOnce() -> AnyElement) {
+        if self.y + h < self.lo || self.y > self.hi {
+            self.gap += h;
+        } else {
+            self.flush();
+            self.rows.push(make());
+        }
+        self.y += h;
+    }
+
+    fn finish(mut self) -> Vec<AnyElement> {
+        self.flush();
+        self.rows
     }
 }
 
@@ -299,6 +345,9 @@ pub struct Workbench {
     layout_saved: Layout,
     webview_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     webview_applied: Option<(i32, i32, i32, i32)>,
+    commit_card: Option<views::commit_tip::CardAnchor>,
+    commit_tip: Option<gpui::Entity<views::commit_tip::CommitTip>>,
+    card_gen: u64,
     terminals: Vec<TerminalSession>,
     active_terminal: usize,
     term_counter: usize,
@@ -347,6 +396,9 @@ impl Workbench {
             layout_saved: Layout::default(),
             webview_bounds: Rc::new(Cell::new(None)),
             webview_applied: Some((-1, -1, 0, 0)),
+            commit_card: None,
+            commit_tip: None,
+            card_gen: 0,
             terminals: Vec::new(),
             active_terminal: 0,
             term_counter: 0,
@@ -2492,7 +2544,18 @@ impl Workbench {
                     .size_full(),
                 )
             }
-            Some(TabContent::Diff(view)) => base.flex().flex_col().children(Self::diff_rows(view)),
+            Some(TabContent::Diff(view)) => {
+                let pad = EDITOR_PAD_Y;
+                let scrolled = (-f32::from(self.scroll.offset().y) - pad).max(0.0);
+                let viewport = f32::from(self.scroll.bounds().size.height);
+                let viewport = if viewport > 0.0 { viewport } else { 1600.0 };
+                let margin = OVERSCAN_ROWS as f32 * LINE_HEIGHT;
+                base.flex().flex_col().children(Self::diff_rows(
+                    view,
+                    scrolled - margin,
+                    scrolled + viewport + margin,
+                ))
+            }
             Some(TabContent::Text(editor)) => {
                 let active_tab = self.model.active();
                 let hl = active_tab.and_then(|t| self.highlights_for_tab(editor, t));
@@ -3653,6 +3716,10 @@ impl Workbench {
         };
         let mut body: Vec<AnyElement> = Vec::new();
         let mut rid = 0usize;
+        let mut y = 0f32;
+        let scrolled = (-f32::from(self.scrolls.scm.offset().y)).max(0.0);
+        let viewport = f32::from(self.scrolls.scm.bounds().size.height);
+        let viewport = if viewport > 0.0 { viewport } else { 1600.0 };
         for kind in [
             scm::GroupKind::Conflicts,
             scm::GroupKind::Staged,
@@ -3734,10 +3801,32 @@ impl Workbench {
                     }))
                     .into_any_element(),
             );
+            y += SCM_HEADER_H;
             if collapsed {
                 continue;
             }
-            for row in rows {
+            let total = rows.len();
+            // Only the rows near the viewport become elements, so thousands of changes cost the same as a few.
+            let first = (((scrolled - y) / SCM_ROW_H).max(0.0) as usize)
+                .saturating_sub(OVERSCAN_ROWS)
+                .min(total);
+            let last = ((((scrolled + viewport - y) / SCM_ROW_H).max(0.0)).ceil() as usize
+                + OVERSCAN_ROWS)
+                .min(total)
+                .max(first);
+            let base = rid;
+            rid += total;
+            y += total as f32 * SCM_ROW_H;
+            if first > 0 {
+                body.push(
+                    div()
+                        .h(px(first as f32 * SCM_ROW_H))
+                        .flex_none()
+                        .into_any_element(),
+                );
+            }
+            for (k, row) in rows[first..last].iter().enumerate() {
+                let rid = base + first + k;
                 let (name, dir) = row.name_and_dir();
                 let (name, dir) = (name.to_owned(), dir.to_owned());
                 let (rel_open, rel_act) = (row.rel.clone(), row.rel.clone());
@@ -3748,11 +3837,12 @@ impl Workbench {
                     div()
                         .id(("scm-row", rid))
                         .flex()
+                        .flex_none()
                         .items_center()
                         .justify_between()
+                        .h(px(SCM_ROW_H))
                         .pl_4()
                         .pr_2()
-                        .py(px(2.))
                         .text_size(px(13.))
                         .cursor_pointer()
                         .hover(|s| s.bg(rgb(theme::HOVER)))
@@ -3837,7 +3927,14 @@ impl Workbench {
                         )
                         .into_any_element(),
                 );
-                rid += 1;
+            }
+            if last < total {
+                body.push(
+                    div()
+                        .h(px((total - last) as f32 * SCM_ROW_H))
+                        .flex_none()
+                        .into_any_element(),
+                );
             }
         }
         if body.is_empty() {
@@ -4060,8 +4157,8 @@ impl Workbench {
             .map_or(0, |d| d.as_secs() as i64);
         for (i, c) in s.history.iter().enumerate() {
             let hash = c.hash.clone();
-            let (hover_hash, tip_hash) = (c.hash.clone(), c.hash.clone());
-            let (hover_entity, tip_entity) = (cx.entity(), cx.entity());
+            let hover_hash = c.hash.clone();
+            let hover_entity = cx.entity();
             let expanded = s.expanded_commits.contains(&c.hash);
             let refs: Vec<AnyElement> = c
                 .refs
@@ -4092,19 +4189,15 @@ impl Workbench {
                     .cursor_pointer()
                     .when(expanded, |d| d.bg(rgb(theme::HOVER)))
                     .hover(|s| s.bg(rgb(theme::HOVER)))
-                    .on_hover(move |hovered, _w, cx| {
-                        if *hovered {
-                            let hash = hover_hash.clone();
-                            hover_entity.update(cx, |wb, cx| {
-                                wb.model.scm.request_detail(&hash);
-                                cx.notify();
-                            });
-                        }
-                    })
-                    .hoverable_tooltip(move |_w, cx| {
-                        let (entity, hash) = (tip_entity.clone(), tip_hash.clone());
-                        cx.new(|cx| views::commit_tip::CommitTip::new(entity, hash, cx))
-                            .into()
+                    .on_hover(move |hovered, window, cx| {
+                        let at = window.mouse_position();
+                        hover_entity.update(cx, |wb, cx| {
+                            if *hovered {
+                                wb.hover_commit(&hover_hash, at, cx);
+                            } else {
+                                wb.leave_commit(cx);
+                            }
+                        });
                     })
                     .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
                         this.model.scm.toggle_commit(&hash);
@@ -4257,12 +4350,14 @@ impl Workbench {
         }
     }
 
-    fn diff_rows(view: &scm::DiffView) -> Vec<AnyElement> {
+    fn diff_rows(view: &scm::DiffView, lo: f32, hi: f32) -> Vec<AnyElement> {
         let note = |text: String, color: u32| {
             div()
                 .flex_none()
+                .flex()
+                .items_center()
+                .h(px(DIFF_NOTE_H))
                 .px_4()
-                .py(px(4.))
                 .text_size(px(12.))
                 .font_family("Segoe UI")
                 .text_color(rgb(color))
@@ -4278,31 +4373,37 @@ impl Workbench {
             }
             scm::DiffState::Ready(d) => d,
         };
-        let mut rows = vec![note(
-            format!(
-                "{}  +{} −{}{}",
-                view.req.key.rel,
-                d.added(),
-                d.removed(),
-                if d.notes.is_empty() {
-                    String::new()
-                } else {
-                    format!("  ({})", d.notes.join(", "))
-                }
-            ),
-            theme::TEXT,
-        )];
+        // Only the lines near the viewport become elements; every other row is a known height, so one spacer stands in for them.
+        let mut w = DiffWindow::new(lo, hi);
+        w.push(DIFF_NOTE_H, || {
+            note(
+                format!(
+                    "{}  +{} −{}{}",
+                    view.req.key.rel,
+                    d.added(),
+                    d.removed(),
+                    if d.notes.is_empty() {
+                        String::new()
+                    } else {
+                        format!("  ({})", d.notes.join(", "))
+                    }
+                ),
+                theme::TEXT,
+            )
+        });
         if d.binary {
-            rows.push(note(
-                "Binary file: there is no text diff.".into(),
-                theme::TEXT_DIM,
-            ));
+            w.push(DIFF_NOTE_H, || {
+                note(
+                    "Binary file: there is no text diff.".into(),
+                    theme::TEXT_DIM,
+                )
+            });
         } else if d.hunks.is_empty() {
-            rows.push(note("No changes.".into(), theme::TEXT_DIM));
+            w.push(DIFF_NOTE_H, || note("No changes.".into(), theme::TEXT_DIM));
         }
         let mut shown = 0usize;
         'hunks: for h in &d.hunks {
-            rows.push(
+            w.push(LINE_HEIGHT, || {
                 div()
                     .flex_none()
                     .h(px(LINE_HEIGHT))
@@ -4315,14 +4416,16 @@ impl Workbench {
                     .whitespace_nowrap()
                     .overflow_hidden()
                     .child(SharedString::from(h.header.clone()))
-                    .into_any_element(),
-            );
+                    .into_any_element()
+            });
             for l in &h.lines {
                 if shown >= MAX_RENDERED_LINES {
-                    rows.push(note(
-                        format!("Showing the first {MAX_RENDERED_LINES} lines of the diff."),
-                        theme::WARN,
-                    ));
+                    w.push(DIFF_NOTE_H, || {
+                        note(
+                            format!("Showing the first {MAX_RENDERED_LINES} lines of the diff."),
+                            theme::WARN,
+                        )
+                    });
                     break 'hunks;
                 }
                 shown += 1;
@@ -4344,7 +4447,7 @@ impl Workbench {
                             n.map_or(String::new(), |n| n.to_string()),
                         ))
                 };
-                rows.push(
+                w.push(LINE_HEIGHT, || {
                     div()
                         .flex()
                         .flex_none()
@@ -4369,17 +4472,19 @@ impl Workbench {
                                 })
                                 .child(SharedString::from(display_text(&l.text))),
                         )
-                        .into_any_element(),
-                );
+                        .into_any_element()
+                });
             }
         }
         if d.truncated {
-            rows.push(note(
-                "The diff is larger than the display limit and was cut.".into(),
-                theme::WARN,
-            ));
+            w.push(DIFF_NOTE_H, || {
+                note(
+                    "The diff is larger than the display limit and was cut.".into(),
+                    theme::WARN,
+                )
+            });
         }
-        rows
+        w.finish()
     }
 
     fn palette_overlay(
@@ -4884,7 +4989,9 @@ impl Render for Workbench {
             || self.model.prompt.is_some()
             || self.external_prompt.is_some()
             || self.model.settings_open
-            || self.model.ext_detail.is_some();
+            || self.model.ext_detail.is_some()
+            // The native webview is drawn above everything GPUI paints, so a hover card over it would be cut off.
+            || self.commit_card.is_some();
         let webview_wanted = !overlay_open
             && matches!(
                 self.model.active().map(|t| &t.content),
@@ -5040,6 +5147,7 @@ impl Render for Workbench {
             )
             .children(status_bar)
             .children(menus)
+            .children(self.commit_card_overlay(window, cx))
             .children(palette)
             .children(self.prompt_modal_overlay(cx))
     }

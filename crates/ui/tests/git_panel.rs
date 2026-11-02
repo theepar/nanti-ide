@@ -818,3 +818,33 @@ fn history_push_pull_and_commit_diffs_work_end_to_end() {
     assert!(t.0.join("n.txt").exists());
     let _ = std::fs::remove_dir_all(&base);
 }
+
+#[gpui::test]
+fn thousands_of_changes_and_a_huge_diff_keep_frames_cheap(cx: &mut TestAppContext) {
+    let t = repo("ui-big");
+    for i in 0..4000 {
+        std::fs::write(t.0.join(format!("dir/f{i:05}.txt")), "x\n").unwrap();
+    }
+    let big: String = (0..15_000).map(|i| format!("line {i}\n")).collect();
+    std::fs::write(t.0.join("a.txt"), big).unwrap();
+    let (window, cx) = open(cx, &t.0);
+    wait_idle(window, cx);
+    window
+        .update(cx, |wb, _, _| {
+            let m = wb.model_mut();
+            m.activity = Activity::SourceControl;
+            m.open_diff("a.txt", false);
+        })
+        .unwrap();
+    wait_idle(window, cx);
+    let start = Instant::now();
+    for _ in 0..10 {
+        window.update(cx, |_, _, cx| cx.notify()).unwrap();
+        cx.run_until_parked();
+    }
+    let per_frame = start.elapsed() / 10;
+    assert!(
+        per_frame < Duration::from_millis(400),
+        "a frame took {per_frame:?} with 4000 changes and a 15000 line diff"
+    );
+}

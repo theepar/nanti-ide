@@ -1,6 +1,8 @@
+use std::time::Duration;
+
 use gpui::{
-    AnyElement, ClickEvent, ClipboardItem, Context, Entity, FontWeight, IntoElement, Render,
-    SharedString, Subscription, Window, div, prelude::*, px, rgb,
+    AnyElement, ClickEvent, ClipboardItem, Context, Entity, FontWeight, IntoElement, Pixels, Point,
+    Render, SharedString, Subscription, Window, div, prelude::*, px, rgb,
 };
 
 use crate::{Workbench, assets, scm, theme};
@@ -8,6 +10,123 @@ use crate::{Workbench, assets, scm, theme};
 const BODY_LINES: usize = 14;
 // A fixed width lets long messages wrap to a known height, so the card grows downward instead of overlapping.
 const CARD_WIDTH: f32 = 420.0;
+// The first card waits so that sweeping the pointer across the list stays quiet; once it is up, moving to another row swaps it at once.
+const SHOW_DELAY: Duration = Duration::from_millis(350);
+const HIDE_DELAY: Duration = Duration::from_millis(220);
+const PREFETCH_AROUND: usize = 4;
+
+/// Where the card sits: beside the sidebar so it never covers the rows the pointer is moving across.
+#[derive(Clone, Copy)]
+pub(crate) struct CardAnchor {
+    pub(crate) pointer_y: f32,
+}
+
+impl Workbench {
+    pub(crate) fn hover_commit(&mut self, hash: &str, at: Point<Pixels>, cx: &mut Context<Self>) {
+        self.card_gen += 1;
+        let gen_ = self.card_gen;
+        let s = &mut self.model.scm;
+        s.request_detail(hash);
+        if let Some(i) = s.history.iter().position(|c| c.hash == hash) {
+            let near: Vec<String> = s.history
+                [i.saturating_sub(PREFETCH_AROUND)..(i + PREFETCH_AROUND + 1).min(s.history.len())]
+                .iter()
+                .map(|c| c.hash.clone())
+                .collect();
+            for h in near {
+                s.request_detail(&h);
+            }
+        }
+        let anchor = CardAnchor {
+            pointer_y: f32::from(at.y),
+        };
+        let hash = hash.to_owned();
+        if self.commit_card.is_some() {
+            self.show_commit_card(&hash, anchor, cx);
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(SHOW_DELAY).await;
+            let _ = this.update(cx, |wb, cx| {
+                if wb.card_gen == gen_ {
+                    wb.show_commit_card(&hash, anchor, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn show_commit_card(&mut self, hash: &str, anchor: CardAnchor, cx: &mut Context<Self>) {
+        self.commit_card = Some(anchor);
+        let tip = match &self.commit_tip {
+            Some(t) => t.clone(),
+            None => {
+                let wb = cx.entity();
+                let hash = hash.to_owned();
+                let t = cx.new(|cx| CommitTip::new(wb, hash, cx));
+                self.commit_tip = Some(t.clone());
+                t
+            }
+        };
+        tip.update(cx, |t, cx| t.set_hash(hash, cx));
+        cx.notify();
+    }
+
+    pub(crate) fn leave_commit(&mut self, cx: &mut Context<Self>) {
+        self.card_gen += 1;
+        let gen_ = self.card_gen;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(HIDE_DELAY).await;
+            let _ = this.update(cx, |wb, cx| {
+                if wb.card_gen == gen_ && wb.commit_card.take().is_some() {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    pub(crate) fn keep_commit_card(&mut self) {
+        self.card_gen += 1;
+    }
+
+    pub(crate) fn commit_card_overlay(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement + use<>> {
+        let anchor = self.commit_card?;
+        let tip = self.commit_tip.clone()?;
+        let (vw, vh) = {
+            let v = window.viewport_size();
+            (f32::from(v.width), f32::from(v.height))
+        };
+        let layout = &self.model.layout;
+        let side = crate::layout::ACTIVITY_BAR_WIDTH + layout.sidebar_width + 6.0;
+        let left = match layout.sidebar_side {
+            crate::layout::Side::Left => side,
+            crate::layout::Side::Right => vw - side - CARD_WIDTH - 12.0,
+        }
+        .clamp(4.0, (vw - CARD_WIDTH - 12.0).max(4.0));
+        let card = div()
+            .id("commit-card")
+            .absolute()
+            .left(px(left))
+            .on_hover(cx.listener(|this, hovered: &bool, _w, cx| {
+                if *hovered {
+                    this.keep_commit_card();
+                } else {
+                    this.leave_commit(cx);
+                }
+            }))
+            .child(tip);
+        Some(if anchor.pointer_y > vh * 0.55 {
+            card.bottom(px((vh - anchor.pointer_y - 24.0).max(6.0)))
+        } else {
+            card.top(px((anchor.pointer_y - 14.0).max(6.0)))
+        })
+    }
+}
 
 /// The hover card of a commit in the history: who, when, the whole message, the size of the change and links.
 pub(crate) struct CommitTip {
@@ -23,6 +142,13 @@ impl CommitTip {
             workbench,
             hash,
             _watch,
+        }
+    }
+
+    pub(crate) fn set_hash(&mut self, hash: &str, cx: &mut Context<Self>) {
+        if self.hash != hash {
+            self.hash = hash.to_owned();
+            cx.notify();
         }
     }
 
