@@ -219,7 +219,7 @@ impl Workbench {
                     .child(section("DISCORD"))
                     .child(Self::setting_row(
                         "Rich Presence",
-                        "Show what you are working on in your Discord status. Off by default.",
+                        "Show what you are working on in your Discord status.",
                         self.switch(
                             "set-discord",
                             d.settings.enabled,

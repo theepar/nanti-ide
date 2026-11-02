@@ -33,7 +33,7 @@ pub struct DiscordSettings {
 impl Default for DiscordSettings {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             client_id: std::env::var("NANTI_DISCORD_CLIENT_ID")
                 .ok()
                 .and_then(|v| valid_client_id(&v))
