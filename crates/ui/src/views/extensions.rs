@@ -970,6 +970,7 @@ impl Workbench {
                         .items_center()
                         .gap_3()
                         .px_3()
+                        .my(px(6.))
                         .h(px(56.))
                         .cursor_pointer()
                         .hover(|s| s.bg(rgb(theme::HOVER)))
