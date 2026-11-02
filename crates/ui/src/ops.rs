@@ -181,7 +181,57 @@ impl Model {
             );
         }
         self.show_activity(crate::model::Activity::Extensions);
-        self.open_input(InputKind::InstallVsix, "");
+        if self.native_dialogs {
+            self.pick_request = Some(crate::model::PickRequest::Vsix);
+        } else {
+            self.open_input(InputKind::InstallVsix, "");
+        }
+    }
+
+    pub(crate) fn cmd_open_file(&mut self) {
+        if self.native_dialogs {
+            self.pick_request = Some(crate::model::PickRequest::File);
+        }
+    }
+
+    pub(crate) fn cmd_open_folder(&mut self) {
+        if self.native_dialogs {
+            self.pick_request = Some(crate::model::PickRequest::Folder);
+        }
+    }
+
+    /// The user chose `path` in the native dialog shown for `req`.
+    pub fn apply_picked(&mut self, req: crate::model::PickRequest, path: PathBuf) {
+        use crate::model::PickRequest;
+        match req {
+            PickRequest::File => {
+                if path.is_file() {
+                    self.open_file(&path);
+                }
+            }
+            PickRequest::Folder => self.open_folder(path),
+            PickRequest::Vsix => {
+                let Some(dir) = self.config_dir.clone() else {
+                    return;
+                };
+                let is_vsix = path
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("vsix"));
+                if !is_vsix {
+                    return self.say("Extensions", "Choose a .vsix file");
+                }
+                match extensions::install_vsix(&dir, &path) {
+                    Ok(ext) => {
+                        self.refresh_extensions();
+                        self.say(
+                            "Extensions",
+                            &format!("Installed {} {}", ext.id, ext.version),
+                        );
+                    }
+                    Err(e) => self.say("Extensions", &format!("Install failed: {e}")),
+                }
+            }
+        }
     }
 
     /// Carry out what a prompt asked. `Err` keeps the prompt open and is shown under its field.
@@ -237,6 +287,7 @@ impl Model {
     }
 
     fn after_create(&mut self, path: &Path, folder: bool) {
+        self.invalidate_explorer();
         self.reveal_in_explorer(path);
         if folder {
             self.expanded.insert(path.to_path_buf());
@@ -255,6 +306,7 @@ impl Model {
     }
 
     fn after_rename(&mut self, from: &Path, to: &Path) {
+        self.invalidate_explorer();
         for tab in &mut self.tabs {
             if matches!(tab.content, TabContent::Diff(_)) {
                 continue;
@@ -289,6 +341,7 @@ impl Model {
     pub fn delete_item(&mut self, path: &Path) {
         match ops::send_to_recycle_bin(&self.root, path) {
             Ok(()) => {
+                self.invalidate_explorer();
                 let mut i = 0;
                 while i < self.tabs.len() {
                     let t = &self.tabs[i];
@@ -420,6 +473,10 @@ impl Model {
             Some(dir) => extensions::list_installed(dir, self.panel_extension.as_deref()),
             None => Vec::new(),
         };
+        // Refresh also retries recommendations that failed (e.g. no connection earlier).
+        if self.marketplace_results.is_empty() && self.marketplace_query.is_none() {
+            self.recommend_tried = false;
+        }
     }
 
     pub fn confirm_remove_extension(&mut self, dir: &Path) {
@@ -451,6 +508,295 @@ impl Model {
             ),
             Err(e) => self.say("Extensions", &format!("Cannot save the choice: {e}")),
         }
+    }
+
+    /// Search Open VSX in the background; the answer is applied by `pump_marketplace`.
+    pub fn search_marketplace(&mut self, query: &str) {
+        let q = query.trim().to_owned();
+        self.marketplace_results.clear();
+        self.marketplace_message = None;
+        self.marketplace_recommended = false;
+        if q.is_empty() {
+            self.marketplace_searching = false;
+            self.marketplace_query = None;
+            self.marketplace_rx = None; // an answer still in flight is dropped
+            self.recommend_tried = false; // an empty search brings the recommendations back
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let asked = q.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(extensions::search_marketplace(&asked));
+        });
+        self.marketplace_rx = Some(rx); // replacing it drops any older, now stale, search
+        self.marketplace_query = Some(q);
+        self.marketplace_searching = true;
+    }
+
+    /// Publisher and name of the marketplace entry behind `download_url`.
+    fn market_ident(&self, download_url: &str) -> Option<(String, String)> {
+        if let Some(m) = self.marketplace_results.iter().find(|m| m.download_url == download_url) {
+            return Some((m.publisher.clone(), m.name.clone()));
+        }
+        let d = self
+            .ext_detail
+            .as_ref()
+            .filter(|d| d.download_url.as_deref() == Some(download_url))?;
+        let name = d.id.strip_prefix(&format!("{}.", d.publisher))?;
+        Some((d.publisher.clone(), name.to_owned()))
+    }
+
+    /// Download and install in the background (one at a time); `pump_marketplace` reports.
+    pub fn install_from_marketplace(&mut self, download_url: &str) {
+        if self.installing.is_some() {
+            return;
+        }
+        let Some(cfg) = self.config_dir.clone() else {
+            self.say("Extensions", "Cannot install: no configuration directory");
+            return;
+        };
+        let (publisher, name) = self.market_ident(download_url).unwrap_or_default();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let url = download_url.to_owned();
+        let progress = self.install_progress.clone();
+        progress.done.store(0, std::sync::atomic::Ordering::Relaxed);
+        progress.total.store(0, std::sync::atomic::Ordering::Relaxed);
+        std::thread::spawn(move || {
+            let _ = tx.send(extensions::download_and_install(&cfg, &publisher, &name, &url, &progress));
+        });
+        self.installing = Some(download_url.to_owned());
+        self.install_rx = Some(rx);
+        self.progress_seen = 0;
+    }
+
+    /// "Installing 42%" / "Installing..." for the extension being installed.
+    pub fn install_label(&self) -> String {
+        use std::sync::atomic::Ordering;
+        let (done, total) = (
+            self.install_progress.done.load(Ordering::Relaxed),
+            self.install_progress.total.load(Ordering::Relaxed),
+        );
+        if total > 0 && done >= total {
+            "Unpacking...".to_owned()
+        } else if total > 0 {
+            format!("Installing {}%", done * 100 / total)
+        } else if done > 0 {
+            format!("Installing {} MB", done / 1_000_000)
+        } else {
+            "Installing...".to_owned()
+        }
+    }
+
+    /// Fetch the icons of the listed marketplace extensions in the background (cached on disk).
+    fn request_icons(&mut self) {
+        let Some(cfg) = self.config_dir.clone() else {
+            return;
+        };
+        let mut jobs: Vec<(String, String)> = Vec::new();
+        for m in &self.marketplace_results {
+            if self.ext_icons.contains_key(&m.id) || self.icons_requested.contains(&m.id) {
+                continue;
+            }
+            if let Some(p) = extensions::cached_icon(&cfg, &m.id) {
+                self.ext_icons.insert(m.id.clone(), p);
+            } else if let Some(url) = &m.icon_url {
+                self.icons_requested.insert(m.id.clone());
+                jobs.push((m.id.clone(), url.clone()));
+            }
+        }
+        if jobs.is_empty() {
+            return;
+        }
+        let workers = jobs.len().min(4);
+        let jobs = std::sync::Arc::new(std::sync::Mutex::new(jobs));
+        for _ in 0..workers {
+            let (jobs, tx, cfg) = (jobs.clone(), self.icon_tx.clone(), cfg.clone());
+            std::thread::spawn(move || {
+                loop {
+                    let job = jobs.lock().ok().and_then(|mut j| j.pop());
+                    let Some((id, url)) = job else { break };
+                    if let Ok(path) = extensions::download_icon(&cfg, &id, &url) {
+                        let _ = tx.send((id, path));
+                    }
+                }
+            });
+        }
+    }
+
+    /// Show the detail page of the `index`-th marketplace result.
+    pub fn open_market_detail(&mut self, index: usize) {
+        use crate::extensions::Readme;
+        let Some(m) = self.marketplace_results.get(index).cloned() else {
+            return;
+        };
+        self.readme_rx = None;
+        {
+            // search results carry no README: the detail endpoint does (with license/categories)
+            let (tx, rx) = std::sync::mpsc::channel();
+            let (id, publisher, name) = (m.id.clone(), m.publisher.clone(), m.name.clone());
+            std::thread::spawn(move || {
+                let _ = tx.send((id, extensions::download_extra(&publisher, &name)));
+            });
+            self.readme_rx = Some(rx);
+        }
+        let readme = Readme::Loading;
+        self.ext_detail = Some(extensions::ExtDetail {
+            id: m.id,
+            display_name: m.display_name,
+            publisher: m.publisher,
+            version: m.version,
+            description: m.description,
+            download_url: Some(m.download_url),
+            downloads: Some(m.downloads),
+            rating: m.rating,
+            rating_count: m.rating_count,
+            updated: m.updated,
+            license: None,
+            categories: Vec::new(),
+            readme,
+        });
+    }
+
+    /// Show the detail page of the `index`-th installed extension.
+    pub fn open_installed_detail(&mut self, index: usize) {
+        use crate::extensions::Readme;
+        let Some(x) = self.extensions.get(index).cloned() else {
+            return;
+        };
+        self.readme_rx = None;
+        let readme = match extensions::read_local_readme(&x.dir) {
+            Some(text) => Readme::Ready(text),
+            None => Readme::None,
+        };
+        self.ext_detail = Some(extensions::ExtDetail {
+            id: x.id,
+            display_name: x.display_name,
+            publisher: x.publisher,
+            version: x.version,
+            description: x.description,
+            download_url: None,
+            downloads: None,
+            rating: None,
+            rating_count: 0,
+            updated: None,
+            license: None,
+            categories: Vec::new(),
+            readme,
+        });
+    }
+
+    pub fn close_ext_detail(&mut self) {
+        self.ext_detail = None;
+        self.readme_rx = None;
+    }
+
+    /// Fill an empty Extensions view with recommendations so there is something to install
+    /// before the first search. True if a request was started.
+    fn recommend_if_idle(&mut self) -> bool {
+        if !self.marketplace_enabled
+            || self.activity != crate::model::Activity::Extensions
+            || self.recommend_tried
+            || self.marketplace_searching
+            || self.marketplace_query.is_some()
+            || !self.marketplace_results.is_empty()
+        {
+            return false;
+        }
+        self.recommend_tried = true;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(extensions::recommended_marketplace());
+        });
+        self.marketplace_rx = Some(rx);
+        self.marketplace_recommended = true;
+        self.marketplace_searching = true;
+        true
+    }
+
+    /// Apply finished marketplace work. True if something on screen changed.
+    pub fn pump_marketplace(&mut self) -> bool {
+        use std::sync::mpsc::TryRecvError;
+        let mut changed = self.recommend_if_idle();
+        if self.installing.is_some() {
+            // repaint while the download advances
+            let now = self.install_progress.done.load(std::sync::atomic::Ordering::Relaxed);
+            if now != self.progress_seen {
+                self.progress_seen = now;
+                changed = true;
+            }
+        }
+        while let Ok((id, path)) = self.icon_rx.try_recv() {
+            self.ext_icons.insert(id, path);
+            changed = true;
+        }
+        if let Some(polled) = self.readme_rx.as_ref().map(|rx| rx.try_recv()) {
+            use crate::extensions::Readme;
+            let outcome = match polled {
+                Ok((id, res)) => Some((id, res)),
+                Err(TryRecvError::Disconnected) => self
+                    .ext_detail
+                    .as_ref()
+                    .map(|d| (d.id.clone(), Err("the download stopped unexpectedly".to_owned()))),
+                Err(TryRecvError::Empty) => None,
+            };
+            if let Some((id, res)) = outcome {
+                self.readme_rx = None;
+                if let Some(d) = self.ext_detail.as_mut().filter(|d| d.id == id) {
+                    match res {
+                        Ok(extra) => {
+                            d.readme = extra.readme.map_or(Readme::None, Readme::Ready);
+                            d.license = extra.license;
+                            d.categories = extra.categories;
+                        }
+                        Err(e) => d.readme = Readme::Failed(e),
+                    }
+                }
+                changed = true;
+            }
+        }
+        if let Some(polled) = self.marketplace_rx.as_ref().map(|rx| rx.try_recv()) {
+            match polled {
+                Ok(res) => {
+                    self.marketplace_rx = None;
+                    self.marketplace_searching = false;
+                    match res {
+                        Ok(results) => {
+                            self.marketplace_results = results;
+                            self.request_icons();
+                        }
+                        Err(e) => self.marketplace_message = Some(e),
+                    }
+                    changed = true;
+                }
+                Err(TryRecvError::Disconnected) => {
+                    self.marketplace_rx = None;
+                    self.marketplace_searching = false;
+                    self.marketplace_message = Some("The search stopped unexpectedly".into());
+                    changed = true;
+                }
+                Err(TryRecvError::Empty) => {}
+            }
+        }
+        if let Some(polled) = self.install_rx.as_ref().map(|rx| rx.try_recv()) {
+            let outcome = match polled {
+                Ok(res) => Some(res),
+                Err(TryRecvError::Disconnected) => Some(Err("the download stopped unexpectedly".to_owned())),
+                Err(TryRecvError::Empty) => None,
+            };
+            if let Some(res) = outcome {
+                self.install_rx = None;
+                self.installing = None;
+                match res {
+                    Ok(ext) => {
+                        self.refresh_extensions();
+                        self.say("Extensions", &format!("Installed {}", ext.display_name));
+                    }
+                    Err(e) => self.say("Extensions", &format!("Cannot install: {e}")),
+                }
+                changed = true;
+            }
+        }
+        changed
     }
 
     // ---- analysis ----------------------------------------------------------------------------------

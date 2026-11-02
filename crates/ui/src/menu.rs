@@ -55,6 +55,8 @@ pub fn items(kind: MenuKind) -> Vec<MenuItem> {
             Cmd(C::NewFile),
             Cmd(C::NewFolder),
             Sep,
+            Cmd(C::OpenFile),
+            Cmd(C::OpenFolder),
             Cmd(C::QuickOpen),
             Sep,
             Cmd(C::Save),

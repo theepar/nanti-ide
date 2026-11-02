@@ -19,6 +19,64 @@ pub struct Extension {
     /// Webview view type it contributes (usable in the right-hand panel), if any.
     pub view_type: Option<String>,
     pub commands: usize,
+    pub publisher: String,
+    /// The extension's own icon file (`"icon"` in package.json), if it exists.
+    pub icon: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MarketplaceExtension {
+    pub id: String,
+    pub name: String,
+    pub publisher: String,
+    pub display_name: String,
+    pub version: String,
+    pub description: String,
+    pub download_url: String,
+    /// Open VSX file URLs for the list icon and the detail page.
+    pub icon_url: Option<String>,
+    pub readme_url: Option<String>,
+    pub downloads: u64,
+    pub rating: Option<f64>,
+    pub rating_count: u64,
+    /// ISO timestamp of the latest release.
+    pub updated: Option<String>,
+}
+
+/// What the extension detail page shows.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExtDetail {
+    pub id: String,
+    pub display_name: String,
+    pub publisher: String,
+    pub version: String,
+    pub description: String,
+    /// Set for marketplace entries (what Install downloads).
+    pub download_url: Option<String>,
+    pub downloads: Option<u64>,
+    pub rating: Option<f64>,
+    pub rating_count: u64,
+    pub updated: Option<String>,
+    pub license: Option<String>,
+    pub categories: Vec<String>,
+    pub readme: Readme,
+}
+
+/// What the Open VSX detail endpoint adds to a search result.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtExtra {
+    pub readme: Option<String>,
+    pub license: Option<String>,
+    pub categories: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Readme {
+    /// The extension ships none.
+    None,
+    Loading,
+    Ready(String),
+    Failed(String),
 }
 
 /// Where extensions live: `<config dir>/extensions`.
@@ -82,7 +140,153 @@ fn read_manifest(dir: &Path) -> Option<Extension> {
         engine,
         view_type,
         commands,
+        publisher: publisher.to_owned(),
+        icon: j
+            .get("icon")
+            .and_then(|v| v.as_str())
+            .map(|rel| dir.join(rel))
+            .filter(|p| p.is_file()),
     })
+}
+
+/// README of an installed extension (first `readme*` file in its folder, capped in size).
+pub fn read_local_readme(dir: &Path) -> Option<String> {
+    let entry = std::fs::read_dir(dir).ok()?.filter_map(Result::ok).find(|e| {
+        e.file_name()
+            .to_string_lossy()
+            .to_ascii_lowercase()
+            .starts_with("readme")
+    })?;
+    let bytes = std::fs::read(entry.path()).ok()?;
+    Some(String::from_utf8_lossy(&bytes[..bytes.len().min(README_MAX)]).into_owned())
+}
+
+const README_MAX: usize = 400_000;
+const ICON_MAX: u64 = 2_000_000;
+const ICON_EXTS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "svg"];
+
+/// Folder for downloaded marketplace icons: `<config>/cache/icons`.
+pub fn icon_cache_dir(config_dir: &Path) -> PathBuf {
+    config_dir.join("cache").join("icons")
+}
+
+fn icon_stem(id: &str) -> String {
+    id.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// A previously downloaded icon of extension `id`.
+pub fn cached_icon(config_dir: &Path, id: &str) -> Option<PathBuf> {
+    let dir = icon_cache_dir(config_dir);
+    let stem = icon_stem(id);
+    ICON_EXTS
+        .iter()
+        .map(|e| dir.join(format!("{stem}.{e}")))
+        .find(|p| p.is_file())
+}
+
+/// Download an icon from Open VSX into the cache (gpui draws it from the local file).
+pub fn download_icon(config_dir: &Path, id: &str, url: &str) -> Result<PathBuf, String> {
+    if !url.starts_with("https://open-vsx.org/") {
+        return Err("refusing to download an icon from an address that is not Open VSX".into());
+    }
+    let ext = url
+        .rsplit('/')
+        .next()
+        .and_then(|f| f.rsplit_once('.'))
+        .map(|(_, e)| e.to_ascii_lowercase())
+        .filter(|e| ICON_EXTS.contains(&e.as_str()))
+        .unwrap_or_else(|| "png".to_owned());
+    let dir = icon_cache_dir(config_dir);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let dest = dir.join(format!("{}.{ext}", icon_stem(id)));
+    let part = dir.join(format!("{}.{ext}.part", icon_stem(id)));
+    let mut cmd = std::process::Command::new("curl.exe");
+    cmd.arg("-sSL").arg("--max-time").arg("15").arg("-o").arg(&part).arg(url);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let out = cmd.output().map_err(|e| format!("cannot run curl: {e}"))?;
+    let size = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
+    if !out.status.success() || size == 0 || size > ICON_MAX {
+        let _ = std::fs::remove_file(&part);
+        return Err("the icon could not be downloaded".into());
+    }
+    std::fs::rename(&part, &dest).map_err(|e| e.to_string())?;
+    Ok(dest)
+}
+
+/// Download an extension's README (Markdown) from Open VSX.
+pub fn download_readme(url: &str) -> Result<String, String> {
+    fetch_text(url, README_MAX)
+}
+
+/// The detail endpoint (`/api/{publisher}/{name}`) knows the README and metadata that the search
+/// results leave out. README and metadata are fetched together, on a worker thread.
+pub fn download_extra(publisher: &str, name: &str) -> Result<ExtExtra, String> {
+    let plain = |s: &str| {
+        !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+    };
+    if !plain(publisher) || !plain(name) {
+        return Err("unexpected extension name".into());
+    }
+    let json = fetch_text(
+        &format!("https://open-vsx.org/api/{publisher}/{name}"),
+        4_000_000,
+    )?;
+    let v: serde_json::Value =
+        serde_json::from_str(&json).map_err(|e| format!("invalid response: {e}"))?;
+    let readme = v
+        .pointer("/files/readme")
+        .and_then(|u| u.as_str())
+        .and_then(|u| download_readme(u).ok())
+        .filter(|t| !t.trim().is_empty());
+    Ok(ExtExtra {
+        readme,
+        license: v
+            .get("license")
+            .and_then(|l| l.as_str())
+            .filter(|l| !l.trim().is_empty())
+            .map(str::to_owned),
+        categories: v
+            .get("categories")
+            .and_then(|c| c.as_array())
+            .map(|a| a.iter().filter_map(|c| c.as_str().map(str::to_owned)).collect())
+            .unwrap_or_default(),
+    })
+}
+
+fn fetch_text(url: &str, cap: usize) -> Result<String, String> {
+    if !url.starts_with("https://open-vsx.org/") {
+        return Err("refusing to download from an address that is not Open VSX".into());
+    }
+    let mut cmd = std::process::Command::new("curl.exe");
+    cmd.arg("-sSL").arg("--max-time").arg("15").arg(url);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let out = cmd.output().map_err(|e| format!("cannot run curl: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "could not load the description: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let bytes = &out.stdout[..out.stdout.len().min(cap)];
+    Ok(String::from_utf8_lossy(bytes).into_owned())
 }
 
 /// Extensions in `<config>/extensions/*`, plus `extra` (the one passed with `NANTI_EXTENSION`).
@@ -199,6 +403,217 @@ pub fn load_panel_choice(config_dir: &Path) -> Option<(PathBuf, String)> {
     (dir.join("package.json").is_file() && !view.is_empty()).then_some((dir, view))
 }
 
+/// Query Open VSX Registry (`https://open-vsx.org/api/-/search?query={q}&size=20`).
+pub fn search_marketplace(query: &str) -> Result<Vec<MarketplaceExtension>, String> {
+    let q = query.trim();
+    if q.is_empty() {
+        return Ok(Vec::new());
+    }
+    let encoded: String = url::form_urlencoded::byte_serialize(q.as_bytes()).collect();
+    fetch_marketplace(&format!(
+        "https://open-vsx.org/api/-/search?query={encoded}&size=20"
+    ))
+}
+
+/// The most downloaded extensions: what the Extensions view recommends before anything is searched.
+pub fn recommended_marketplace() -> Result<Vec<MarketplaceExtension>, String> {
+    fetch_marketplace(
+        "https://open-vsx.org/api/-/search?sortBy=downloadCount&sortOrder=desc&size=30",
+    )
+}
+
+fn fetch_marketplace(url: &str) -> Result<Vec<MarketplaceExtension>, String> {
+    let mut cmd = std::process::Command::new("curl.exe");
+    cmd.arg("-sSL").arg("--max-time").arg("10").arg(url);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let out = cmd.output().map_err(|e| format!("cannot run curl: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "search request failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    let val: serde_json::Value = serde_json::from_slice(&out.stdout)
+        .map_err(|e| format!("invalid search response JSON: {e}"))?;
+
+    let mut list = Vec::new();
+    if let Some(items) = val.get("extensions").and_then(|e| e.as_array()) {
+        for item in items {
+            let namespace = item.get("namespace").and_then(|n| n.as_str()).unwrap_or("unknown");
+            let name = item.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
+            let id = format!("{namespace}.{name}");
+            let display_name = item.get("displayName").and_then(|d| d.as_str()).unwrap_or(name);
+            let version = item.get("version").and_then(|v| v.as_str()).unwrap_or("0.0.0");
+            let description = item.get("description").and_then(|d| d.as_str()).unwrap_or("");
+            let download_url = item
+                .pointer("/files/download")
+                .and_then(|d| d.as_str())
+                .map(str::to_owned)
+                .or_else(|| item.get("downloadUrl").and_then(|d| d.as_str()).map(str::to_owned))
+                .unwrap_or_default();
+
+            if !download_url.is_empty() {
+                list.push(MarketplaceExtension {
+                    id,
+                    name: name.to_owned(),
+                    publisher: namespace.to_owned(),
+                    display_name: display_name.to_owned(),
+                    version: version.to_owned(),
+                    description: description.to_owned(),
+                    download_url,
+                    icon_url: item
+                        .pointer("/files/icon")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_owned),
+                    readme_url: item
+                        .pointer("/files/readme")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_owned),
+                    downloads: item.get("downloadCount").and_then(|v| v.as_u64()).unwrap_or(0),
+                    rating: item.get("averageRating").and_then(|v| v.as_f64()),
+                    rating_count: item.get("ratingCount").and_then(|v| v.as_u64()).unwrap_or(0),
+                    updated: item
+                        .get("timestamp")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_owned),
+                });
+            }
+        }
+    }
+    Ok(list)
+}
+
+/// Bytes downloaded so far / expected, shared with the UI to show install progress.
+#[derive(Debug, Default)]
+pub struct Progress {
+    pub done: std::sync::atomic::AtomicU64,
+    pub total: std::sync::atomic::AtomicU64,
+}
+
+/// The Open VSX target platform of this machine (extensions may ship one package per platform).
+fn target_platform() -> &'static str {
+    if cfg!(target_arch = "aarch64") {
+        "win32-arm64"
+    } else {
+        "win32-x64"
+    }
+}
+
+/// Which package to download for `publisher.name`, and its size (0 if unknown).
+///
+/// Search results point at ONE build of a platform-specific extension (often another platform's:
+/// "alpine-arm64"), so the package for this machine is looked up in the detail endpoint. An
+/// extension that has platform builds but none for Windows is refused instead of installing a
+/// binary that cannot run.
+pub fn resolve_package(publisher: &str, name: &str, listed_url: &str) -> Result<(String, u64), String> {
+    let plain = |s: &str| {
+        !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+    };
+    if !plain(publisher) || !plain(name) {
+        return Ok((listed_url.to_owned(), 0));
+    }
+    let Ok(json) = fetch_text(&format!("https://open-vsx.org/api/{publisher}/{name}"), 4_000_000)
+    else {
+        return Ok((listed_url.to_owned(), 0)); // detail unavailable: use what the search gave
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) else {
+        return Ok((listed_url.to_owned(), 0));
+    };
+    let builds = v.get("downloads").and_then(|d| d.as_object()).filter(|d| !d.is_empty());
+    let Some(builds) = builds else {
+        return Ok((listed_url.to_owned(), 0));
+    };
+    for key in [target_platform(), "universal"] {
+        if let Some(url) = builds.get(key).and_then(|u| u.as_str())
+            && url.starts_with("https://open-vsx.org/")
+        {
+            let size = v
+                .pointer(&format!("/downloadSizes/{key}"))
+                .and_then(|n| n.as_u64())
+                .unwrap_or(0);
+            return Ok((url.to_owned(), size));
+        }
+    }
+    Err(format!(
+        "{publisher}.{name} has no build for this computer ({})",
+        target_platform()
+    ))
+}
+
+/// Download a package from Open VSX and install it into `<config>/extensions`.
+pub fn download_and_install(
+    config_dir: &Path,
+    publisher: &str,
+    name: &str,
+    listed_url: &str,
+    progress: &Progress,
+) -> Result<Extension, String> {
+    use std::sync::atomic::Ordering;
+    // Fail fast, without touching the network, on an address that is not Open VSX.
+    if !listed_url.starts_with("https://open-vsx.org/") {
+        return Err("refusing to download from an address that is not Open VSX".into());
+    }
+    let (url, size) = resolve_package(publisher, name, listed_url)?;
+    progress.done.store(0, Ordering::Relaxed);
+    progress.total.store(size, Ordering::Relaxed);
+
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let tmp = std::env::temp_dir().join(format!("nanti-ext-{}-{stamp}.vsix", std::process::id()));
+    let mut cmd = std::process::Command::new("curl.exe");
+    // --fail: an HTTP error must not be saved as if it were the package.
+    // Large packages are fine; a connection that stalls for 30 s is not.
+    cmd.args(["-sSL", "--fail", "--connect-timeout", "15", "--max-time", "1800"])
+        .args(["--speed-limit", "2048", "--speed-time", "30"])
+        .arg("-o")
+        .arg(&tmp)
+        .arg(&url)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let mut child = cmd.spawn().map_err(|e| format!("cannot run curl: {e}"))?;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                let got = std::fs::metadata(&tmp).map_or(0, |m| m.len());
+                progress.done.store(got, Ordering::Relaxed);
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(format!("download failed: {e}"));
+            }
+        }
+    };
+    progress
+        .done
+        .store(std::fs::metadata(&tmp).map_or(0, |m| m.len()), Ordering::Relaxed);
+    if !status.success() {
+        let mut why = String::new();
+        if let Some(mut e) = child.stderr.take() {
+            use std::io::Read;
+            let _ = e.read_to_string(&mut why);
+        }
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("download failed: {}", why.trim()));
+    }
+    let res = install_vsix(config_dir, &tmp);
+    let _ = std::fs::remove_file(&tmp);
+    res
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,6 +629,102 @@ mod tests {
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         Tmp(p)
+    }
+
+    /// Installs real extensions from Open VSX. Needs the network; run it with
+    /// `cargo test -p ui --lib -- --ignored installs_real_extensions --nocapture`.
+    #[test]
+    #[ignore = "needs the network and downloads real packages"]
+    fn installs_real_extensions_from_open_vsx() {
+        let wanted = std::env::var("NANTI_TEST_EXTS").unwrap_or_else(|_| {
+            "usernamehw.errorlens,tamasfe.even-better-toml,esbenp.prettier-vscode,\
+             dbaeumer.vscode-eslint,redhat.vscode-yaml,rust-lang.rust-analyzer"
+                .to_owned()
+        });
+        let dir = tmp("real");
+        let mut failures = Vec::new();
+        for id in wanted.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            let Some((publisher, name)) = id.split_once('.') else {
+                continue;
+            };
+            let listed = search_marketplace(name)
+                .ok()
+                .and_then(|r| r.into_iter().find(|m| m.id.eq_ignore_ascii_case(id)));
+            let Some(listed) = listed else {
+                failures.push(format!("{id}: not found by the search"));
+                continue;
+            };
+            let progress = Progress::default();
+            let started = std::time::Instant::now();
+            match download_and_install(&dir.0, publisher, name, &listed.download_url, &progress) {
+                Ok(ext) => {
+                    let mb = progress.done.load(std::sync::atomic::Ordering::Relaxed) / 1_000_000;
+                    println!(
+                        "OK  {id} {} ({mb} MB, {:.1}s) -> {}",
+                        ext.version,
+                        started.elapsed().as_secs_f32(),
+                        ext.dir.display()
+                    );
+                    if !ext.id.eq_ignore_ascii_case(id) {
+                        failures.push(format!("{id}: installed as {}", ext.id));
+                    }
+                }
+                Err(e) => failures.push(format!("{id}: {e}")),
+            }
+        }
+        assert!(failures.is_empty(), "failed installs:\n{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn icon_and_readme_downloads_are_limited_to_open_vsx() {
+        let dir = tmp("ic");
+        for bad in ["https://evil.example/icon.png", "http://open-vsx.org/icon.png", ""] {
+            assert!(download_icon(&dir.0, "a.b", bad).is_err(), "{bad:?}");
+            assert!(download_readme(bad).is_err(), "{bad:?}");
+        }
+        assert!(cached_icon(&dir.0, "a.b").is_none());
+        std::fs::create_dir_all(icon_cache_dir(&dir.0)).unwrap();
+        let p = icon_cache_dir(&dir.0).join("a.b.png");
+        std::fs::write(&p, [1u8]).unwrap();
+        assert_eq!(cached_icon(&dir.0, "a.b"), Some(p));
+    }
+
+    #[test]
+    fn a_manifest_icon_is_used_only_if_the_file_exists() {
+        let dir = tmp("mi");
+        let ext = dir.0.join("x");
+        write_manifest(
+            &ext,
+            r#"{"name":"n","publisher":"p","version":"1.0.0","icon":"icon.png"}"#,
+        );
+        assert!(read_manifest(&ext).unwrap().icon.is_none());
+        std::fs::write(ext.join("icon.png"), [1u8]).unwrap();
+        let m = read_manifest(&ext).unwrap();
+        assert_eq!(m.icon, Some(ext.join("icon.png")));
+        assert_eq!(m.publisher, "p");
+    }
+
+    #[test]
+    fn local_readme_is_found_case_insensitively() {
+        let dir = tmp("rd");
+        assert!(read_local_readme(&dir.0).is_none());
+        std::fs::write(dir.0.join("ReadMe.MD"), "# Hello").unwrap();
+        assert_eq!(read_local_readme(&dir.0).as_deref(), Some("# Hello"));
+    }
+
+    #[test]
+    fn downloads_are_limited_to_open_vsx() {
+        let dir = tmp("dl");
+        for bad in [
+            "http://open-vsx.org/api/a/b/1/file/x.vsix",
+            "https://open-vsx.org.evil.example/x.vsix",
+            "https://evil.example/https://open-vsx.org/x.vsix",
+            "file:///C:/x.vsix",
+            "",
+        ] {
+            let err = download_and_install(&dir.0, "a", "b", bad, &Progress::default()).unwrap_err();
+            assert!(err.contains("Open VSX"), "{bad:?}: {err}");
+        }
     }
 
     fn write_manifest(dir: &Path, json: &str) {

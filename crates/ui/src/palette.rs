@@ -48,6 +48,8 @@ pub enum Command {
     GitCommit,
     NewFile,
     NewFolder,
+    OpenFile,
+    OpenFolder,
     SaveAll,
     CloseAllTabs,
     RenameItem,
@@ -76,7 +78,7 @@ pub enum Command {
 
 impl Command {
     /// Every command shown in the palette. Only things that really work are listed.
-    pub const ALL: [Command; 59] = [
+    pub const ALL: [Command; 61] = [
         Command::CommandPalette,
         Command::QuickOpen,
         Command::Save,
@@ -112,6 +114,8 @@ impl Command {
         Command::GitCommit,
         Command::NewFile,
         Command::NewFolder,
+        Command::OpenFile,
+        Command::OpenFolder,
         Command::SaveAll,
         Command::CloseAllTabs,
         Command::RenameItem,
@@ -175,6 +179,8 @@ impl Command {
             Command::GitCommit => "Git: Commit Staged Changes",
             Command::NewFile => "File: New File...",
             Command::NewFolder => "File: New Folder...",
+            Command::OpenFile => "File: Open File...",
+            Command::OpenFolder => "File: Open Folder...",
             Command::SaveAll => "File: Save All",
             Command::CloseAllTabs => "File: Close All Tabs",
             Command::RenameItem => "File: Rename...",
@@ -212,6 +218,8 @@ impl Command {
         match self {
             Command::CommandPalette => Some("Ctrl+Shift+P"),
             Command::QuickOpen => Some("Ctrl+P"),
+            Command::OpenFile => Some("Ctrl+O"),
+            Command::OpenFolder => Some("Ctrl+K Ctrl+O"),
             Command::Save => Some("Ctrl+S"),
             Command::CloseTab => Some("Ctrl+W"),
             Command::NextTab => Some("Ctrl+Tab"),

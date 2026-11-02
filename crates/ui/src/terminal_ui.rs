@@ -29,6 +29,7 @@ pub struct TerminalSession {
     /// IME pre-edit text shown at the cursor; it only reaches the shell when committed.
     pub preedit: Option<String>,
     selecting: bool,
+    pub ext_id: Option<String>,
 }
 
 /// Where the terminal grid was last painted, shared with the paint closure.
@@ -105,6 +106,7 @@ impl Workbench {
                     name: format!("terminal {}", self.term_counter),
                     preedit: None,
                     selecting: false,
+                    ext_id: None,
                 });
                 self.active_terminal = self.terminals.len() - 1;
             }
@@ -113,6 +115,48 @@ impl Workbench {
                 self.model.terminal_focused = false;
             }
         }
+    }
+
+    pub fn spawn_terminal_ext(
+        &mut self,
+        ext_id: Option<String>,
+        name: Option<String>,
+        shell_path: Option<String>,
+        shell_args: Option<Vec<String>>,
+        cwd: Option<std::path::PathBuf>,
+    ) {
+        let (cols, rows) = self.grid_size();
+        let target_cwd = cwd.unwrap_or_else(|| self.model.root.clone());
+        let mut opts = TerminalOptions::new(target_cwd, cols, rows);
+        opts.cell_width = self.term_metrics.cell_width.get() as u16;
+        opts.cell_height = LINE_HEIGHT as u16;
+        if let Some(cmd) = shell_path {
+            opts.shell = Some((cmd, shell_args.unwrap_or_default()));
+        }
+        match Terminal::spawn(opts) {
+            Ok(term) => {
+                self.term_counter += 1;
+                let term_name = name.unwrap_or_else(|| format!("terminal {}", self.term_counter));
+                self.terminals.push(TerminalSession {
+                    term,
+                    name: term_name,
+                    preedit: None,
+                    selecting: false,
+                    ext_id,
+                });
+                self.active_terminal = self.terminals.len() - 1;
+            }
+            Err(e) => {
+                self.model.message = Some(format!("Cannot start terminal: {e}"));
+                self.model.terminal_focused = false;
+            }
+        }
+    }
+
+    pub fn find_terminal_by_ext_id(&self, id: &str) -> Option<usize> {
+        self.terminals
+            .iter()
+            .position(|t| t.ext_id.as_deref() == Some(id))
     }
 
     /// Close terminal `index`; dropping the session kills its shell.
@@ -383,6 +427,7 @@ impl Workbench {
     // ---- rendering ----------------------------------------------------------------------------
 
     /// Tabs of the open terminals plus a "+" button.
+    #[allow(dead_code)]
     pub(crate) fn terminal_strip(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         div()
             .flex()
@@ -454,6 +499,150 @@ impl Workbench {
                         this.apply_command(Command::NewTerminal, window, cx);
                     }))
                     .child("+ New"),
+            )
+    }
+
+    /// Vertical terminal tabs displayed when multiple terminals are open.
+    pub(crate) fn terminal_side_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let items: Vec<AnyElement> = self
+            .terminals
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let active = i == self.active_terminal;
+                let title = s.term.title();
+                let name = if title.is_empty() {
+                    s.name.clone()
+                } else {
+                    title
+                };
+                let display_name = match s.term.exit_code() {
+                    Some(c) => format!("{name} (exit {c})"),
+                    None => name,
+                };
+                div()
+                    .id(("term-side-item", i))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .h(px(26.))
+                    .px_2()
+                    .cursor_pointer()
+                    .when(active, |d| {
+                        d.bg(rgb(theme::SELECTED))
+                            .text_color(rgb(theme::TEXT))
+                    })
+                    .when(!active, |d| {
+                        d.text_color(rgb(theme::TEXT_DIM))
+                            .hover(|s| s.bg(rgb(theme::HOVER)).text_color(rgb(theme::TEXT)))
+                    })
+                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                        this.active_terminal = i;
+                        this.focus_target(Target::Terminal, window);
+                        cx.notify();
+                    }))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .child(
+                                div()
+                                    .px(px(2.))
+                                    .py(px(1.))
+                                    .rounded_xs()
+                                    .border_1()
+                                    .border_color(rgb(theme::BORDER))
+                                    .font_family(FONT_FAMILY)
+                                    .text_size(px(10.))
+                                    .child(">_"),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(12.))
+                                    .whitespace_nowrap()
+                                    .overflow_hidden()
+                                    .child(SharedString::from(display_name)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .id(("term-side-close", i))
+                            .px_1()
+                            .rounded_sm()
+                            .text_size(px(12.))
+                            .text_color(rgb(theme::TEXT_DIM))
+                            .hover(|s| s.bg(rgb(theme::HOVER)).text_color(rgb(theme::TEXT)))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                cx.stop_propagation();
+                                this.close_terminal(i);
+                                this.sync_focus(window);
+                                cx.notify();
+                            }))
+                            .child("×"),
+                    )
+                    .into_any_element()
+            })
+            .collect();
+
+        div()
+            .flex()
+            .flex_col()
+            .flex_none()
+            .w(px(140.))
+            .h_full()
+            .bg(rgb(theme::SIDEBAR))
+            .border_l_1()
+            .border_color(rgb(theme::BORDER))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap_1()
+                    .px_2()
+                    .h(px(24.))
+                    .border_b_1()
+                    .border_color(rgb(theme::BORDER))
+                    .child(
+                        div()
+                            .id("term-side-new")
+                            .px_1()
+                            .rounded_sm()
+                            .cursor_pointer()
+                            .text_size(px(12.))
+                            .text_color(rgb(theme::TEXT_DIM))
+                            .hover(|s| s.bg(rgb(theme::HOVER)).text_color(rgb(theme::TEXT)))
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.apply_command(Command::NewTerminal, window, cx);
+                            }))
+                            .child("+"),
+                    )
+                    .child(
+                        div()
+                            .id("term-side-kill")
+                            .px_1()
+                            .rounded_sm()
+                            .cursor_pointer()
+                            .text_size(px(12.))
+                            .text_color(rgb(theme::TEXT_DIM))
+                            .hover(|s| s.bg(rgb(theme::HOVER)).text_color(rgb(theme::TEXT)))
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.apply_command(Command::KillTerminal, window, cx);
+                            }))
+                            .child("🗑"),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h_0()
+                    .py_1()
+                    .children(items),
             )
     }
 

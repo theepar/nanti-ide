@@ -6,12 +6,12 @@ use std::time::SystemTime;
 
 use editor_core::Editor;
 
-use crate::extensions::Extension;
+use crate::extensions::{ExtDetail, Extension, MarketplaceExtension};
 use crate::find::{FindFocus, FindState};
 use crate::layout::Layout;
 use crate::menu::MenuKind;
 use crate::output::OutputLog;
-use crate::palette::{Command, Palette, PaletteAction, PaletteMode};
+use crate::palette::{Command, Palette, PaletteAction, PaletteMode, TextField};
 use crate::problems::Problems;
 use crate::scm::{DiffState, DiffView, Job, ScmState};
 use crate::search::SearchState;
@@ -155,6 +155,38 @@ pub enum SaveOutcome {
     Failed(String),
 }
 
+/// A native file/folder dialog the UI layer must show. The model only records the request so it
+/// stays free of windowing code (and tests never open a dialog).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickRequest {
+    File,
+    Folder,
+    Vsix,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DocSyncEvent {
+    Open {
+        uri: String,
+        language_id: String,
+        version: u64,
+        text: String,
+    },
+    Change {
+        uri: String,
+        version: u64,
+        text: String,
+    },
+    Save {
+        uri: String,
+    },
+    Close {
+        uri: String,
+    },
+    /// The workspace folder changed: language servers started for the old folder must be stopped.
+    Reset,
+}
+
 /// Something only the UI layer can do (it owns the PTYs); raised by commands, consumed by the UI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminalRequest {
@@ -182,6 +214,9 @@ pub struct Model {
     pub scm: ScmState,
     /// Explorer entry the file commands act on.
     pub explorer_sel: Option<PathBuf>,
+    /// Bumped whenever the IDE itself changes the file tree (create, rename, delete, refresh) so
+    /// the UI's cached listing is rebuilt at once instead of waiting for its time limit.
+    pub explorer_gen: u64,
     pub menu_open: Option<MenuKind>,
     pub context_menu: Option<ContextMenu>,
     pub output: OutputLog,
@@ -196,8 +231,46 @@ pub struct Model {
     pub clipboard_request: Option<String>,
     /// A command asked the application to quit.
     pub quit_request: bool,
+    /// A native dialog the UI layer must show (see [`PickRequest`]).
+    pub pick_request: Option<PickRequest>,
+    /// The app serves `pick_request`s with native dialogs. Off (the default) in tests, where
+    /// "Install from VSIX" falls back to a text prompt and Open File/Folder do nothing.
+    pub native_dialogs: bool,
     /// Command line the UI layer must type into the terminal.
     pub terminal_run: Option<String>,
+    pub doc_sync_events: Vec<DocSyncEvent>,
+    pub ext_query: TextField,
+    pub ext_query_focused: bool,
+    pub marketplace_results: Vec<MarketplaceExtension>,
+    pub marketplace_searching: bool,
+    pub marketplace_message: Option<String>,
+    /// The query whose answer is shown, so "no results" differs from "never searched".
+    pub marketplace_query: Option<String>,
+    /// The listed extensions are the recommendations, not the answer to a search.
+    pub marketplace_recommended: bool,
+    /// The recommendations were requested once already (a failure is retried by Refresh).
+    pub(crate) recommend_tried: bool,
+    /// The app (not a test) may use the network for the marketplace.
+    pub marketplace_enabled: bool,
+    /// Download URL of the extension being installed (one at a time).
+    pub installing: Option<String>,
+    /// How much of that download has arrived (updated by the worker thread).
+    pub install_progress: std::sync::Arc<crate::extensions::Progress>,
+    pub(crate) progress_seen: u64,
+    /// Local icon files of marketplace extensions (downloaded in the background), by id.
+    pub ext_icons: std::collections::HashMap<String, PathBuf>,
+    pub(crate) icons_requested: std::collections::HashSet<String>,
+    pub(crate) icon_tx: std::sync::mpsc::Sender<(String, PathBuf)>,
+    pub(crate) icon_rx: std::sync::mpsc::Receiver<(String, PathBuf)>,
+    /// The extension whose detail page is shown in the editor area.
+    pub ext_detail: Option<ExtDetail>,
+    pub(crate) readme_rx: Option<
+        std::sync::mpsc::Receiver<(String, Result<crate::extensions::ExtExtra, String>)>,
+    >,
+    // Search and install run on worker threads; their answers arrive here (`pump_marketplace`).
+    pub(crate) marketplace_rx:
+        Option<std::sync::mpsc::Receiver<Result<Vec<MarketplaceExtension>, String>>>,
+    pub(crate) install_rx: Option<std::sync::mpsc::Receiver<Result<Extension, String>>>,
     pub(crate) outline_cache: std::cell::RefCell<Option<(PathBuf, u64, Vec<syntax::Symbol>)>>,
     /// Last user-visible status ("Saved x", "Save failed: ...").
     pub message: Option<String>,
@@ -207,9 +280,11 @@ impl Model {
     pub fn new(root: PathBuf) -> Self {
         let mut expanded = BTreeSet::new();
         expanded.insert(root.clone());
+        let (icon_tx, icon_rx) = std::sync::mpsc::channel();
         Self {
             scm: ScmState::new(root.clone()),
             explorer_sel: None,
+            explorer_gen: 0,
             menu_open: None,
             context_menu: None,
             output: OutputLog::new(),
@@ -220,7 +295,30 @@ impl Model {
             panel_extension: None,
             clipboard_request: None,
             quit_request: false,
+            pick_request: None,
+            native_dialogs: false,
             terminal_run: None,
+            doc_sync_events: Vec::new(),
+            ext_query: TextField::default(),
+            ext_query_focused: false,
+            marketplace_results: Vec::new(),
+            marketplace_searching: false,
+            marketplace_message: None,
+            marketplace_query: None,
+            marketplace_recommended: false,
+            recommend_tried: false,
+            marketplace_enabled: false,
+            installing: None,
+            install_progress: std::sync::Arc::new(crate::extensions::Progress::default()),
+            progress_seen: 0,
+            ext_icons: std::collections::HashMap::new(),
+            icons_requested: std::collections::HashSet::new(),
+            icon_tx,
+            icon_rx,
+            ext_detail: None,
+            readme_rx: None,
+            marketplace_rx: None,
+            install_rx: None,
             outline_cache: std::cell::RefCell::new(None),
             root,
             expanded,
@@ -237,6 +335,23 @@ impl Model {
             search: SearchState::new(),
             message: None,
         }
+    }
+
+    /// The file tree changed on disk through us: drop any cached listing.
+    pub fn invalidate_explorer(&mut self) {
+        self.explorer_gen = self.explorer_gen.wrapping_add(1);
+    }
+
+    /// Cheap fingerprint of everything `visible_entries` depends on besides the disk itself.
+    pub fn explorer_signature(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.root.hash(&mut h);
+        self.explorer_gen.hash(&mut h);
+        for p in &self.expanded {
+            p.hash(&mut h);
+        }
+        h.finish()
     }
 
     /// Flattened, ordered list of what the explorer shows (directories first, then by name).
@@ -299,8 +414,33 @@ impl Model {
         }
     }
 
+    /// Open a new workspace root directory.
+    pub fn open_folder(&mut self, folder: PathBuf) {
+        if !folder.is_dir() {
+            return;
+        }
+        self.root = folder.clone();
+        self.expanded.clear();
+        self.expanded.insert(folder.clone());
+        self.scm = ScmState::new(folder.clone());
+        self.scm.enable();
+        self.outline_cache = std::cell::RefCell::new(None);
+        // Tell the language servers / extension host about every document that goes away, then
+        // restart the servers for the new root. Otherwise they keep the old folder's files (and
+        // memory) alive and diagnose against the wrong project.
+        for t in self.tabs.iter().filter(|t| !t.is_dirty()) {
+            let uri = format!("file:///{}", t.path.to_string_lossy().replace('\\', "/"));
+            self.doc_sync_events.push(DocSyncEvent::Close { uri });
+        }
+        self.doc_sync_events.push(DocSyncEvent::Reset);
+        self.tabs.retain(|t| t.is_dirty());
+        self.active_tab = if self.tabs.is_empty() { None } else { Some(0) };
+        self.message = Some(format!("Opened folder {}", self.root.display()));
+    }
+
     /// Open `path` in a tab (or focus the existing tab). Never loads huge/binary files.
     pub fn open_file(&mut self, path: &Path) {
+        self.ext_detail = None;
         if let Some(i) = self
             .tabs
             .iter()
@@ -313,16 +453,38 @@ impl Model {
             || path.display().to_string(),
             |n| n.to_string_lossy().into_owned(),
         );
+        let content = load(path);
+        if let TabContent::Text(e) = &content {
+            let uri = format!("file:///{}", path.to_string_lossy().replace('\\', "/"));
+            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+            let lang = match ext {
+                "rs" => "rust",
+                "go" => "go",
+                "js" | "mjs" | "cjs" => "javascript",
+                "ts" => "typescript",
+                "json" => "json",
+                "md" => "markdown",
+                "dart" => "dart",
+                _ => "plaintext",
+            };
+            self.doc_sync_events.push(DocSyncEvent::Open {
+                uri,
+                language_id: lang.to_owned(),
+                version: e.version(),
+                text: e.text(),
+            });
+        }
         self.tabs.push(Tab {
             path: path.to_path_buf(),
             title,
-            content: load(path),
+            content,
             stamp: DiskStamp::of(path),
         });
         self.active_tab = Some(self.tabs.len() - 1);
     }
 
     pub fn activate_tab(&mut self, index: usize) {
+        self.ext_detail = None;
         if index < self.tabs.len() {
             self.active_tab = Some(index);
         }
@@ -343,7 +505,9 @@ impl Model {
     }
 
     fn remove_tab(&mut self, index: usize) {
-        self.tabs.remove(index);
+        let removed = self.tabs.remove(index);
+        let uri = format!("file:///{}", removed.path.to_string_lossy().replace('\\', "/"));
+        self.doc_sync_events.push(DocSyncEvent::Close { uri });
         self.active_tab = match self.active_tab {
             _ if self.tabs.is_empty() => None,
             Some(a) if a > index => Some(a - 1),
@@ -371,6 +535,7 @@ impl Model {
     /// A conflicted file has no meaningful two-way diff: it opens in the editor so the markers can
     /// be resolved.
     pub fn open_diff(&mut self, rel: &str, staged: bool) {
+        self.ext_detail = None;
         let conflicted = self
             .scm
             .status
@@ -541,6 +706,8 @@ impl Model {
             Ok(()) => {
                 tab.stamp = DiskStamp::of(&tab.path);
                 editor.mark_saved();
+                let uri = format!("file:///{}", tab.path.to_string_lossy().replace('\\', "/"));
+                self.doc_sync_events.push(DocSyncEvent::Save { uri });
                 let saved = format!("Saved {}", tab.title);
                 self.output.push("Files", &saved);
                 self.message = Some(saved);
@@ -765,6 +932,7 @@ impl Model {
             Command::CopyPath => self.cmd_copy_path(),
             Command::RevealInOs => self.cmd_reveal(),
             Command::RefreshExplorer => {
+                self.invalidate_explorer();
                 self.scm.refresh();
                 self.say("Explorer", "Refreshed");
             }
@@ -777,6 +945,8 @@ impl Model {
             Command::RunTask => self.show_activity(Activity::Run),
             Command::About => self.open_about(),
             Command::Exit => self.quit_request = true,
+            Command::OpenFile => self.cmd_open_file(),
+            Command::OpenFolder => self.cmd_open_folder(),
             Command::GitStageAll => self.scm.stage_all(),
             Command::GitUnstageAll => self.scm.unstage_all(),
             Command::GitCommit => {
@@ -913,6 +1083,7 @@ impl Model {
         self.search.focused = false;
         self.scm.focused = false;
         self.terminal_focused = false;
+        self.ext_query_focused = false;
     }
 
     /// After the find query or its options changed: refresh and jump to the nearest match.
@@ -1174,6 +1345,127 @@ mod tests {
         let m = Model::new(ws.0.clone());
         let n = names(&m);
         assert_eq!(n[1..], ["  src/", "  A.md", "  b.txt", "  blob.bin"]);
+    }
+
+    #[test]
+    fn recommendations_are_requested_only_by_the_app_and_only_in_the_extensions_view() {
+        let ws = workspace("rec");
+        let mut m = Model::new(ws.0.clone());
+        m.activity = Activity::Extensions;
+        assert!(!m.pump_marketplace(), "tests never touch the network");
+        assert!(m.marketplace_rx.is_none() && !m.marketplace_searching);
+
+        m.marketplace_enabled = true;
+        m.activity = Activity::Explorer;
+        assert!(!m.pump_marketplace(), "nothing to fetch outside the Extensions view");
+        assert!(m.marketplace_rx.is_none());
+
+        // Once recommended (or failed), it is not requested again until Refresh clears the flag.
+        m.activity = Activity::Extensions;
+        m.recommend_tried = true;
+        assert!(!m.pump_marketplace());
+        assert!(m.marketplace_rx.is_none());
+    }
+
+    #[test]
+    fn marketplace_answers_arrive_through_the_pump_without_blocking() {
+        use std::sync::mpsc::channel;
+        let ws = workspace("mkt");
+        let mut m = Model::new(ws.0.clone());
+        let (tx, rx) = channel();
+        m.marketplace_rx = Some(rx);
+        m.marketplace_searching = true;
+        m.marketplace_query = Some("rust".into());
+        assert!(!m.pump_marketplace(), "nothing has arrived yet");
+        assert!(m.marketplace_searching);
+
+        tx.send(Ok(vec![MarketplaceExtension {
+            id: "a.b".into(),
+            name: "b".into(),
+            publisher: "a".into(),
+            display_name: "B".into(),
+            version: "1.0.0".into(),
+            description: String::new(),
+            download_url: "https://open-vsx.org/x.vsix".into(),
+            icon_url: None,
+            readme_url: None,
+            downloads: 0,
+            rating: None,
+            rating_count: 0,
+            updated: None,
+        }]))
+        .unwrap();
+        assert!(m.pump_marketplace());
+        assert!(!m.marketplace_searching);
+        assert_eq!(m.marketplace_results.len(), 1);
+
+        let (tx, rx) = channel();
+        m.marketplace_rx = Some(rx);
+        tx.send(Err("offline".to_owned())).unwrap();
+        assert!(m.pump_marketplace());
+        assert_eq!(m.marketplace_message.as_deref(), Some("offline"));
+
+        // a worker that died without answering must not leave "Searching..." on screen forever
+        let (tx, rx) = channel::<Result<Vec<MarketplaceExtension>, String>>();
+        drop(tx);
+        m.marketplace_searching = true;
+        m.marketplace_rx = Some(rx);
+        assert!(m.pump_marketplace());
+        assert!(!m.marketplace_searching);
+        assert!(m.marketplace_message.as_deref().is_some_and(|t| t.contains("unexpectedly")));
+
+        // an empty query clears everything and forgets the old answer
+        m.search_marketplace("   ");
+        assert!(m.marketplace_results.is_empty() && m.marketplace_query.is_none());
+        assert!(m.marketplace_message.is_none());
+    }
+
+    #[test]
+    fn explorer_signature_changes_with_expansion_root_and_file_operations() {
+        let a = workspace("sig-a");
+        let b = workspace("sig-b");
+        let mut m = Model::new(a.0.clone());
+        let base = m.explorer_signature();
+        assert_eq!(base, m.explorer_signature(), "stable while nothing changes");
+        m.toggle_dir(&a.0.join("src"));
+        let expanded = m.explorer_signature();
+        assert_ne!(base, expanded);
+        m.invalidate_explorer();
+        let invalidated = m.explorer_signature();
+        assert_ne!(expanded, invalidated);
+        m.open_folder(b.0.clone());
+        assert_ne!(invalidated, m.explorer_signature());
+    }
+
+    #[test]
+    fn creating_through_the_model_invalidates_the_listing() {
+        let ws = workspace("gen");
+        let mut m = Model::new(ws.0.clone());
+        let g0 = m.explorer_gen;
+        m.submit_input(crate::palette::InputKind::NewFile(ws.0.clone()), "fresh.txt")
+            .unwrap();
+        assert!(m.explorer_gen > g0, "create must invalidate the cached listing");
+        assert!(names(&m).contains(&"  fresh.txt".to_string()));
+    }
+
+    #[test]
+    fn switching_folder_closes_old_documents_and_resets_language_servers() {
+        let a = workspace("switch-a");
+        let b = workspace("switch-b");
+        let mut m = Model::new(a.0.clone());
+        m.open_file(&a.0.join("b.txt"));
+        m.doc_sync_events.clear(); // ignore the Open event
+        m.open_folder(b.0.clone());
+        let uri = format!(
+            "file:///{}",
+            a.0.join("b.txt").to_string_lossy().replace('\\', "/")
+        );
+        assert_eq!(
+            m.doc_sync_events,
+            [DocSyncEvent::Close { uri }, DocSyncEvent::Reset]
+        );
+        assert!(m.tabs.is_empty());
+        assert_eq!(m.root, b.0);
     }
 
     #[test]

@@ -80,4 +80,27 @@ impl Problems {
         self.files = files;
         changed
     }
+
+    /// Update diagnostics from a real Language Server (rust-analyzer, gopls, etc).
+    pub fn update_lsp_diagnostics(&mut self, path: PathBuf, title: String, items: Vec<Diagnostic>) -> bool {
+        let entry = self.cache.entry(path.clone()).or_insert_with(|| Entry {
+            version: 0,
+            seen: 0,
+            seen_at: Instant::now(),
+            items: Vec::new(),
+        });
+        entry.items = items.clone();
+        if items.is_empty() {
+            self.files.retain(|f| f.path != path);
+        } else if let Some(f) = self.files.iter_mut().find(|f| f.path == path) {
+            f.items = items;
+        } else {
+            self.files.push(ProblemFile {
+                path,
+                title,
+                items,
+            });
+        }
+        true
+    }
 }

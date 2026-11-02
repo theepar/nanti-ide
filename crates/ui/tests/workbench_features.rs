@@ -489,7 +489,7 @@ fn every_menu_command_runs_without_panicking() {
     for kind in MenuKind::ALL {
         for it in items(kind) {
             if let ui::menu::MenuItem::Command(c) = it {
-                if matches!(c, Command::Exit | Command::RevealInOs) {
+                if matches!(c, Command::Exit | Command::RevealInOs | Command::OpenFile | Command::OpenFolder) {
                     continue; // quits / opens the OS file manager
                 }
                 m.close_palette();

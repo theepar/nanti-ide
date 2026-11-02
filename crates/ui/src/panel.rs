@@ -28,6 +28,25 @@ pub enum UiEvent {
         id: String,
         url: String,
     },
+    TerminalCreate {
+        id: String,
+        name: String,
+        shell_path: Option<String>,
+        shell_args: Option<Vec<String>>,
+        cwd: Option<PathBuf>,
+    },
+    TerminalSendText {
+        id: String,
+        text: String,
+        add_new_line: bool,
+    },
+    TerminalShow {
+        id: String,
+        preserve_focus: bool,
+    },
+    TerminalDispose {
+        id: String,
+    },
     StatusItem {
         id: String,
         visible: bool,
@@ -40,6 +59,23 @@ pub enum UiEvent {
 pub enum HostCommand {
     WebviewMessage(Value),
     ResolveExternal { id: String, approved: bool },
+    DocOpen {
+        uri: String,
+        language_id: String,
+        version: u64,
+        text: String,
+    },
+    DocChange {
+        uri: String,
+        version: u64,
+        text: String,
+    },
+    DocSave {
+        uri: String,
+    },
+    DocClose {
+        uri: String,
+    },
     Shutdown,
 }
 
@@ -185,6 +221,31 @@ impl Panel {
             .send(HostCommand::ResolveExternal { id, approved });
     }
 
+    pub fn doc_open(&self, uri: String, language_id: String, version: u64, text: String) {
+        let _ = self.to_host.send(HostCommand::DocOpen {
+            uri,
+            language_id,
+            version,
+            text,
+        });
+    }
+
+    pub fn doc_change(&self, uri: String, version: u64, text: String) {
+        let _ = self.to_host.send(HostCommand::DocChange {
+            uri,
+            version,
+            text,
+        });
+    }
+
+    pub fn doc_save(&self, uri: String) {
+        let _ = self.to_host.send(HostCommand::DocSave { uri });
+    }
+
+    pub fn doc_close(&self, uri: String) {
+        let _ = self.to_host.send(HostCommand::DocClose { uri });
+    }
+
     /// Apply pending host events; returns the ones the UI itself must show (status items and consent requests).
     pub fn pump(&mut self) -> Vec<UiEvent> {
         let mut ui = Vec::new();
@@ -201,7 +262,12 @@ impl Panel {
                         .load_url(&format!("{ORIGIN}/html?v={}", self.html_version));
                 }
                 UiEvent::Message(m) => self.queued.push(m),
-                other @ (UiEvent::StatusItem { .. } | UiEvent::OpenExternal { .. }) => {
+                other @ (UiEvent::StatusItem { .. }
+                | UiEvent::OpenExternal { .. }
+                | UiEvent::TerminalCreate { .. }
+                | UiEvent::TerminalSendText { .. }
+                | UiEvent::TerminalShow { .. }
+                | UiEvent::TerminalDispose { .. }) => {
                     ui.push(other)
                 }
             }
@@ -300,6 +366,29 @@ fn run_worker(
                     selftest_log(log, &format!("webview -> host: {m}"));
                     pending_webview.push(host.send_webview_message_deferred(&handle, m)?);
                 }
+                HostCommand::DocOpen {
+                    uri,
+                    language_id,
+                    version,
+                    text,
+                } => {
+                    let _ = host.request(
+                        "workspace.didOpenTextDocument",
+                        json!({ "uri": uri, "languageId": language_id, "version": version, "text": text }),
+                    )?;
+                }
+                HostCommand::DocChange { uri, version, text } => {
+                    let _ = host.request(
+                        "workspace.didChangeTextDocument",
+                        json!({ "uri": uri, "version": version, "text": text }),
+                    )?;
+                }
+                HostCommand::DocSave { uri } => {
+                    let _ = host.request("workspace.didSaveTextDocument", json!({ "uri": uri }))?;
+                }
+                HostCommand::DocClose { uri } => {
+                    let _ = host.request("workspace.didCloseTextDocument", json!({ "uri": uri }))?;
+                }
             }
         }
         let mut index = 0;
@@ -352,6 +441,44 @@ fn run_worker(
                     visible: n.params["visible"].as_bool().unwrap_or(false),
                     text: n.params["text"].as_str().unwrap_or_default().to_owned(),
                 });
+            }
+            "terminal.create" => {
+                let id = n.params["id"].as_str().unwrap_or_default().to_owned();
+                let name = n.params["name"].as_str().unwrap_or("Terminal").to_owned();
+                let shell_path = n.params["shellPath"].as_str().map(str::to_owned);
+                let shell_args = n.params["shellArgs"].as_array().map(|a| {
+                    a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect()
+                });
+                let cwd = n.params["cwd"].as_str().map(PathBuf::from);
+                let _ = ui.send(UiEvent::TerminalCreate {
+                    id,
+                    name,
+                    shell_path,
+                    shell_args,
+                    cwd,
+                });
+            }
+            "terminal.sendText" => {
+                let id = n.params["id"].as_str().unwrap_or_default().to_owned();
+                let text = n.params["text"].as_str().unwrap_or_default().to_owned();
+                let add_new_line = n.params["addNewLine"].as_bool().unwrap_or(true);
+                let _ = ui.send(UiEvent::TerminalSendText {
+                    id,
+                    text,
+                    add_new_line,
+                });
+            }
+            "terminal.show" => {
+                let id = n.params["id"].as_str().unwrap_or_default().to_owned();
+                let preserve_focus = n.params["preserveFocus"].as_bool().unwrap_or(false);
+                let _ = ui.send(UiEvent::TerminalShow {
+                    id,
+                    preserve_focus,
+                });
+            }
+            "terminal.dispose" => {
+                let id = n.params["id"].as_str().unwrap_or_default().to_owned();
+                let _ = ui.send(UiEvent::TerminalDispose { id });
             }
             "window.showInformationMessage" => {
                 let msg = n.params["message"].as_str().unwrap_or_default();

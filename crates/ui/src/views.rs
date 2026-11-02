@@ -3,17 +3,179 @@
 //! command or model operation; nothing here is decorative.
 
 use gpui::{
-    AnyElement, Bounds, ClickEvent, Context, IntoElement, MouseButton, MouseDownEvent, Pixels,
-    ScrollHandle, SharedString, Window, canvas, div, fill, point, prelude::*, px, rgb, size,
+    AnyElement, Bounds, ClickEvent, Context, FontWeight, IntoElement, MouseButton, MouseDownEvent, Pixels,
+    ObjectFit, ScrollHandle, SharedString, Window, WindowControlArea, canvas, div, fill, img, point,
+    prelude::*, px, rgb, size,
 };
 
+use crate::assets;
 use crate::menu::{self, MenuItem, MenuKind};
 use crate::model::PanelTab;
 use crate::palette::Command;
-use crate::{MENU_BAR_HEIGHT, Workbench, theme};
+use crate::{MENU_BAR_HEIGHT, Target, Workbench, theme};
 
-const BRAND_W: f32 = 58.0;
-const MENU_W: f32 = 236.0;
+
+/// 1234 -> "1K", 1_500_000 -> "1.5M".
+fn short_count(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.0}K", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
+}
+
+/// Index just after the `)` that completes a Markdown link starting at `open` (a `[`).
+fn parse_link(b: &[char], open: usize) -> Option<(String, usize)> {
+    let mut depth = 0usize;
+    let mut close = None;
+    for (i, c) in b.iter().enumerate().skip(open) {
+        match c {
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    close = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let close = close?;
+    if b.get(close + 1) != Some(&'(') {
+        return None;
+    }
+    let end = b[close + 1..].iter().position(|c| *c == ')')? + close + 2;
+    let text: String = b[open + 1..close].iter().collect();
+    Some((text, end))
+}
+
+/// Plain text of one README line: HTML tags, images and emphasis marks removed, links kept as text.
+fn strip_markup(s: &str) -> String {
+    let b: Vec<char> = s.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            '<' => {
+                if let Some(j) = b[i..].iter().position(|c| *c == '>') {
+                    i += j + 1;
+                    continue;
+                }
+                out.push('<');
+            }
+            '!' if b.get(i + 1) == Some(&'[') => {
+                if let Some((_, end)) = parse_link(&b, i + 1) {
+                    i = end;
+                    continue;
+                }
+                out.push('!');
+            }
+            '[' => {
+                if let Some((text, end)) = parse_link(&b, i) {
+                    out.push_str(&strip_markup(&text));
+                    i = end;
+                    continue;
+                }
+                out.push('[');
+            }
+            '*' | '`' => {}
+            c => out.push(c),
+        }
+        i += 1;
+    }
+    out
+}
+
+/// A README as readable blocks: headings, bullets, code and paragraphs (no full Markdown).
+fn readme_blocks(text: &str) -> Vec<AnyElement> {
+    let mut out: Vec<AnyElement> = Vec::new();
+    let (mut in_code, mut in_comment) = (false, false);
+    for raw in text.lines().take(400) {
+        let line = raw.trim_end();
+        if line.trim_start().starts_with("```") {
+            in_code = !in_code;
+            continue;
+        }
+        if in_code {
+            out.push(
+                div()
+                    .px_2()
+                    .bg(rgb(0x1e1e1e))
+                    .font_family(crate::FONT_FAMILY)
+                    .text_size(px(12.))
+                    .whitespace_nowrap()
+                    .overflow_hidden()
+                    .child(SharedString::from(line.to_owned()))
+                    .into_any_element(),
+            );
+            continue;
+        }
+        if in_comment {
+            in_comment = !line.contains("-->");
+            continue;
+        }
+        if line.contains("<!--") && !line.contains("-->") {
+            in_comment = true;
+            continue;
+        }
+        let clean = strip_markup(line);
+        let t = clean.trim();
+        if t.is_empty() {
+            out.push(div().h(px(8.)).into_any_element());
+            continue;
+        }
+        let level = t.chars().take_while(|c| *c == '#').count();
+        if (1..=6).contains(&level) && t[level..].starts_with(' ') {
+            let size = match level {
+                1 => 22.,
+                2 => 18.,
+                3 => 15.,
+                _ => 13.,
+            };
+            out.push(
+                div()
+                    .pt_2()
+                    .pb_1()
+                    .text_size(px(size))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .when(level <= 2, |d| d.border_b_1().border_color(rgb(theme::BORDER)))
+                    .child(SharedString::from(t[level..].trim().to_owned()))
+                    .into_any_element(),
+            );
+        } else if let Some(rest) = t.strip_prefix("- ").or_else(|| t.strip_prefix("* ")) {
+            out.push(
+                div()
+                    .flex()
+                    .gap_2()
+                    .pl_3()
+                    .text_size(px(13.))
+                    .child("•")
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(SharedString::from(rest.to_owned())),
+                    )
+                    .into_any_element(),
+            );
+        } else {
+            out.push(
+                div()
+                    .text_size(px(13.))
+                    .text_color(rgb(0xcfcfcf))
+                    .child(SharedString::from(t.to_owned()))
+                    .into_any_element(),
+            );
+        }
+    }
+    out
+}
+
+const BRAND_W: f32 = 38.0; // left padding (12) + logo (14) + gap (12)
+const MENU_W: f32 = 260.0;
 
 fn button_w(kind: MenuKind) -> f32 {
     kind.title().chars().count() as f32 * 7.2 + 22.0
@@ -158,12 +320,28 @@ impl Workbench {
 
     // ---- menu bar -------------------------------------------------------------------------------
 
-    pub(crate) fn menu_bar(&self, cx: &mut Context<Self>) -> AnyElement {
-        let root_name = self
-            .model
-            .root
-            .file_name()
-            .map_or_else(|| "nanti.".to_owned(), |n| n.to_string_lossy().into_owned());
+    /// One Windows-style caption button (minimize / maximize / close). The click itself is done by
+    /// the platform: `window_control_area` makes the hit test report the matching caption button.
+    fn caption_button(
+        id: &'static str,
+        area: WindowControlArea,
+        icon_name: &'static str,
+        danger: bool,
+    ) -> gpui::Stateful<gpui::Div> {
+        div()
+            .id(id)
+            .window_control_area(area)
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .w(px(46.))
+            .h(px(MENU_BAR_HEIGHT))
+            .hover(move |s| s.bg(rgb(if danger { 0xe81123 } else { theme::HOVER })))
+            .child(assets::icon(icon_name, 14., 0xe6e6e6))
+    }
+
+    pub(crate) fn menu_bar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let open = self.model.menu_open;
         div()
             .flex()
@@ -178,10 +356,13 @@ impl Workbench {
                 div()
                     .w(px(BRAND_W))
                     .flex_none()
+                    .flex()
+                    .items_center()
+                    .h_full()
                     .pl_3()
-                    .text_size(px(13.))
-                    .text_color(rgb(theme::TEXT))
-                    .child("nanti."),
+                    .window_control_area(WindowControlArea::Drag)
+                    // logo only, white (the name is in the window title)
+                    .child(assets::logo_mark(14., 0xffffff)),
             )
             .children(MenuKind::ALL.into_iter().enumerate().map(|(i, k)| {
                 div()
@@ -195,12 +376,12 @@ impl Workbench {
                     .rounded_sm()
                     .cursor_pointer()
                     .text_color(rgb(if open == Some(k) {
-                        theme::TEXT
+                        0xffffff
                     } else {
-                        theme::TEXT_DIM
+                        theme::TEXT
                     }))
                     .when(open == Some(k), |d| d.bg(rgb(theme::SELECTED)))
-                    .hover(|s| s.bg(rgb(theme::HOVER)).text_color(rgb(theme::TEXT)))
+                    .hover(|s| s.bg(rgb(theme::HOVER)).text_color(rgb(0xffffff)))
                     .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
                         if this.model.menu_open == Some(k) {
                             this.model.close_menus();
@@ -221,16 +402,13 @@ impl Workbench {
                     }))
                     .child(k.title())
             }))
+            // the free stretch of the bar moves the window (one bar instead of title bar + menu bar)
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
-                    .flex()
-                    .justify_center()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_color(rgb(theme::TEXT_DIM))
-                    .child(SharedString::from(format!("{root_name} — nanti."))),
+                    .h_full()
+                    .window_control_area(WindowControlArea::Drag),
             )
             .child(
                 div()
@@ -239,26 +417,46 @@ impl Workbench {
                     .pr_2()
                     .child(Self::layout_button(
                         "top-toggle-sidebar",
-                        "▤",
+                        "layout-sidebar",
                         self.model.layout.sidebar,
                         Command::ToggleSidebar,
                         cx,
                     ))
                     .child(Self::layout_button(
                         "top-toggle-panel",
-                        "▭",
+                        "layout-panel",
                         self.model.layout.panel,
                         Command::TogglePanel,
                         cx,
                     ))
-                    .child(Self::layout_button(
-                        "top-toggle-right",
-                        "▯",
-                        self.model.layout.right,
-                        Command::ToggleRightPanel,
-                        cx,
-                    )),
+                    .children(self.panel.is_some().then(|| {
+                        Self::layout_button(
+                            "top-toggle-right",
+                            "layout-right",
+                            self.model.layout.right,
+                            Command::ToggleRightPanel,
+                            cx,
+                        )
+                    })),
             )
+            .child(Self::caption_button(
+                "win-min",
+                WindowControlArea::Min,
+                "minimize",
+                false,
+            ))
+            .child(Self::caption_button(
+                "win-max",
+                WindowControlArea::Max,
+                if window.is_maximized() { "restore" } else { "maximize" },
+                false,
+            ))
+            .child(Self::caption_button(
+                "win-close",
+                WindowControlArea::Close,
+                "close",
+                true,
+            ))
             .into_any_element()
     }
 
@@ -282,12 +480,15 @@ impl Workbench {
                     .id((id, i))
                     .flex()
                     .justify_between()
+                    .items_center()
                     .gap_6()
                     .px_3()
-                    .py(px(4.))
+                    .py(px(5.))
+                    .mx_1()
+                    .rounded_sm()
                     .text_size(px(12.))
                     .cursor_pointer()
-                    .hover(|s| s.bg(rgb(theme::ACCENT)).text_color(rgb(0xffffff)))
+                    .hover(|s| s.bg(rgb(theme::HOVER_STRONG)).text_color(rgb(0xffffff)))
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         this.model.close_menus();
                         this.apply_command(c, window, cx);
@@ -364,11 +565,11 @@ impl Workbench {
                         .py_1()
                         .flex()
                         .flex_col()
-                        .bg(rgb(theme::SIDEBAR))
+                        .bg(rgb(theme::MENU_BG))
                         .border_1()
                         .border_color(rgb(theme::BORDER))
                         .rounded_md()
-                        .shadow_lg()
+                        .shadow_xl()
                         .text_color(rgb(theme::TEXT))
                         .children(rows),
                 )
@@ -394,37 +595,59 @@ impl Workbench {
             .child(label)
     }
 
+    /// Square icon-only toolbar button.
+    fn icon_button(id: &'static str, icon_name: &'static str) -> gpui::Stateful<gpui::Div> {
+        div()
+            .id(id)
+            .flex()
+            .items_center()
+            .justify_center()
+            .w(px(26.))
+            .h(px(26.))
+            .rounded_sm()
+            .cursor_pointer()
+            .hover(|s| s.bg(rgb(theme::HOVER)))
+            .child(assets::icon(icon_name, 17., theme::ICON))
+    }
+
     pub(crate) fn explorer_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
         div()
             .flex()
             .flex_none()
-            .flex_wrap()
+            .items_center()
             .gap_1()
             .px_2()
             .pb_1()
             .child(
-                Self::flat_button("ex-new-file", "+ File").on_click(cx.listener(
+                Self::icon_button("ex-open", "folder-open").on_click(cx.listener(
+                    |this, _: &ClickEvent, window, cx| {
+                        this.apply_command(Command::OpenFolder, window, cx)
+                    },
+                )),
+            )
+            .child(
+                Self::icon_button("ex-new-file", "file-plus").on_click(cx.listener(
                     |this, _: &ClickEvent, window, cx| {
                         this.apply_command(Command::NewFile, window, cx)
                     },
                 )),
             )
             .child(
-                Self::flat_button("ex-new-folder", "+ Folder").on_click(cx.listener(
+                Self::icon_button("ex-new-folder", "folder-plus").on_click(cx.listener(
                     |this, _: &ClickEvent, window, cx| {
                         this.apply_command(Command::NewFolder, window, cx)
                     },
                 )),
             )
             .child(
-                Self::flat_button("ex-refresh", "Refresh").on_click(cx.listener(
+                Self::icon_button("ex-refresh", "refresh").on_click(cx.listener(
                     |this, _: &ClickEvent, window, cx| {
                         this.apply_command(Command::RefreshExplorer, window, cx)
                     },
                 )),
             )
             .child(
-                Self::flat_button("ex-collapse", "Collapse").on_click(cx.listener(
+                Self::icon_button("ex-collapse", "collapse").on_click(cx.listener(
                     |this, _: &ClickEvent, window, cx| {
                         this.apply_command(Command::CollapseAll, window, cx)
                     },
@@ -599,20 +822,491 @@ impl Workbench {
             .into_any_element()
     }
 
-    // ---- Extensions view -----------------------------------------------------------------------------
 
-    pub(crate) fn extensions_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// An extension's icon at `size` px: its image when known, else a tile with its initial.
+    fn ext_icon(&self, id: &str, own: Option<&std::path::PathBuf>, label: &str, size: f32) -> AnyElement {
+        let path = own.cloned().or_else(|| self.model.ext_icons.get(id).cloned());
+        match path {
+            Some(p) => img(p)
+                .size(px(size))
+                .flex_none()
+                .rounded_md()
+                .object_fit(ObjectFit::Cover)
+                .into_any_element(),
+            None => div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .size(px(size))
+                .rounded_md()
+                .bg(rgb(0x2d2d2d))
+                .text_size(px(size * 0.45))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(rgb(theme::TEXT_DIM))
+                .child(SharedString::from(
+                    label
+                        .chars()
+                        .find(|c| c.is_alphanumeric())
+                        .map_or_else(String::new, |c| c.to_uppercase().to_string()),
+                ))
+                .into_any_element(),
+        }
+    }
+
+    /// The page shown in the editor area for one extension: icon, name, Install, README, facts.
+    pub(crate) fn ext_detail_page(
+        &self,
+        d: &crate::extensions::ExtDetail,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        use crate::extensions::Readme;
+        let installed = self.model.extensions.iter().find(|e| e.id == d.id);
         let installed_root = self
             .model
             .config_dir
             .as_ref()
             .map(|c| crate::extensions::extensions_dir(c));
-        let rows: Vec<AnyElement> = self
+        let removable = installed
+            .zip(installed_root.as_ref())
+            .is_some_and(|(e, root)| e.dir.parent() == Some(root.as_path()));
+
+        let action: AnyElement = if let Some(x) = installed {
+            let dir = x.dir.clone();
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(rgb(0x81b88b))
+                        .child("Installed"),
+                )
+                .children(removable.then(|| {
+                    Self::flat_button("ext-detail-remove", "Uninstall").on_click(cx.listener(
+                        move |this, _: &ClickEvent, _w, cx| {
+                            this.model.confirm_remove_extension(&dir);
+                            cx.notify();
+                        },
+                    ))
+                }))
+                .into_any_element()
+        } else if let Some(url) = d.download_url.clone() {
+            if self.model.installing.as_deref() == Some(url.as_str()) {
+                div()
+                    .text_size(px(12.))
+                    .text_color(rgb(theme::TEXT_DIM))
+                    .child(SharedString::from(self.model.install_label()))
+                    .into_any_element()
+            } else {
+                div()
+                    .id("ext-detail-install")
+                    .flex()
+                    .items_center()
+                    .h(px(30.))
+                    .px_4()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .bg(rgb(theme::ACCENT))
+                    .text_color(rgb(0x1e1e1e))
+                    .text_size(px(13.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .hover(|s| s.bg(rgb(0xffffff)))
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
+                        this.model.install_from_marketplace(&url);
+                        cx.notify();
+                    }))
+                    .child("Install")
+                    .into_any_element()
+            }
+        } else {
+            div().into_any_element()
+        };
+
+        let fact = |label: &'static str, value: String| {
+            div()
+                .flex()
+                .gap_3()
+                .py(px(3.))
+                .text_size(px(12.))
+                .child(
+                    div()
+                        .flex_none()
+                        .w(px(84.))
+                        .text_color(rgb(theme::TEXT_DIM))
+                        .child(label),
+                )
+                .child(div().flex_1().min_w_0().child(SharedString::from(value)))
+        };
+        let mut facts = div()
+            .flex()
+            .flex_col()
+            .flex_none()
+            .w(px(260.))
+            .p_4()
+            .rounded_lg()
+            .bg(rgb(0x202020))
+            .border_1()
+            .border_color(rgb(theme::BORDER))
+            .child(
+                div()
+                    .pb_2()
+                    .text_size(px(14.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Installation"),
+            )
+            .child(fact("Identifier", d.id.clone()))
+            .child(fact("Version", d.version.clone()));
+        if let Some(n) = d.downloads {
+            facts = facts.child(fact("Downloads", short_count(n)));
+        }
+        if let Some(r) = d.rating.filter(|_| d.rating_count > 0) {
+            facts = facts.child(fact("Rating", format!("{r:.1} / 5  ({})", d.rating_count)));
+        }
+        if let Some(t) = &d.updated {
+            facts = facts.child(fact("Last updated", t.chars().take(10).collect()));
+        }
+        if let Some(l) = &d.license {
+            let short: String = l.chars().take(60).collect();
+            facts = facts.child(fact("License", short));
+        }
+        if !d.categories.is_empty() {
+            facts = facts.child(fact("Categories", d.categories.join(", ")));
+        }
+
+        let readme: Vec<AnyElement> = match &d.readme {
+            Readme::Ready(text) => readme_blocks(text),
+            Readme::Loading => vec![
+                div()
+                    .text_size(px(13.))
+                    .text_color(rgb(theme::TEXT_DIM))
+                    .child("Loading the description...")
+                    .into_any_element(),
+            ],
+            Readme::Failed(e) => vec![
+                div()
+                    .text_size(px(13.))
+                    .text_color(rgb(0xe5534b))
+                    .child(SharedString::from(e.clone()))
+                    .into_any_element(),
+            ],
+            Readme::None => vec![
+                div()
+                    .text_size(px(13.))
+                    .text_color(rgb(theme::TEXT_DIM))
+                    .child("This extension has no description page.")
+                    .into_any_element(),
+            ],
+        };
+
+        let page = div()
+            .id("ext-detail")
+            .size_full()
+            .overflow_y_scroll()
+            .track_scroll(&self.scrolls.ext_detail)
+            .px_8()
+            .py_6()
+            .flex()
+            .flex_col()
+            .gap_5()
+            .child(
+                div()
+                    .flex()
+                    .gap_5()
+                    .items_center()
+                    .child(self.ext_icon(
+                        &d.id,
+                        installed.and_then(|e| e.icon.as_ref()),
+                        &d.display_name,
+                        96.,
+                    ))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_size(px(28.))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(SharedString::from(d.display_name.clone())),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(13.))
+                                    .text_color(rgb(theme::TEXT_DIM))
+                                    .child(SharedString::from(d.publisher.clone())),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(14.))
+                                    .text_color(rgb(0xcfcfcf))
+                                    .child(SharedString::from(d.description.clone())),
+                            )
+                            .child(div().pt_2().flex().child(action)),
+                    ),
+            )
+            // a quiet section label with the one underline, like a tab strip
+            .child(
+                div()
+                    .flex()
+                    .border_b_1()
+                    .border_color(rgb(theme::BORDER))
+                    .child(
+                        div()
+                            .pb(px(6.))
+                            .text_size(px(11.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .border_b_2()
+                            .border_color(rgb(theme::ACCENT))
+                            .child("DETAILS"),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap_6()
+                    .items_start()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w_0()
+                            .max_w(px(780.))
+                            .gap(px(4.))
+                            .children(readme),
+                    )
+                    .child(facts),
+            );
+
+        div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .bg(rgb(theme::EDITOR))
+            .child(self.scroll_box(
+                "ext-detail",
+                page.into_any_element(),
+                &self.scrolls.ext_detail,
+                cx,
+            ))
+            .into_any_element()
+    }
+
+    // ---- Extensions view -----------------------------------------------------------------------------
+
+    pub(crate) fn extensions_panel(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let installed_root = self
             .model
-            .extensions
-            .iter()
-            .enumerate()
-            .map(|(i, x)| {
+            .config_dir
+            .as_ref()
+            .map(|c| crate::extensions::extensions_dir(c));
+
+        let mut list_rows: Vec<AnyElement> = Vec::new();
+
+        if self.model.marketplace_searching {
+            list_rows.push(
+                div()
+                    .px_3()
+                    .py_2()
+                    .text_size(px(12.))
+                    .text_color(rgb(theme::TEXT_DIM))
+                    .child(if self.model.marketplace_recommended {
+                        "Loading recommended extensions..."
+                    } else {
+                        "Searching Open VSX Marketplace..."
+                    })
+                    .into_any_element(),
+            );
+        } else if let Some(err) = &self.model.marketplace_message {
+            list_rows.push(
+                div()
+                    .px_3()
+                    .py_2()
+                    .text_size(px(12.))
+                    .text_color(rgb(0xe5534b))
+                    .child(SharedString::from(err.clone()))
+                    .into_any_element(),
+            );
+        } else if !self.model.marketplace_results.is_empty() {
+            list_rows.push(
+                div()
+                    .px_3()
+                    .py(px(4.))
+                    .bg(rgb(theme::PANEL))
+                    .text_size(px(11.))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(rgb(theme::TEXT_DIM))
+                    .child(SharedString::from(format!(
+                        "{} ({})",
+                        if self.model.marketplace_recommended {
+                            "RECOMMENDED"
+                        } else {
+                            "MARKETPLACE"
+                        },
+                        self.model.marketplace_results.len()
+                    )))
+                    .into_any_element(),
+            );
+            for (i, m) in self.model.marketplace_results.iter().enumerate() {
+                let is_installed = self
+                    .model
+                    .extensions
+                    .iter()
+                    .any(|e| e.id == m.id || e.id == m.name);
+                let download_url = m.download_url.clone();
+                let stats = if m.downloads > 0 {
+                    format!("{}  ·  {}", m.publisher, short_count(m.downloads))
+                } else {
+                    m.publisher.clone()
+                };
+                list_rows.push(
+                    div()
+                        .id(("mkt-ext", i))
+                        .flex()
+                        .gap_3()
+                        .px_3()
+                        .py(px(10.))
+                        .cursor_pointer()
+                        .border_b_1()
+                        .border_color(rgb(theme::BORDER))
+                        .hover(|s| s.bg(rgb(theme::HOVER)))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
+                            this.model.open_market_detail(i);
+                            cx.notify();
+                        }))
+                        .child(self.ext_icon(&m.id, None, &m.display_name, 42.))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .flex_1()
+                                .min_w_0()
+                                .gap(px(2.))
+                                .child(
+                                    div()
+                                        .text_size(px(13.))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .whitespace_nowrap()
+                                        .overflow_hidden()
+                                        .child(SharedString::from(m.display_name.clone())),
+                                )
+                                .children((!m.description.is_empty()).then(|| {
+                                    div()
+                                        .text_size(px(11.))
+                                        .text_color(rgb(theme::TEXT_DIM))
+                                        .whitespace_nowrap()
+                                        .overflow_hidden()
+                                        .child(SharedString::from(m.description.clone()))
+                                }))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .justify_between()
+                                        .gap_2()
+                                        .pt(px(2.))
+                                        .child(
+                                            div()
+                                                .min_w_0()
+                                                .text_size(px(11.))
+                                                .text_color(rgb(theme::TEXT_DIM))
+                                                .whitespace_nowrap()
+                                                .overflow_hidden()
+                                                .child(SharedString::from(stats)),
+                                        )
+                                        .child(if is_installed {
+                                            div()
+                                                .flex_none()
+                                                .text_size(px(11.))
+                                                .text_color(rgb(0x81b88b))
+                                                .child("Installed")
+                                                .into_any_element()
+                                        } else if self.model.installing.as_deref()
+                                            == Some(download_url.as_str())
+                                        {
+                                            div()
+                                                .flex_none()
+                                                .text_size(px(11.))
+                                                .text_color(rgb(theme::TEXT_DIM))
+                                                .child(SharedString::from(self.model.install_label()))
+                                                .into_any_element()
+                                        } else {
+                                            Self::flat_button(("mkt-install-btn", i), "Install")
+                                                .flex_none()
+                                                .bg(rgb(0x2f2f2f))
+                                                .text_color(rgb(theme::TEXT))
+                                                .on_click(cx.listener(
+                                                    move |this, _: &ClickEvent, _w, cx| {
+                                                        cx.stop_propagation();
+                                                        this.model
+                                                            .install_from_marketplace(&download_url);
+                                                        cx.notify();
+                                                    },
+                                                ))
+                                                .into_any_element()
+                                        }),
+                                ),
+                        )
+                        .into_any_element(),
+                );
+            }
+        } else if let Some(q) = &self.model.marketplace_query {
+            list_rows.push(
+                div()
+                    .px_3()
+                    .py_2()
+                    .text_size(px(12.))
+                    .text_color(rgb(theme::TEXT_DIM))
+                    .child(SharedString::from(format!(
+                        "No extensions found for \"{q}\" on Open VSX."
+                    )))
+                    .into_any_element(),
+            );
+        } else {
+            list_rows.push(
+                div()
+                    .px_3()
+                    .py_2()
+                    .text_size(px(12.))
+                    .text_color(rgb(theme::TEXT_DIM))
+                    .child("Type a name above and press Enter to search the Open VSX marketplace.")
+                    .into_any_element(),
+            );
+        }
+
+        list_rows.push(
+            div()
+                .px_3()
+                .py(px(4.))
+                .bg(rgb(theme::PANEL))
+                .text_size(px(11.))
+                .font_weight(FontWeight::BOLD)
+                .text_color(rgb(theme::TEXT_DIM))
+                .child(SharedString::from(format!(
+                    "INSTALLED ({})",
+                    self.model.extensions.len()
+                )))
+                .into_any_element(),
+        );
+
+        if self.model.extensions.is_empty() {
+            list_rows.push(
+                div()
+                    .px_3()
+                    .py_2()
+                    .text_size(px(12.))
+                    .text_color(rgb(theme::TEXT_DIM))
+                    .child("No extensions installed. Search above or install a .vsix package.")
+                    .into_any_element(),
+            );
+        } else {
+            for (i, x) in self.model.extensions.iter().enumerate() {
                 let active = self.model.panel_extension.as_deref() == Some(x.dir.as_path());
                 let removable = installed_root.as_deref() == x.dir.parent();
                 let (dir_use, dir_rm) = (x.dir.clone(), x.dir.clone());
@@ -622,6 +1316,7 @@ impl Workbench {
                     actions = actions.child(
                         Self::flat_button(("ext-use", i), "Use in right panel").on_click(
                             cx.listener(move |this, _: &ClickEvent, _w, cx| {
+                                cx.stop_propagation();
                                 this.model.use_as_panel_extension(&dir_use, &view);
                                 cx.notify();
                             }),
@@ -631,72 +1326,98 @@ impl Workbench {
                 if removable {
                     actions = actions.child(Self::flat_button(("ext-rm", i), "Remove").on_click(
                         cx.listener(move |this, _: &ClickEvent, _w, cx| {
+                            cx.stop_propagation();
                             this.model.confirm_remove_extension(&dir_rm);
                             cx.notify();
                         }),
                     ));
                 }
-                div()
-                    .id(("ext", i))
-                    .flex()
-                    .flex_col()
-                    .px_3()
-                    .py_2()
-                    .border_b_1()
-                    .border_color(rgb(theme::BORDER))
-                    .child(
-                        div()
-                            .flex()
-                            .justify_between()
-                            .text_size(px(13.))
-                            .child(SharedString::from(x.display_name.clone()))
-                            .child(
-                                div()
-                                    .text_size(px(11.))
-                                    .text_color(rgb(theme::TEXT_DIM))
-                                    .child(SharedString::from(x.version.clone())),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(11.))
-                            .text_color(rgb(theme::TEXT_DIM))
-                            .child(SharedString::from(format!(
-                                "{}{}{}",
-                                x.id,
-                                if x.commands > 0 {
-                                    format!("  ·  {} commands", x.commands)
-                                } else {
-                                    String::new()
-                                },
-                                if x.engine.is_empty() {
-                                    String::new()
-                                } else {
-                                    format!("  ·  vscode {}", x.engine)
-                                }
-                            ))),
-                    )
-                    .children((!x.description.is_empty()).then(|| {
-                        div()
-                            .pt_1()
-                            .text_size(px(12.))
-                            .child(SharedString::from(x.description.clone()))
-                    }))
-                    .children(active.then(|| {
-                        div()
-                            .pt_1()
-                            .text_size(px(11.))
-                            .text_color(rgb(0x81b88b))
-                            .child("● running in the right panel")
-                    }))
-                    .child(actions)
-                    .into_any_element()
-            })
-            .collect();
+                list_rows.push(
+                    div()
+                        .id(("ext", i))
+                        .flex()
+                        .gap_3()
+                        .px_3()
+                        .py_2()
+                        .cursor_pointer()
+                        .border_b_1()
+                        .border_color(rgb(theme::BORDER))
+                        .hover(|s| s.bg(rgb(theme::HOVER)))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
+                            this.model.open_installed_detail(i);
+                            cx.notify();
+                        }))
+                        .child(self.ext_icon(&x.id, x.icon.as_ref(), &x.display_name, 40.))
+                        .child(
+                            div().flex().flex_col().flex_1().min_w_0()
+                        .child(
+                            div()
+                                .flex()
+                                .justify_between()
+                                .text_size(px(13.))
+                                .child(SharedString::from(x.display_name.clone()))
+                                .child(
+                                    div()
+                                        .text_size(px(11.))
+                                        .text_color(rgb(theme::TEXT_DIM))
+                                        .child(SharedString::from(x.version.clone())),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(11.))
+                                .text_color(rgb(theme::TEXT_DIM))
+                                .child(SharedString::from(format!(
+                                    "{}{}{}",
+                                    x.id,
+                                    if x.commands > 0 {
+                                        format!("  ·  {} commands", x.commands)
+                                    } else {
+                                        String::new()
+                                    },
+                                    if x.engine.is_empty() {
+                                        String::new()
+                                    } else {
+                                        format!("  ·  vscode {}", x.engine)
+                                    }
+                                ))),
+                        )
+                        .children((!x.description.is_empty()).then(|| {
+                            div()
+                                .pt_1()
+                                .text_size(px(12.))
+                                .child(SharedString::from(x.description.clone()))
+                        }))
+                        .children(active.then(|| {
+                            div()
+                                .pt_1()
+                                .text_size(px(11.))
+                                .text_color(rgb(0x81b88b))
+                                .child("● running in the right panel")
+                        }))
+                        .child(actions)
+                        )
+                        .into_any_element(),
+                );
+            }
+        }
+
         let folder = installed_root.as_ref().map_or_else(
             || "no configuration folder".to_owned(),
             |p| p.display().to_string(),
         );
+
+        let search_field = self.field_widget(
+            window,
+            cx,
+            "ext-search-query",
+            &self.model.ext_query,
+            self.model.ext_query_focused,
+            "Search Marketplace (Enter)",
+            &self.ext_search_focus,
+            Target::ExtSearch,
+        );
+
         div()
             .flex()
             .flex_col()
@@ -704,29 +1425,29 @@ impl Workbench {
             .min_h_0()
             .child(
                 div()
+                    .px_2()
+                    .pb_2()
+                    .child(search_field),
+            )
+            .child(
+                div()
                     .flex()
                     .gap_1()
                     .px_2()
                     .pb_1()
-                    .child(Self::flat_button("ext-install", "Install from VSIX...").on_click(cx.listener(
-                        |this, _: &ClickEvent, window, cx| this.apply_command(Command::InstallVsix, window, cx),
-                    )))
-                    .child(Self::flat_button("ext-refresh", "Refresh").on_click(cx.listener(
-                        |this, _: &ClickEvent, _w, cx| {
+                    .child(Self::flat_button("ext-install", "Install from VSIX...").on_click(
+                        cx.listener(|this, _: &ClickEvent, window, cx| {
+                            this.apply_command(Command::InstallVsix, window, cx)
+                        }),
+                    ))
+                    .child(Self::flat_button("ext-refresh", "Refresh").on_click(
+                        cx.listener(|this, _: &ClickEvent, _w, cx| {
                             this.model.refresh_extensions();
                             cx.notify();
-                        },
-                    ))),
+                        }),
+                    )),
             )
-            .children(self.model.extensions.is_empty().then(|| {
-                div()
-                    .px_3()
-                    .py_2()
-                    .text_size(px(12.))
-                    .text_color(rgb(theme::TEXT_DIM))
-                    .child("No extensions installed. Install a .vsix package you own, or start with NANTI_EXTENSION.")
-            }))
-            .child(self.scroll_list("ext-list", &self.scrolls.ext, rows, None, cx))
+            .child(self.scroll_list("ext-list", &self.scrolls.ext, list_rows, None, cx))
             .child(
                 div()
                     .flex_none()
@@ -872,14 +1593,14 @@ impl Workbench {
 
     pub(crate) fn panel_body(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         match self.model.panel_tab {
-            PanelTab::Terminal => div()
-                .flex()
-                .flex_col()
-                .flex_1()
-                .min_h_0()
-                .child(self.terminal_strip(cx))
-                .child(self.terminal_view(window, cx))
-                .into_any_element(),
+            PanelTab::Terminal => {
+                let mut b = div().flex().flex_1().min_h_0();
+                b = b.child(self.terminal_view(window, cx));
+                if self.terminals.len() > 1 {
+                    b = b.child(self.terminal_side_tabs(cx));
+                }
+                b.into_any_element()
+            }
             PanelTab::Problems => self.problems_view(cx),
             PanelTab::Output => self.output_view(cx),
         }
@@ -888,7 +1609,8 @@ impl Workbench {
     // ---- welcome ----------------------------------------------------------------------------------------
 
     pub(crate) fn welcome(&self, cx: &mut Context<Self>) -> AnyElement {
-        let entries: [(&'static str, Command); 7] = [
+        let entries: [(&'static str, Command); 8] = [
+            ("Open Folder", Command::OpenFolder),
             ("Go to File", Command::QuickOpen),
             ("New File", Command::NewFile),
             ("Command Palette", Command::CommandPalette),
@@ -904,34 +1626,19 @@ impl Workbench {
             .gap_1()
             .font_family("Segoe UI")
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .w(px(52.))
-                    .h(px(52.))
-                    .rounded_xl()
-                    .bg(rgb(0x1c1c1c))
-                    .border_1()
-                    .border_color(rgb(0x383838))
-                    .mb_2()
-                    .child(
-                        div()
-                            .text_size(px(22.))
-                            .text_color(rgb(0xffffff))
-                            .child("< >"),
-                    ),
+                div().mb_3().child(assets::logo_mark(72., 0xffffff)),
             )
             .child(
                 div()
-                    .text_size(px(30.))
-                    .text_color(rgb(theme::TEXT))
+                    .text_size(px(32.))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(rgb(0xffffff))
                     .child("nanti."),
             )
             .child(
                 div()
                     .pb_4()
-                    .text_size(px(13.))
+                    .text_size(px(14.))
                     .text_color(rgb(theme::TEXT_DIM))
                     .child("Code now. Not later."),
             )
@@ -941,9 +1648,9 @@ impl Workbench {
                     .flex()
                     .justify_between()
                     .gap_8()
-                    .w(px(300.))
+                    .w(px(320.))
                     .px_3()
-                    .py(px(5.))
+                    .py(px(6.))
                     .rounded_sm()
                     .cursor_pointer()
                     .text_size(px(13.))

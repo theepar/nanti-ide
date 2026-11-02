@@ -137,6 +137,14 @@ fn dragging_the_sidebar_splitter_resizes_clamps_and_ignores_moves_without_the_bu
 fn dragging_the_right_and_bottom_splitters(cx: &mut TestAppContext) {
     let ws = workspace("drp");
     let (window, cx) = open(cx, &ws.0, None);
+    // with no extension the right panel is not shown at all; lay it out empty for this test
+    window
+        .update(cx, |wb, _, cx| {
+            wb.show_empty_right_panel_for_tests();
+            cx.notify(); // redraw so the splitter exists before the drag
+        })
+        .unwrap();
+    cx.run_until_parked();
     let (vw, vh) = viewport(window, cx);
     // right panel is 320 wide; its splitter sits just left of it
     drag(cx, (vw - 322.0, vh / 2.0), (vw - 420.0, vh / 2.0));

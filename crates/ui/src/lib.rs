@@ -6,7 +6,7 @@
 //! docs/m0-status.md): no horizontal scroll or word wrap; IME verified by handler-level tests only.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -22,9 +22,11 @@ use gpui::{
 use syntax::{Language, LineSpan, SyntaxHighlighter, Token};
 use terminal_ui::{GridMetrics, TerminalSession};
 
+pub mod assets;
 pub mod extensions;
 pub mod find;
 pub mod layout;
+pub mod lsp;
 pub mod menu;
 pub mod model;
 mod ops;
@@ -63,6 +65,16 @@ const ACTIVITY_BAR_WIDTH: f32 = 48.0;
 const TAB_BAR_HEIGHT: f32 = 35.0;
 /// The editor renders at most this many lines per file until it is virtualized.
 const MAX_RENDERED_LINES: usize = 2000;
+/// The text editor only builds rows near the viewport (see `OVERSCAN_ROWS`), so this is a cap on
+/// how many lines it will show at all, not a per-frame cost like `MAX_RENDERED_LINES` (diffs).
+const EDITOR_MAX_LINES: usize = 100_000;
+/// Extra rows built above and below the viewport so scrolling never shows blank gaps.
+const OVERSCAN_ROWS: usize = 10;
+/// Height of one explorer row; the list is virtualized with it, so rows must keep this height.
+const EXPLORER_ROW_H: f32 = 22.0;
+/// A cached explorer listing is rebuilt at least this often, to notice changes made outside the
+/// IDE (a terminal, git checkout) without reading every directory on every frame.
+const EXPLORER_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(2);
 const LINE_HEIGHT: f32 = 20.0;
 const GUTTER_WIDTH: f32 = 56.0;
 const FONT_SIZE: f32 = 14.0;
@@ -72,26 +84,33 @@ const TAB_WIDTH: usize = 4;
 
 pub mod theme {
     /// Scrollbar colors: a dark track and a clearly visible light grey thumb.
-    pub const SCROLL_TRACK: u32 = 0x2a2a2a;
-    pub const SCROLL_THUMB: u32 = 0x8f8f8f;
-    pub const ACTIVITY_BAR: u32 = 0x2b2b2b;
-    pub const SIDEBAR: u32 = 0x1f1f1f;
-    pub const EDITOR: u32 = 0x181818;
-    pub const TAB_BAR: u32 = 0x1f1f1f;
+    pub const SCROLL_TRACK: u32 = 0x1e1e1e;
+    pub const SCROLL_THUMB: u32 = 0x424242;
+    pub const ACTIVITY_BAR: u32 = 0x181818;
+    pub const SIDEBAR: u32 = 0x1e1e1e;
+    pub const EDITOR: u32 = 0x1e1e1e;
+    pub const TAB_BAR: u32 = 0x181818;
     pub const PANEL: u32 = 0x181818;
-    pub const STATUS_BAR: u32 = 0x1f1f1f;
-    pub const BORDER: u32 = 0x2e2e2e;
+    pub const STATUS_BAR: u32 = 0x181818;
+    pub const BORDER: u32 = 0x2b2b2b;
     pub const TEXT: u32 = 0xcccccc;
     pub const TEXT_DIM: u32 = 0x858585;
-    pub const ACCENT: u32 = 0x3b82f6;
+    /// Toolbar and status-bar icons: brighter than `TEXT_DIM` so small glyphs stay readable.
+    pub const ICON: u32 = 0xb4b4b4;
+    /// Highlights are white, not blue.
+    pub const ACCENT: u32 = 0xe6e6e6;
     pub const LINE_NUMBER: u32 = 0x6e7681;
+    pub const LINE_NUMBER_ACTIVE: u32 = 0xc6c6c6;
     pub const HOVER: u32 = 0x2a2d2e;
     pub const SELECTED: u32 = 0x37373d;
-    pub const SELECTION: u32 = 0x3b82f64d;
+    /// Hovered menu row.
+    pub const HOVER_STRONG: u32 = 0x3c3f41;
+    pub const SELECTION: u32 = 0x264f7880;
     pub const BANNER: u32 = 0x2b2a1f;
     pub const WARN: u32 = 0xe5c07b;
-    pub const FIND_MATCH: u32 = 0xe5c07b40;
+    pub const FIND_MATCH: u32 = 0x515c6b66;
     pub const FIND_CURRENT: u32 = 0xe5c07b99;
+    pub const MENU_BG: u32 = 0x252526;
 
     /// Dark-theme color for a syntax token.
     pub fn token_color(t: syntax::Token) -> u32 {
@@ -125,13 +144,13 @@ pub fn tone_color(t: scm::Tone) -> u32 {
     }
 }
 
-fn activity_glyph(a: Activity) -> &'static str {
+fn activity_icon(a: Activity) -> &'static str {
     match a {
-        Activity::Explorer => "▤",
-        Activity::Search => "⌕",
-        Activity::SourceControl => "⎇",
-        Activity::Run => "▶",
-        Activity::Extensions => "⧉",
+        Activity::Explorer => "files",
+        Activity::Search => "search",
+        Activity::SourceControl => "git",
+        Activity::Run => "run",
+        Activity::Extensions => "extensions",
     }
 }
 
@@ -236,6 +255,7 @@ enum Target {
     Search,
     Commit,
     Terminal,
+    ExtSearch,
 }
 
 /// Scroll state of the sidebar and panel lists (the editor has its own handle).
@@ -246,6 +266,7 @@ struct Scrolls {
     scm: ScrollHandle,
     tasks: ScrollHandle,
     ext: ScrollHandle,
+    ext_detail: ScrollHandle,
     problems: ScrollHandle,
     output: ScrollHandle,
     search: ScrollHandle,
@@ -270,17 +291,22 @@ pub struct Workbench {
     search_focus: FocusHandle,
     commit_focus: FocusHandle,
     terminal_focus: FocusHandle,
+    ext_search_focus: FocusHandle,
     drag: Option<Drag>,
     layout_path: Option<PathBuf>,
     layout_saved: Layout,
     /// Last visibility applied to the native webview (avoid calling it every frame).
     right_applied: Option<bool>,
+    /// Tests only: lay the right panel out even though no extension fills it.
+    force_right_panel: bool,
     terminals: Vec<TerminalSession>,
     active_terminal: usize,
     term_counter: usize,
     term_metrics: GridMetrics,
     highlighter: RefCell<SyntaxHighlighter>,
     hl_cache: RefCell<Option<HlCache>>,
+    /// (built at, `Model::explorer_signature`, listing) so a frame does not re-read directories.
+    explorer_cache: RefCell<Option<(std::time::Instant, u64, Rc<Vec<model::Entry>>)>>,
     scroll: ScrollHandle,
     scrolls: Scrolls,
     /// Scroll area whose scrollbar thumb is being dragged.
@@ -290,6 +316,8 @@ pub struct Workbench {
     dragging: bool,
     /// Set once the user confirmed leaving, so closing the window is not intercepted again.
     quitting: bool,
+    last_synced_versions: HashMap<PathBuf, u64>,
+    lsp: lsp::LspManager,
 }
 
 impl Workbench {
@@ -307,22 +335,27 @@ impl Workbench {
             search_focus: cx.focus_handle(),
             commit_focus: cx.focus_handle(),
             terminal_focus: cx.focus_handle(),
+            ext_search_focus: cx.focus_handle(),
             drag: None,
             layout_path: None,
             layout_saved: Layout::default(),
             right_applied: None,
+            force_right_panel: false,
             terminals: Vec::new(),
             active_terminal: 0,
             term_counter: 0,
             term_metrics: GridMetrics::default(),
             highlighter: RefCell::new(SyntaxHighlighter::new()),
             hl_cache: RefCell::new(None),
+            explorer_cache: RefCell::new(None),
             scroll: ScrollHandle::new(),
             scrolls: Scrolls::default(),
             scroll_drag: None,
             outline_open: true,
             dragging: false,
             quitting: false,
+            last_synced_versions: HashMap::new(),
+            lsp: lsp::LspManager::new(),
         }
     }
 
@@ -356,6 +389,59 @@ impl Workbench {
         self.model.enable_source_control();
     }
 
+    /// Let the Extensions view load recommendations from Open VSX. The app calls this at startup;
+    /// tests leave it off so they never touch the network.
+    pub fn enable_marketplace(&mut self) {
+        self.model.marketplace_enabled = true;
+    }
+
+    /// Serve Open File / Open Folder / Install VSIX with the system dialog. The app calls this at
+    /// startup; tests leave it off so no dialog can open.
+    pub fn enable_native_dialogs(&mut self) {
+        self.model.native_dialogs = true;
+    }
+
+    /// Show the system file/folder dialog in this process, owned by the IDE window (no helper
+    /// program, no extra taskbar entry), and apply the choice when it closes.
+    fn start_picker(
+        &mut self,
+        req: crate::model::PickRequest,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::model::PickRequest;
+        let (files, directories, prompt) = match req {
+            PickRequest::File => (true, false, None),
+            PickRequest::Folder => (false, true, Some("Select Folder")),
+            PickRequest::Vsix => (true, false, Some("Install")),
+        };
+        let chosen = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files,
+            directories,
+            multiple: false,
+            prompt: prompt.map(SharedString::new_static),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = chosen.await else {
+                return; // cancelled or failed
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            this.update_in(cx, |wb, window, cx| {
+                wb.model.apply_picked(req, path);
+                if req == PickRequest::File {
+                    wb.focus_editor(window);
+                }
+                wb.sync_focus(window);
+                wb.reveal_cursor();
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// Load the saved layout from `path` and save every later change there.
     pub fn set_layout_path(&mut self, path: PathBuf) {
         self.model.layout = Layout::load(&path);
@@ -380,6 +466,12 @@ impl Workbench {
         }
     }
 
+    /// Test hook: lay the (empty) right panel out so its splitter can be exercised.
+    #[doc(hidden)]
+    pub fn show_empty_right_panel_for_tests(&mut self) {
+        self.force_right_panel = true;
+    }
+
     /// Show an extension webview in the right-hand panel.
     pub fn attach_panel(&mut self, panel: Panel) {
         self.panel = Some(panel);
@@ -390,6 +482,7 @@ impl Workbench {
         let ok = self.quitting || self.model.request_quit();
         if ok {
             self.kill_all_terminals(); // never leave shells running behind a closed window
+            self.lsp.shutdown_all(); // nor rust-analyzer / gopls
         }
         ok
     }
@@ -402,10 +495,128 @@ impl Workbench {
         let mut changed = self.pump_terminals();
         changed |= self.model.pump_scm();
         changed |= self.model.pump_problems();
-        let Some(panel) = self.panel.as_mut() else {
-            return changed;
+        changed |= self.model.pump_marketplace();
+
+        if let Some(tab) = self.model.active() {
+            if let TabContent::Text(e) = &tab.content {
+                let v = e.version();
+                let last = self
+                    .last_synced_versions
+                    .get(&tab.path)
+                    .copied()
+                    .unwrap_or(0);
+                if v != last {
+                    self.last_synced_versions.insert(tab.path.clone(), v);
+                    let uri = format!("file:///{}", tab.path.to_string_lossy().replace('\\', "/"));
+                    self.model
+                        .doc_sync_events
+                        .push(crate::model::DocSyncEvent::Change {
+                            uri,
+                            version: v,
+                            text: e.text(),
+                        });
+                }
+            }
+        }
+        if let Some(tab) = self.model.active() {
+            if let Some(lang) = Language::from_path(&tab.path) {
+                if matches!(lang, Language::Rust | Language::Go) {
+                    if let Some(server) = self.lsp.ensure_server(lang, &self.model.root) {
+                        if !server.opened.contains(&tab.path) {
+                            if let TabContent::Text(e) = &tab.content {
+                                server.did_open(&tab.path, lang, e.version(), &e.text());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let sync_events: Vec<crate::model::DocSyncEvent> = self.model.doc_sync_events.drain(..).collect();
+        for ev in &sync_events {
+            if let Some(panel) = self.panel.as_ref() {
+                match ev {
+                    crate::model::DocSyncEvent::Open {
+                        uri,
+                        language_id,
+                        version,
+                        text,
+                    } => {
+                        panel.doc_open(uri.clone(), language_id.clone(), *version, text.clone());
+                    }
+                    crate::model::DocSyncEvent::Change { uri, version, text } => {
+                        panel.doc_change(uri.clone(), *version, text.clone());
+                    }
+                    crate::model::DocSyncEvent::Save { uri } => {
+                        panel.doc_save(uri.clone());
+                    }
+                    crate::model::DocSyncEvent::Close { uri } => {
+                        panel.doc_close(uri.clone());
+                    }
+                    crate::model::DocSyncEvent::Reset => {}
+                }
+            }
+            match ev {
+                crate::model::DocSyncEvent::Open { uri, version, text, .. } => {
+                    if let Some(path) = crate::lsp::uri_to_path(uri) {
+                        if let Some(lang) = Language::from_path(&path) {
+                            if let Some(server) = self.lsp.ensure_server(lang, &self.model.root) {
+                                server.did_open(&path, lang, *version, text);
+                            }
+                        }
+                    }
+                }
+                crate::model::DocSyncEvent::Change { uri, version, text } => {
+                    if let Some(path) = crate::lsp::uri_to_path(uri) {
+                        if let Some(lang) = Language::from_path(&path) {
+                            if let Some(server) = self.lsp.get_mut(lang) {
+                                server.did_change(&path, *version, text);
+                            }
+                        }
+                    }
+                }
+                crate::model::DocSyncEvent::Save { uri } => {
+                    if let Some(path) = crate::lsp::uri_to_path(uri) {
+                        if let Some(lang) = Language::from_path(&path) {
+                            if let Some(server) = self.lsp.get_mut(lang) {
+                                server.did_save(&path);
+                            }
+                        }
+                    }
+                }
+                crate::model::DocSyncEvent::Close { uri } => {
+                    if let Some(path) = crate::lsp::uri_to_path(uri) {
+                        if let Some(lang) = Language::from_path(&path) {
+                            // Never start a server just to close a document.
+                            if let Some(server) = self.lsp.get_mut(lang) {
+                                server.did_close(&path);
+                            }
+                        }
+                    }
+                }
+                crate::model::DocSyncEvent::Reset => {
+                    self.lsp.shutdown_all();
+                    self.last_synced_versions.clear();
+                }
+            }
+        }
+        for ev in self.lsp.pump() {
+            match ev {
+                crate::lsp::LspEvent::Diagnostics { path, items } => {
+                    let title = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| path.display().to_string());
+                    if self.model.problems.update_lsp_diagnostics(path, title, items) {
+                        changed = true;
+                    }
+                }
+            }
+        }
+        let events = match self.panel.as_mut() {
+            Some(p) => p.pump(),
+            None => Vec::new(),
         };
-        for ev in panel.pump() {
+        for ev in events {
             match ev {
                 UiEvent::StatusItem { id, visible, text } => {
                     changed = true;
@@ -419,8 +630,52 @@ impl Workbench {
                     if self.external_prompt.is_none() && Self::valid_external_url(&url) {
                         self.external_prompt = Some((id, url));
                         changed = true;
-                    } else {
-                        panel.resolve_external(id, false);
+                    } else if let Some(p) = self.panel.as_ref() {
+                        p.resolve_external(id, false);
+                    }
+                }
+                UiEvent::TerminalCreate {
+                    id,
+                    name,
+                    shell_path,
+                    shell_args,
+                    cwd,
+                } => {
+                    self.spawn_terminal_ext(Some(id), Some(name), shell_path, shell_args, cwd);
+                    changed = true;
+                }
+                UiEvent::TerminalSendText {
+                    id,
+                    text,
+                    add_new_line,
+                } => {
+                    if let Some(idx) = self.find_terminal_by_ext_id(&id) {
+                        if let Some(term) = self.terminals.get(idx) {
+                            let payload = if add_new_line {
+                                format!("{text}\r\n")
+                            } else {
+                                text
+                            };
+                            term.term.send_text(&payload);
+                            changed = true;
+                        }
+                    }
+                }
+                UiEvent::TerminalShow { id, preserve_focus } => {
+                    if let Some(idx) = self.find_terminal_by_ext_id(&id) {
+                        self.model.panel_tab = crate::model::PanelTab::Terminal;
+                        self.model.layout.panel = true;
+                        self.active_terminal = idx;
+                        if !preserve_focus {
+                            self.model.terminal_focused = true;
+                        }
+                        changed = true;
+                    }
+                }
+                UiEvent::TerminalDispose { id } => {
+                    if let Some(idx) = self.find_terminal_by_ext_id(&id) {
+                        self.close_terminal(idx);
+                        changed = true;
                     }
                 }
                 _ => {}
@@ -461,13 +716,32 @@ impl Workbench {
 
     fn reveal_cursor(&self) {
         if let Some(TabContent::Text(e)) = self.model.active().map(|t| &t.content) {
-            self.scroll.scroll_to_item(e.line_col().0);
+            // Rows are virtualized (spacers stand in for off-screen lines), so child indices no
+            // longer match line numbers; scroll the minimal amount to show the cursor line instead.
+            let viewport = f32::from(self.scroll.bounds().size.height);
+            if viewport <= 0.0 {
+                return;
+            }
+            let lines = e.buffer().len_lines().min(EDITOR_MAX_LINES);
+            let content = 2.0 * EDITOR_PAD_Y + lines as f32 * LINE_HEIGHT;
+            let top = EDITOR_PAD_Y + e.line_col().0 as f32 * LINE_HEIGHT;
+            let bottom = top + LINE_HEIGHT;
+            let offset = self.scroll.offset();
+            let mut scrolled = -f32::from(offset.y);
+            if top - EDITOR_PAD_Y < scrolled {
+                scrolled = top - EDITOR_PAD_Y;
+            } else if bottom + EDITOR_PAD_Y > scrolled + viewport {
+                scrolled = bottom + EDITOR_PAD_Y - viewport;
+            }
+            scrolled = scrolled.clamp(0.0, (content - viewport).max(0.0));
+            self.scroll.set_offset(point(offset.x, px(-scrolled)));
         }
     }
 
     fn finish_quit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.quitting = true;
         self.kill_all_terminals();
+        self.lsp.shutdown_all();
         window.remove_window();
         cx.quit();
     }
@@ -502,6 +776,12 @@ impl Workbench {
         {
             return Target::Terminal;
         }
+        if self.model.ext_query_focused
+            && self.model.activity == Activity::Extensions
+            && self.model.layout.sidebar
+        {
+            return Target::ExtSearch;
+        }
         Target::Editor
     }
 
@@ -513,6 +793,7 @@ impl Workbench {
             Target::FindReplace => self.model.find.as_ref().map(|f| &f.replace),
             Target::Search => Some(&self.model.search.query),
             Target::Commit => Some(&self.model.scm.message),
+            Target::ExtSearch => Some(&self.model.ext_query),
             Target::Editor | Target::Terminal => None,
         }
     }
@@ -524,6 +805,7 @@ impl Workbench {
             Target::FindReplace => self.model.find.as_mut().map(|f| &mut f.replace),
             Target::Search => Some(&mut self.model.search.query),
             Target::Commit => Some(&mut self.model.scm.message),
+            Target::ExtSearch => Some(&mut self.model.ext_query),
             Target::Editor | Target::Terminal => None,
         }
     }
@@ -574,6 +856,10 @@ impl Workbench {
                 self.model.focus_editor_inputs();
                 self.model.terminal_focused = true;
             }
+            Target::ExtSearch => {
+                self.model.focus_editor_inputs();
+                self.model.ext_query_focused = true;
+            }
             Target::Editor | Target::Palette => self.model.focus_editor_inputs(),
         }
         self.sync_focus(window);
@@ -613,6 +899,7 @@ impl Workbench {
             Target::Search => window.focus(&self.search_focus),
             Target::Commit => window.focus(&self.commit_focus),
             Target::Terminal => window.focus(&self.terminal_focus),
+            Target::ExtSearch => window.focus(&self.ext_search_focus),
             // With the editor hidden (maximized panel) park the focus on the root so shortcuts work.
             Target::Editor if self.model.layout.panel && self.model.layout.panel_maximized => {
                 window.focus(&self.root_focus)
@@ -625,6 +912,9 @@ impl Workbench {
     fn drain_requests(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = self.model.clipboard_request.take() {
             cx.write_to_clipboard(ClipboardItem::new_string(text));
+        }
+        if let Some(req) = self.model.pick_request.take() {
+            self.start_picker(req, window, cx);
         }
         if std::mem::take(&mut self.model.quit_request) && self.model.request_quit() {
             self.finish_quit(window, cx);
@@ -641,6 +931,13 @@ impl Workbench {
     }
 
     fn accept_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(p) = self.model.palette.as_ref() {
+            if let Some(crate::palette::PaletteAction::Command(c @ (Command::OpenFile | Command::OpenFolder))) = p.selected_action() {
+                self.model.close_palette();
+                self.apply_command(c, window, cx);
+                return;
+            }
+        }
         self.model.accept_palette();
         self.process_terminal_request();
         self.drain_requests(window, cx);
@@ -861,6 +1158,39 @@ impl Workbench {
         self.after_field_key(window, cx);
     }
 
+    /// Keys while the extension search input has focus.
+    fn on_ext_search_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let m = ev.keystroke.modifiers;
+        let key = ev.keystroke.key.as_str();
+        if m.control && !m.alt {
+            return match Self::field_shortcut(key, m.shift) {
+                Some(c) => self.run_and_stop(c, window, cx),
+                None => cx.stop_propagation(),
+            };
+        }
+        match key {
+            "escape" => self.model.ext_query_focused = false,
+            "enter" => {
+                let q = self.model.ext_query.text().to_owned();
+                self.model.search_marketplace(&q);
+            }
+            "left" | "right" | "home" | "end" | "backspace" | "delete" => {
+                if let Some(f) = self.field_mut() {
+                    match key {
+                        "left" => f.left(),
+                        "right" => f.right(),
+                        "home" => f.home(),
+                        "end" => f.end(),
+                        "backspace" => f.backspace(),
+                        _ => f.delete(),
+                    }
+                }
+            }
+            _ => return,
+        }
+        self.after_field_key(window, cx);
+    }
+
     fn after_field_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.model.refresh_find();
         self.sync_focus(window);
@@ -911,6 +1241,7 @@ impl Workbench {
             Target::Search => return self.on_search_key(ev, window, cx),
             Target::Commit => return self.on_commit_key(ev, window, cx),
             Target::Terminal => return self.on_terminal_key(ev, window, cx),
+            Target::ExtSearch => return self.on_ext_search_key(ev, window, cx),
             Target::Editor => {}
         }
 
@@ -1031,7 +1362,7 @@ impl Workbench {
         let bounds = self.scroll.bounds();
         let offset = self.scroll.offset();
         let y = f32::from(p.y - bounds.origin.y - offset.y) - EDITOR_PAD_Y;
-        let shown = e.buffer().len_lines().min(MAX_RENDERED_LINES);
+        let shown = e.buffer().len_lines().min(EDITOR_MAX_LINES);
         let line = ((y / LINE_HEIGHT).floor().max(0.0) as usize).min(shown.saturating_sub(1));
         let text = e.buffer().line_text(line);
         let x = (p.x - bounds.origin.x - px(GUTTER_WIDTH)).max(px(0.));
@@ -1154,11 +1485,11 @@ impl Workbench {
             .flex_none()
             // Never transparent: an unpainted gap shows whatever is behind the window.
             .bg(if active {
-                rgba(0x3b82f6aa)
+                rgba(0xffffff55)
             } else {
                 rgb(theme::BORDER)
             })
-            .hover(|s| s.bg(rgba(0x3b82f680)))
+            .hover(|s| s.bg(rgba(0xffffff33)))
             .when(vertical, |d| d.w(px(SPLITTER)).h_full().cursor_col_resize())
             .when(!vertical, |d| {
                 d.h(px(SPLITTER)).w_full().cursor_row_resize()
@@ -1193,6 +1524,8 @@ impl Workbench {
             .w(px(48.))
             .h_full()
             .bg(rgb(theme::ACTIVITY_BAR))
+            .border_r_1()
+            .border_color(rgb(theme::BORDER))
             .items_center()
             .pt_2()
             .gap_1()
@@ -1210,18 +1543,16 @@ impl Workbench {
                     .h(px(40.))
                     .rounded_md()
                     .cursor_pointer()
-                    .text_size(px(20.))
-                    .text_color(rgb(if selected {
-                        theme::TEXT
-                    } else {
-                        theme::TEXT_DIM
-                    }))
-                    .hover(|s| s.bg(rgb(theme::HOVER)).text_color(rgb(theme::TEXT)))
+                    .hover(|s| s.bg(rgb(theme::HOVER)))
                     .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
                         this.model.select_activity(a);
                         cx.notify();
                     }))
-                    .child(activity_glyph(a))
+                    .child(assets::icon(
+                        activity_icon(a),
+                        22.,
+                        if selected { 0xffffff } else { theme::ICON },
+                    ))
                     .children(badge.map(|n| {
                         div()
                             .absolute()
@@ -1235,7 +1566,7 @@ impl Workbench {
                             .justify_center()
                             .rounded_full()
                             .bg(rgb(theme::ACCENT))
-                            .text_color(rgb(0xffffff))
+                            .text_color(rgb(0x111111))
                             .text_size(px(10.))
                             .child(SharedString::from(if n > 99 {
                                 "99+".to_owned()
@@ -1246,24 +1577,54 @@ impl Workbench {
             }))
     }
 
+    /// The explorer listing, from cache while the tree and the expansion state are unchanged.
+    fn explorer_entries(&self) -> Rc<Vec<model::Entry>> {
+        let sig = self.model.explorer_signature();
+        if let Some((at, s, list)) = &*self.explorer_cache.borrow()
+            && *s == sig
+            && at.elapsed() < EXPLORER_CACHE_TTL
+        {
+            return list.clone();
+        }
+        let list = Rc::new(self.model.visible_entries());
+        *self.explorer_cache.borrow_mut() = Some((std::time::Instant::now(), sig, list.clone()));
+        list
+    }
+
     fn sidebar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let body: AnyElement =
             if self.model.activity == Activity::Explorer {
                 let active_path = self.model.active().map(|t| t.path.clone());
+                // Virtualized like the editor: only rows near the viewport become elements and
+                // spacers keep the scroll extent, so a folder with thousands of files stays cheap.
+                let entries = self.explorer_entries();
+                let total = entries.len();
+                let viewport = f32::from(self.scrolls.explorer.bounds().size.height);
+                let viewport = if viewport > 0.0 { viewport } else { 1600.0 };
+                let scrolled = (-f32::from(self.scrolls.explorer.offset().y)).max(0.0);
+                let first = ((scrolled / EXPLORER_ROW_H) as usize)
+                    .saturating_sub(OVERSCAN_ROWS)
+                    .min(total);
+                let last = (((scrolled + viewport) / EXPLORER_ROW_H).ceil() as usize
+                    + OVERSCAN_ROWS)
+                    .min(total)
+                    .max(first);
                 let list =
                     div()
                         .id("explorer-list")
                         .size_full()
                         .overflow_y_scroll()
                         .track_scroll(&self.scrolls.explorer)
-                        .children(self.model.visible_entries().into_iter().enumerate().map(
-                            |(i, e)| {
+                        .child(div().h(px(first as f32 * EXPLORER_ROW_H)).flex_none())
+                        .children(entries[first..last].iter().cloned().enumerate().map(
+                            |(k, e)| {
+                                let i = first + k;
                                 let selected = (!e.is_dir && active_path.as_ref() == Some(&e.path))
                                     || self.model.explorer_sel.as_deref() == Some(e.path.as_path());
-                                let marker = match (e.is_dir, e.expanded) {
-                                    (true, true) => "▾ ",
-                                    (true, false) => "▸ ",
-                                    (false, _) => "  ",
+                                let chevron = match (e.is_dir, e.expanded) {
+                                    (true, true) => Some("chevron-down"),
+                                    (true, false) => Some("chevron-right"),
+                                    (false, _) => None,
                                 };
                                 let path = e.path.clone();
                                 let is_dir = e.is_dir;
@@ -1272,10 +1633,11 @@ impl Workbench {
                                 div()
                                     .id(("entry", i))
                                     .flex()
+                                    .items_center()
                                     .justify_between()
                                     .pl(px(8. + 12. * e.depth as f32))
                                     .pr_2()
-                                    .py(px(2.))
+                                    .h(px(EXPLORER_ROW_H))
                                     .text_size(px(13.))
                                     .text_color(rgb(name_color))
                                     .cursor_pointer()
@@ -1294,7 +1656,9 @@ impl Workbench {
                                             }
                                         }),
                                     )
-                                    .when(selected, |d| d.bg(rgb(theme::SELECTED)))
+                                    .when(selected, |d| {
+                                        d.bg(rgb(theme::SELECTED))
+                                    })
                                     .hover(|s| s.bg(rgb(theme::HOVER)))
                                     .on_click(cx.listener(
                                         move |this, _: &ClickEvent, window, cx| {
@@ -1309,9 +1673,31 @@ impl Workbench {
                                         },
                                     ))
                                     .child(
-                                        div().whitespace_nowrap().overflow_hidden().child(
-                                            SharedString::from(format!("{marker}{}", e.name)),
-                                        ),
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(4.))
+                                            .min_w_0()
+                                            .child(div().flex_none().w(px(14.)).children(
+                                                chevron.map(|c| {
+                                                    assets::icon(c, 14., theme::TEXT_DIM)
+                                                }),
+                                            ))
+                                            .child(if is_dir {
+                                                assets::icon("folder", 15., 0x7f9fbf)
+                                            } else {
+                                                assets::icon(
+                                                    "file",
+                                                    15.,
+                                                    assets::file_color(&e.name),
+                                                )
+                                            })
+                                            .child(
+                                                div()
+                                                    .whitespace_nowrap()
+                                                    .overflow_hidden()
+                                                    .child(SharedString::from(e.name.clone())),
+                                            ),
                                     )
                                     .children(decor.map(|d| {
                                         div()
@@ -1322,6 +1708,7 @@ impl Workbench {
                                     }))
                             },
                         ))
+                        .child(div().h(px((total - last) as f32 * EXPLORER_ROW_H)).flex_none())
                         .into_any_element();
                 let list = self.scroll_box("explorer-list", list, &self.scrolls.explorer, cx);
                 div()
@@ -1340,7 +1727,7 @@ impl Workbench {
             } else if self.model.activity == Activity::Run {
                 self.run_panel(cx)
             } else {
-                self.extensions_panel(cx)
+                self.extensions_panel(window, cx)
             };
         div()
             .flex()
@@ -1359,8 +1746,9 @@ impl Workbench {
                     .px_3()
                     .py_2()
                     .text_size(px(11.))
+                    .font_weight(FontWeight::BOLD)
                     .text_color(rgb(theme::TEXT_DIM))
-                    .child(self.model.activity.title()),
+                    .child(self.model.activity.title().to_uppercase()),
             )
             .child(body)
     }
@@ -1370,14 +1758,56 @@ impl Workbench {
             .flex()
             .flex_none()
             .h(px(35.))
-            .bg(rgb(theme::TAB_BAR))
-            .border_b_1()
-            .border_color(rgb(theme::BORDER))
+            // with no tabs the bar melts into the editor instead of showing an empty strip
+            .bg(rgb(if self.model.tabs.is_empty() && self.model.ext_detail.is_none() {
+                theme::EDITOR
+            } else {
+                theme::TAB_BAR
+            }))
+            .when(
+                !self.model.tabs.is_empty() || self.model.ext_detail.is_some(),
+                |d| d.border_b_1().border_color(rgb(theme::BORDER)),
+            )
+            // the extension detail page is a tab of its own, first and active while it is shown
+            .children(self.model.ext_detail.as_ref().map(|d| {
+                div()
+                    .id("tab-ext-detail")
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .pl_3()
+                    .pr_1()
+                    .text_size(px(13.))
+                    .border_r_1()
+                    .border_color(rgb(theme::BORDER))
+                    .bg(rgb(theme::EDITOR))
+                    .text_color(rgb(theme::TEXT))
+                    .child(assets::icon("extensions", 14., theme::TEXT_DIM))
+                    .child(SharedString::from(format!("Extension: {}", d.display_name)))
+                    .child(
+                        div()
+                            .id("tab-ext-detail-close")
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .w(px(18.))
+                            .h(px(18.))
+                            .rounded_sm()
+                            .cursor_pointer()
+                            .hover(|s| s.bg(rgb(theme::SELECTED)))
+                            .on_click(cx.listener(|this, _: &ClickEvent, _w, cx| {
+                                this.model.close_ext_detail();
+                                cx.notify();
+                            }))
+                            .child(assets::icon("close", 12., theme::TEXT_DIM)),
+                    )
+            }))
             .children(self.model.tabs.iter().enumerate().map(|(i, t)| {
-                let active = self.model.active_tab == Some(i);
+                let active = self.model.active_tab == Some(i) && self.model.ext_detail.is_none();
                 let dirty = t.is_dirty();
                 div()
                     .id(("tab", i))
+                    .relative()
                     .flex()
                     .items_center()
                     .gap_2()
@@ -1389,9 +1819,7 @@ impl Workbench {
                     .cursor_pointer()
                     .when(active, |d| {
                         d.bg(rgb(theme::EDITOR))
-                            .text_color(rgb(theme::TEXT))
-                            .border_t_2()
-                            .border_color(rgb(theme::ACCENT))
+                            .text_color(rgb(0xffffff))
                     })
                     .when(!active, |d| {
                         d.text_color(rgb(theme::TEXT_DIM))
@@ -1402,6 +1830,7 @@ impl Workbench {
                         this.focus_editor(window);
                         cx.notify();
                     }))
+                    .child(assets::icon("file", 14., assets::file_color(&t.title)))
                     .child(SharedString::from(t.title.clone()))
                     .child(
                         div()
@@ -1412,14 +1841,22 @@ impl Workbench {
                             .w(px(18.))
                             .h(px(18.))
                             .rounded_sm()
-                            .text_size(px(14.))
                             .hover(|s| s.bg(rgb(theme::SELECTED)))
                             .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
                                 cx.stop_propagation();
                                 this.model.close_tab(i);
                                 cx.notify();
                             }))
-                            .child(if dirty { "●" } else { "×" }),
+                            .child(if dirty {
+                                div()
+                                    .w(px(8.))
+                                    .h(px(8.))
+                                    .rounded_full()
+                                    .bg(rgb(theme::TEXT))
+                                    .into_any_element()
+                            } else {
+                                assets::icon("close", 12., theme::TEXT_DIM).into_any_element()
+                            }),
                     )
             }))
     }
@@ -1615,29 +2052,53 @@ impl Workbench {
                 .child(SharedString::from(reason.clone())),
             Some(TabContent::Diff(view)) => base.flex().flex_col().children(Self::diff_rows(view)),
             Some(TabContent::Text(editor)) => {
-                let hl = self
-                    .model
-                    .active()
-                    .and_then(|t| self.highlights(editor, &t.path));
+                let active_tab = self.model.active();
+                let hl = active_tab.and_then(|t| self.highlights(editor, &t.path));
+                let active_problems: Vec<syntax::Diagnostic> = active_tab
+                    .and_then(|t| {
+                        self.model
+                            .problems
+                            .files
+                            .iter()
+                            .find(|f| f.path == t.path)
+                            .map(|f| f.items.clone())
+                    })
+                    .unwrap_or_default();
                 let find_matches: &[Range<usize>] =
                     self.model.find.as_ref().map_or(&[], |f| f.matches());
                 let find_current = self.model.find.as_ref().and_then(|f| f.current);
                 let buf = editor.buffer();
                 let total = buf.len_lines();
-                let shown = total.min(MAX_RENDERED_LINES);
+                let shown = total.min(EDITOR_MAX_LINES);
+                // Virtualization: only rows in (or near) the viewport become elements; spacers keep
+                // the scroll extent and scrollbar identical to a fully built list.
+                let viewport = f32::from(self.scroll.bounds().size.height);
+                let viewport = if viewport > 0.0 { viewport } else { 1600.0 };
+                let scrolled = (-f32::from(self.scroll.offset().y) - EDITOR_PAD_Y).max(0.0);
+                let first = ((scrolled / LINE_HEIGHT) as usize)
+                    .saturating_sub(OVERSCAN_ROWS)
+                    .min(shown);
+                let last = (((scrolled + viewport) / LINE_HEIGHT).ceil() as usize
+                    + OVERSCAN_ROWS)
+                    .min(shown)
+                    .max(first);
                 let sel = editor.selection();
                 let (cursor_line, cursor_col) = editor.line_col();
                 let focused = self.focus.is_focused(window);
-                let rows: Vec<AnyElement> = (0..shown)
+                let rows: Vec<AnyElement> = (first..last)
                     .map(|n| {
                         let text = buf.line_text(n);
                         let (ls, le) = (buf.line_start(n), buf.line_end(n));
+                        let line_num = n + 1;
+                        let has_error = active_problems.iter().any(|d| d.line == n);
+                        let is_active_line = focused && n == cursor_line;
                         let mut row = div()
                             .relative()
                             .flex()
                             .flex_none()
                             .h(px(LINE_HEIGHT))
                             .items_center()
+                            .when(is_active_line, |d| d.bg(rgba(0xffffff0a)))
                             .child(
                                 div()
                                     .w(px(GUTTER_WIDTH))
@@ -1645,8 +2106,14 @@ impl Workbench {
                                     .pr_3()
                                     .flex()
                                     .justify_end()
-                                    .text_color(rgb(theme::LINE_NUMBER))
-                                    .child(SharedString::from((n + 1).to_string())),
+                                    .text_color(rgb(if has_error {
+                                        0xe5534b
+                                    } else if is_active_line {
+                                        theme::LINE_NUMBER_ACTIVE
+                                    } else {
+                                        theme::LINE_NUMBER
+                                    }))
+                                    .child(SharedString::from(line_num.to_string())),
                             )
                             .child(div().whitespace_nowrap().child(line_element(
                                 &text,
@@ -1675,6 +2142,21 @@ impl Workbench {
                                         .bg(rgba(color)),
                                 );
                             }
+                        }
+                        for d in active_problems.iter().filter(|d| d.line == n) {
+                            let col = d.col.min(text.chars().count());
+                            let len = d.len.max(1);
+                            let x1 = x_of_col(window, &text, col);
+                            let x2 = x_of_col(window, &text, (col + len).min(text.chars().count())).max(x1 + px(8.));
+                            row = row.child(
+                                div()
+                                    .absolute()
+                                    .top(px(LINE_HEIGHT - 2.))
+                                    .left(px(GUTTER_WIDTH) + x1)
+                                    .w(x2 - x1)
+                                    .h(px(2.))
+                                    .bg(rgb(0xe5534b)),
+                            );
                         }
                         if editor.has_selection() && sel.end >= ls && sel.start <= le {
                             let from = sel.start.max(ls) - ls;
@@ -1730,12 +2212,15 @@ impl Workbench {
                     (total > shown).then(|| {
                         div().px_4().py_2().text_color(rgb(theme::TEXT_DIM)).child(
                             SharedString::from(format!(
-                                "… {} more lines not shown (viewer limit {MAX_RENDERED_LINES})",
+                                "… {} more lines not shown (viewer limit {EDITOR_MAX_LINES})",
                                 total - shown
                             )),
                         )
                     });
-                base.children(rows).children(note)
+                base.child(div().h(px(first as f32 * LINE_HEIGHT)).flex_none())
+                    .children(rows)
+                    .child(div().h(px((shown - last) as f32 * LINE_HEIGHT)).flex_none())
+                    .children(note)
             }
         };
         // Registers the platform input handler (typing + IME) while the editor has focus.
@@ -1821,36 +2306,55 @@ impl Workbench {
                             .child(t.title())
                     }))
                     .child(div().flex_1())
+                    .when(self.model.panel_tab == PanelTab::Terminal, |d| {
+                        d.child(
+                            Self::panel_button("panel-new-term", "plus").on_click(cx.listener(
+                                |this, _: &ClickEvent, window, cx| {
+                                    this.apply_command(Command::NewTerminal, window, cx);
+                                },
+                            )),
+                        )
+                        .child(
+                            Self::panel_button("panel-kill-term", "trash").on_click(cx.listener(
+                                |this, _: &ClickEvent, window, cx| {
+                                    this.apply_command(Command::KillTerminal, window, cx);
+                                },
+                            )),
+                        )
+                    })
                     .child(
-                        div()
-                            .id("panel-maximize")
-                            .px_2()
-                            .rounded_sm()
-                            .cursor_pointer()
-                            .text_size(px(12.))
-                            .text_color(rgb(theme::TEXT_DIM))
-                            .hover(|s| s.bg(rgb(theme::HOVER)).text_color(rgb(theme::TEXT)))
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.apply_command(Command::MaximizePanel, window, cx);
-                            }))
-                            .child(if maximized { "❐" } else { "▢" }),
+                        Self::panel_button(
+                            "panel-maximize",
+                            if maximized { "restore" } else { "maximize" },
+                        )
+                        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                            this.apply_command(Command::MaximizePanel, window, cx);
+                        })),
                     )
                     .child(
-                        div()
-                            .id("panel-hide")
-                            .px_2()
-                            .rounded_sm()
-                            .cursor_pointer()
-                            .text_size(px(12.))
-                            .text_color(rgb(theme::TEXT_DIM))
-                            .hover(|s| s.bg(rgb(theme::HOVER)).text_color(rgb(theme::TEXT)))
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        Self::panel_button("panel-hide", "close").on_click(cx.listener(
+                            |this, _: &ClickEvent, window, cx| {
                                 this.apply_command(Command::TogglePanel, window, cx);
-                            }))
-                            .child("×"),
+                            },
+                        )),
                     ),
             )
             .child(body)
+    }
+
+    /// Icon-only button of the bottom panel's toolbar.
+    fn panel_button(id: &'static str, icon_name: &'static str) -> gpui::Stateful<gpui::Div> {
+        div()
+            .id(id)
+            .flex()
+            .items_center()
+            .justify_center()
+            .w(px(28.))
+            .h(px(24.))
+            .rounded_sm()
+            .cursor_pointer()
+            .hover(|s| s.bg(rgb(theme::HOVER)))
+            .child(assets::icon(icon_name, 17., theme::ICON))
     }
 
     fn ai_panel(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -1874,51 +2378,53 @@ impl Workbench {
                     .px_3()
                     .flex()
                     .items_center()
-                    .justify_between()
-                    .text_size(px(11.))
-                    .text_color(rgb(theme::TEXT_DIM))
-                    .child("EXTENSION PANEL")
+                    .justify_end()
                     .child(
-                        div()
-                            .id("right-hide")
-                            .px_2()
-                            .rounded_sm()
-                            .cursor_pointer()
-                            .hover(|s| s.bg(rgb(theme::HOVER)).text_color(rgb(theme::TEXT)))
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        Self::panel_button("right-hide", "close").on_click(cx.listener(
+                            |this, _: &ClickEvent, window, cx| {
                                 this.apply_command(Command::ToggleRightPanel, window, cx);
-                            }))
-                            .child("×"),
+                            },
+                        )),
                     ),
             )
-            .children(self.panel.is_none().then(|| {
-                div()
-                    .px_3()
-                    .text_size(px(12.))
-                    .text_color(rgb(theme::TEXT_DIM))
-                    .child("No extension is set for this panel. Install one in the Extensions view and choose Use in right panel.")
-            }))
     }
 
     /// A small status-bar button that toggles a region; lit while the region is shown.
     fn layout_button(
         id: &'static str,
-        glyph: &'static str,
+        icon_name: &'static str,
         on: bool,
         command: Command,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         div()
             .id(id)
-            .px(px(5.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .w(px(26.))
+            .h(px(20.))
             .rounded_sm()
             .cursor_pointer()
-            .text_color(rgb(if on { theme::TEXT } else { theme::TEXT_DIM }))
-            .hover(|s| s.bg(rgb(theme::HOVER)).text_color(rgb(theme::TEXT)))
+            .hover(|s| s.bg(rgb(theme::HOVER)))
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 this.apply_command(command, window, cx);
             }))
-            .child(glyph)
+            .child(assets::icon(
+                // the "-on" variant has the toggled region filled in
+                if on {
+                    match icon_name {
+                        "layout-sidebar" => "layout-sidebar-on",
+                        "layout-panel" => "layout-panel-on",
+                        "layout-right" => "layout-right-on",
+                        other => other,
+                    }
+                } else {
+                    icon_name
+                },
+                17.,
+                if on { 0xe6e6e6 } else { theme::ICON },
+            ))
     }
 
     fn status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -2034,25 +2540,27 @@ impl Workbench {
                             .gap_1()
                             .child(Self::layout_button(
                                 "toggle-sidebar",
-                                "▤",
+                                "layout-sidebar",
                                 self.model.layout.sidebar,
                                 Command::ToggleSidebar,
                                 cx,
                             ))
                             .child(Self::layout_button(
                                 "toggle-panel",
-                                "▭",
+                                "layout-panel",
                                 self.model.layout.panel,
                                 Command::TogglePanel,
                                 cx,
                             ))
-                            .child(Self::layout_button(
-                                "toggle-right",
-                                "▯",
-                                self.model.layout.right,
-                                Command::ToggleRightPanel,
-                                cx,
-                            )),
+                            .children(self.panel.is_some().then(|| {
+                                Self::layout_button(
+                                    "toggle-right",
+                                    "layout-right",
+                                    self.model.layout.right,
+                                    Command::ToggleRightPanel,
+                                    cx,
+                                )
+                            })),
                     ),
             )
     }
@@ -2131,18 +2639,14 @@ impl Workbench {
             .relative()
             .flex_1()
             .min_w_0()
-            .h(px(24.))
+            .h(px(28.))
             .px(px(FIELD_PAD))
             .flex()
             .items_center()
             .bg(rgb(theme::EDITOR))
             .border_1()
-            .border_color(rgb(if focused {
-                theme::ACCENT
-            } else {
-                theme::BORDER
-            }))
-            .rounded_sm()
+            .border_color(rgb(if focused { 0x8c8c8c } else { theme::BORDER }))
+            .rounded_md()
             .font_family(FONT_FAMILY)
             .text_size(px(FONT_SIZE))
             .text_color(rgb(theme::TEXT))
@@ -2162,7 +2666,7 @@ impl Workbench {
             .children(focused.then(|| {
                 div()
                     .absolute()
-                    .top(px(2.))
+                    .top(px(4.))
                     .left(px(FIELD_PAD) + caret_x)
                     .w(px(2.))
                     .h(px(18.))
@@ -2171,7 +2675,7 @@ impl Workbench {
             .children(underline.map(|(x1, x2)| {
                 div()
                     .absolute()
-                    .top(px(20.))
+                    .top(px(22.))
                     .left(px(FIELD_PAD) + x1)
                     .w(x2 - x1)
                     .h(px(1.))
@@ -2188,7 +2692,7 @@ impl Workbench {
             .rounded_sm()
             .cursor_pointer()
             .text_size(px(12.))
-            .when(on, |d| d.bg(rgb(theme::ACCENT)).text_color(rgb(0xffffff)))
+            .when(on, |d| d.bg(rgb(theme::SELECTED)).text_color(rgb(0xffffff)))
             .when(!on, |d| {
                 d.text_color(rgb(theme::TEXT_DIM))
                     .hover(|s| s.bg(rgb(theme::HOVER)))
@@ -2515,18 +3019,23 @@ impl Workbench {
     ) -> gpui::Stateful<gpui::Div> {
         div()
             .id(id)
-            .px_2()
-            .py(px(2.))
-            .rounded_sm()
+            .flex()
+            .items_center()
+            .justify_center()
+            .h(px(28.))
+            .px_3()
+            .rounded_md()
             .cursor_pointer()
             .text_size(px(12.))
-            .border_1()
-            .border_color(rgb(theme::BORDER))
+            .font_weight(FontWeight::MEDIUM)
             .when(enabled, |d| {
-                d.bg(rgb(theme::ACCENT)).text_color(rgb(0xffffff))
+                d.bg(rgb(theme::ACCENT))
+                    .text_color(rgb(0x1e1e1e))
+                    .hover(|s| s.bg(rgb(0xffffff)))
             })
             .when(!enabled, |d| {
-                d.text_color(rgb(theme::TEXT_DIM))
+                d.bg(rgb(0x2a2a2a))
+                    .text_color(rgb(theme::TEXT_DIM))
                     .hover(|s| s.bg(rgb(theme::HOVER)))
             })
             .child(label)
@@ -2572,8 +3081,8 @@ impl Workbench {
         );
         let staged = s.staged_count();
         let branch_line = match (&status.branch, &status.upstream) {
-            (Some(b), Some(u)) => format!("⎇ {b} → {u}  ↑{} ↓{}", status.ahead, status.behind),
-            (Some(b), None) => format!("⎇ {b} (no upstream)"),
+            (Some(b), Some(u)) => format!("{b} → {u}   ↑{} ↓{}", status.ahead, status.behind),
+            (Some(b), None) => format!("{b} (no upstream)"),
             (None, _) => "HEAD is detached".to_owned(),
         };
         let mut body: Vec<AnyElement> = Vec::new();
@@ -2589,8 +3098,8 @@ impl Workbench {
             }
             let collapsed = s.collapsed.contains(&kind);
             let bulk: Option<(&'static str, &'static str)> = match kind {
-                scm::GroupKind::Staged => Some(("scm-unstage-all", "−")),
-                scm::GroupKind::Changes => Some(("scm-stage-all", "+")),
+                scm::GroupKind::Staged => Some(("scm-unstage-all", "minimize")),
+                scm::GroupKind::Changes => Some(("scm-stage-all", "plus")),
                 scm::GroupKind::Conflicts => None,
             };
             body.push(
@@ -2600,27 +3109,47 @@ impl Workbench {
                     .items_center()
                     .justify_between()
                     .px_2()
-                    .py(px(3.))
+                    .h(px(24.))
                     .text_size(px(11.))
-                    .text_color(rgb(theme::TEXT_DIM))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(rgb(theme::ICON))
                     .cursor_pointer()
                     .hover(|s| s.bg(rgb(theme::HOVER)))
                     .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
                         this.model.scm.toggle_group(kind);
                         cx.notify();
                     }))
-                    .child(SharedString::from(format!(
-                        "{} {}  ({})",
-                        if collapsed { "▸" } else { "▾" },
-                        kind.title(),
-                        rows.len()
-                    )))
-                    .children(bulk.map(|(id, label)| {
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .child(assets::icon(
+                                if collapsed { "chevron-right" } else { "chevron-down" },
+                                14.,
+                                theme::TEXT_DIM,
+                            ))
+                            .child(SharedString::from(kind.title()))
+                            .child(
+                                div()
+                                    .ml_1()
+                                    .px(px(6.))
+                                    .rounded_full()
+                                    .bg(rgb(0x2f2f2f))
+                                    .font_weight(FontWeight::NORMAL)
+                                    .text_color(rgb(theme::TEXT_DIM))
+                                    .child(SharedString::from(rows.len().to_string())),
+                            ),
+                    )
+                    .children(bulk.map(|(id, icon_name)| {
                         div()
                             .id(id)
-                            .px_2()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .w(px(20.))
+                            .h(px(20.))
                             .rounded_sm()
-                            .text_size(px(14.))
                             .hover(|s| s.bg(rgb(theme::SELECTED)))
                             .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
                                 cx.stop_propagation();
@@ -2631,7 +3160,7 @@ impl Workbench {
                                 }
                                 cx.notify();
                             }))
-                            .child(label)
+                            .child(assets::icon(icon_name, 14., theme::ICON))
                     }))
                     .into_any_element(),
             );
@@ -2768,31 +3297,48 @@ impl Workbench {
                     .flex()
                     .flex_col()
                     .flex_none()
-                    .gap_1()
-                    .px_2()
+                    .gap_2()
+                    .px_3()
+                    .pb_1()
                     .child(field)
                     .child(
                         div()
                             .flex()
-                            .gap_1()
+                            .items_center()
+                            .gap_2()
                             .child(
-                                Self::scm_button("scm-commit", "✓ Commit", staged > 0).on_click(
-                                    cx.listener(|this, _: &ClickEvent, window, cx| {
+                                Self::scm_button("scm-commit", "Commit", staged > 0)
+                                    .flex_1()
+                                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                                         this.apply_command(Command::GitCommit, window, cx);
-                                    }),
-                                ),
+                                    })),
                             )
-                            .child(Self::scm_button("scm-refresh", "⟳", false).on_click(
-                                cx.listener(|this, _: &ClickEvent, _w, cx| {
-                                    this.model.scm.refresh();
-                                    cx.notify();
-                                }),
-                            )),
+                            .child(
+                                div()
+                                    .id("scm-refresh")
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .w(px(28.))
+                                    .h(px(28.))
+                                    .rounded_md()
+                                    .cursor_pointer()
+                                    .hover(|s| s.bg(rgb(theme::HOVER)))
+                                    .on_click(cx.listener(|this, _: &ClickEvent, _w, cx| {
+                                        this.model.scm.refresh();
+                                        cx.notify();
+                                    }))
+                                    .child(assets::icon("refresh", 16., theme::ICON)),
+                            ),
                     )
                     .child(
                         div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
                             .text_size(px(11.))
                             .text_color(rgb(theme::TEXT_DIM))
+                            .child(assets::icon("git", 13., theme::TEXT_DIM))
                             .child(SharedString::from(branch_line)),
                     ),
             )
@@ -2973,7 +3519,9 @@ impl Workbench {
                     .py(px(3.))
                     .text_size(px(13.))
                     .cursor_pointer()
-                    .when(i == p.selected, |d| d.bg(rgb(theme::SELECTED)))
+                    .when(i == p.selected, |d| {
+                        d.bg(rgb(theme::SELECTED)).text_color(rgb(0xffffff))
+                    })
                     .hover(|s| s.bg(rgb(theme::HOVER)))
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         if let Some(p) = this.model.palette.as_mut() {
@@ -3036,11 +3584,11 @@ impl Workbench {
                         .track_focus(&self.palette_focus)
                         .flex()
                         .flex_col()
-                        .bg(rgb(theme::SIDEBAR))
+                        .bg(rgb(theme::MENU_BG))
                         .border_1()
                         .border_color(rgb(theme::BORDER))
                         .rounded_md()
-                        .shadow_lg()
+                        .shadow_xl()
                         .text_color(rgb(theme::TEXT))
                         .child(
                             div()
@@ -3339,7 +3887,7 @@ impl Render for Workbench {
             0.0
         };
         let right_w = self.model.layout.effective_right(vw);
-        let right_shown = self.model.layout.right;
+        let right_shown = self.model.layout.right && self.panel.is_some();
         if let Some(panel) = self.panel.as_mut() {
             if self.right_applied != Some(right_shown) {
                 panel.set_visible(right_shown);
@@ -3368,16 +3916,20 @@ impl Render for Workbench {
         let split_sidebar = layout
             .sidebar
             .then(|| self.splitter("split-sidebar", Drag::Sidebar, cx));
-        let split_right = layout
-            .right
-            .then(|| self.splitter("split-right", Drag::Right, cx));
+        // No extension fills the right panel: show nothing (the saved `layout.right` is kept).
+        let right_open = layout.right && (self.panel.is_some() || self.force_right_panel);
+        let split_right = right_open.then(|| self.splitter("split-right", Drag::Right, cx));
         let split_panel =
             (layout.panel && !maximized).then(|| self.splitter("split-panel", Drag::Panel, cx));
-        let right_panel = layout.right.then(|| self.ai_panel(window, cx));
+        let right_panel = right_open.then(|| self.ai_panel(window, cx));
         let tab_bar = (!maximized).then(|| self.tab_bar(cx));
         let prompt_bar = self.prompt_bar(cx);
         let external_prompt_bar = self.external_prompt_bar(cx);
-        let editor = (!maximized).then(|| self.editor(window, cx));
+        // The extension detail page takes the place of the editor until a file or tab is chosen.
+        let editor: Option<AnyElement> = (!maximized).then(|| match &self.model.ext_detail {
+            Some(detail) => self.ext_detail_page(detail, cx),
+            None => self.editor(window, cx).into_any_element(),
+        });
         let bottom_panel = self
             .model
             .layout
@@ -3390,7 +3942,7 @@ impl Render for Workbench {
             self.find_bar(window, cx)
         };
         let palette = self.palette_overlay(window, cx);
-        let menu_bar = self.menu_bar(cx);
+        let menu_bar = self.menu_bar(window, cx);
         let menus = self.menus_overlay(window, cx);
         let status_bar = layout.status_bar.then(|| self.status_bar(cx));
         div()
