@@ -1066,12 +1066,12 @@ impl Model {
     }
 
     pub fn set_active_language_mode(&mut self, mode: Option<String>) {
-        if let Some(i) = self.active_tab {
-            if let Some(tab) = self.tabs.get_mut(i) {
-                tab.language_override = mode.clone();
-                let disp = mode.as_deref().unwrap_or("Auto Detect");
-                self.message = Some(format!("Language mode: {disp}"));
-            }
+        if let Some(i) = self.active_tab
+            && let Some(tab) = self.tabs.get_mut(i)
+        {
+            tab.language_override = mode.clone();
+            let disp = mode.as_deref().unwrap_or("Auto Detect");
+            self.message = Some(format!("Language mode: {disp}"));
         }
     }
 
@@ -1083,10 +1083,10 @@ impl Model {
         view_type: Option<&str>,
     ) {
         self.message = Some(format!("Running {label}"));
-        if let Some(dir) = ext_dir {
-            if let Some(vt) = view_type {
-                self.use_as_panel_extension(dir, vt);
-            }
+        if let Some(dir) = ext_dir
+            && let Some(vt) = view_type
+        {
+            self.use_as_panel_extension(dir, vt);
         }
         self.layout.right = true;
     }

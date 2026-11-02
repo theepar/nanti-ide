@@ -40,3 +40,4 @@ nanti-ide/
 1. **Zero Unnecessary Dependencies**: Every external dependency is audited and catalogued in `THIRD_PARTY_NOTICES.md`.
 2. **Native Performance**: Core editing and layout are written purely in Rust on top of GPUI, avoiding web tech overhead.
 3. **Fail-Closed Isolation**: Extension host runs in an isolated process; slow extensions or network lags never freeze the editor UI thread.
+
