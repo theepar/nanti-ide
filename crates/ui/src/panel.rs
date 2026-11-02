@@ -143,8 +143,84 @@ pub struct Panel {
     html_version: u64,
     queued: Vec<Value>,
     last_bounds: Option<(i32, i32, i32, i32)>,
+    hole_applied: Option<HoleKey>,
     diag_log: Option<PathBuf>,
     inspect_due: Option<std::time::Instant>,
+}
+
+type Area = (i32, i32, i32, i32);
+type HoleKey = ((i32, i32), Option<Area>);
+
+#[cfg(windows)]
+mod clip {
+    use core::ffi::c_void;
+    use core::ptr::{null, null_mut};
+
+    type Hwnd = *mut c_void;
+
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn EnumThreadWindows(
+            thread: u32,
+            f: unsafe extern "system" fn(Hwnd, isize) -> i32,
+            lparam: isize,
+        ) -> i32;
+        fn FindWindowExW(parent: Hwnd, after: Hwnd, class: *const u16, title: *const u16) -> Hwnd;
+        fn SetWindowRgn(hwnd: Hwnd, region: *mut c_void, redraw: i32) -> i32;
+    }
+
+    #[link(name = "gdi32")]
+    unsafe extern "system" {
+        fn CreateRectRgn(left: i32, top: i32, right: i32, bottom: i32) -> *mut c_void;
+        fn CombineRgn(dst: *mut c_void, a: *mut c_void, b: *mut c_void, mode: i32) -> i32;
+        fn DeleteObject(object: *mut c_void) -> i32;
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetCurrentThreadId() -> u32;
+    }
+
+    const RGN_DIFF: i32 = 4;
+
+    unsafe extern "system" fn visit(top: Hwnd, found: isize) -> i32 {
+        let class: Vec<u16> = "WRY_WEBVIEW\0".encode_utf16().collect();
+        // SAFETY: `top` is a live window handed over by the enumeration and `class` is NUL terminated.
+        let child = unsafe { FindWindowExW(top, null_mut(), class.as_ptr(), null()) };
+        if child.is_null() {
+            return 1;
+        }
+        // SAFETY: `found` is the address of the `Hwnd` slot owned by `webview_window`, alive during the call.
+        unsafe { *(found as *mut Hwnd) = child };
+        0
+    }
+
+    pub fn webview_window() -> Option<usize> {
+        let mut found: Hwnd = null_mut();
+        // SAFETY: the callback only writes through the pointer passed here, which outlives the call.
+        unsafe {
+            EnumThreadWindows(GetCurrentThreadId(), visit, &raw mut found as isize);
+        }
+        (!found.is_null()).then_some(found as usize)
+    }
+
+    /// Cuts `hole` (device pixels, relative to the window) out of the webview so what GPUI paints there shows through.
+    pub fn set_hole(hwnd: usize, size: (i32, i32), hole: Option<(i32, i32, i32, i32)>) {
+        let hwnd = hwnd as Hwnd;
+        // SAFETY: every region handle is created here; a region given to SetWindowRgn is owned by the
+        // system afterwards, the temporary hole region is deleted.
+        unsafe {
+            let Some((x, y, w, h)) = hole else {
+                SetWindowRgn(hwnd, null_mut(), 1);
+                return;
+            };
+            let full = CreateRectRgn(0, 0, size.0, size.1);
+            let cut = CreateRectRgn(x, y, x + w, y + h);
+            CombineRgn(full, full, cut, RGN_DIFF);
+            DeleteObject(cut);
+            SetWindowRgn(hwnd, full, 1);
+        }
+    }
 }
 
 impl Panel {
@@ -204,6 +280,7 @@ impl Panel {
             html_version: 0,
             queued: Vec::new(),
             last_bounds: None,
+            hole_applied: None,
             diag_log,
             inspect_due: None,
         })
@@ -227,6 +304,28 @@ impl Panel {
             position: LogicalPosition::new(b.0, b.1).into(),
             size: LogicalSize::new(b.2, b.3).into(),
         });
+    }
+
+    /// `hole` is in logical pixels relative to the webview's top-left corner.
+    pub fn set_hole(&mut self, hole: Option<(i32, i32, i32, i32)>, scale: f32) {
+        #[cfg(windows)]
+        {
+            let Some((_, _, w, h)) = self.last_bounds else {
+                return;
+            };
+            let px = |v: i32| (v as f32 * scale).round() as i32;
+            let size = (px(w), px(h));
+            let hole = hole.map(|(x, y, hw, hh)| (px(x), px(y), px(hw), px(hh)));
+            if self.hole_applied == Some((size, hole)) {
+                return;
+            }
+            if let Some(hwnd) = clip::webview_window() {
+                clip::set_hole(hwnd, size, hole);
+                self.hole_applied = Some((size, hole));
+            }
+        }
+        #[cfg(not(windows))]
+        let _ = (hole, scale);
     }
 
     pub fn resolve_external(&self, id: String, approved: bool) {

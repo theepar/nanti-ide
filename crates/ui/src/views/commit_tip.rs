@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use gpui::{
     AnyElement, ClickEvent, ClipboardItem, Context, Entity, FontWeight, IntoElement, Pixels, Point,
-    Render, SharedString, Subscription, Window, div, prelude::*, px, rgb,
+    Render, SharedString, Subscription, Window, canvas, div, prelude::*, px, rgb,
 };
 
 use crate::{Workbench, assets, scm, theme};
@@ -11,7 +11,7 @@ const BODY_LINES: usize = 14;
 // A fixed width lets long messages wrap to a known height, so the card grows downward instead of overlapping.
 const CARD_WIDTH: f32 = 420.0;
 // The first card waits so that sweeping the pointer across the list stays quiet; once it is up, moving to another row swaps it at once.
-const SHOW_DELAY: Duration = Duration::from_millis(350);
+const SHOW_DELAY: Duration = Duration::from_millis(120);
 const HIDE_DELAY: Duration = Duration::from_millis(220);
 const PREFETCH_AROUND: usize = 4;
 
@@ -108,6 +108,7 @@ impl Workbench {
             crate::layout::Side::Right => vw - side - CARD_WIDTH - 12.0,
         }
         .clamp(4.0, (vw - CARD_WIDTH - 12.0).max(4.0));
+        let (slot, entity) = (self.card_bounds.clone(), cx.entity());
         let card = div()
             .id("commit-card")
             .absolute()
@@ -119,7 +120,23 @@ impl Workbench {
                     this.leave_commit(cx);
                 }
             }))
-            .child(tip);
+            .child(tip)
+            .child(
+                canvas(
+                    |_, _, _| (),
+                    move |bounds, (), _window, cx| {
+                        if slot.get() != Some(bounds) {
+                            slot.set(Some(bounds));
+                            let entity = entity.clone();
+                            cx.defer(move |cx| entity.update(cx, |_, cx| cx.notify()));
+                        }
+                    },
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full(),
+            );
         Some(if anchor.pointer_y > vh * 0.55 {
             card.bottom(px((vh - anchor.pointer_y - 24.0).max(6.0)))
         } else {

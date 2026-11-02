@@ -348,6 +348,7 @@ pub struct Workbench {
     commit_card: Option<views::commit_tip::CardAnchor>,
     commit_tip: Option<gpui::Entity<views::commit_tip::CommitTip>>,
     card_gen: u64,
+    card_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     terminals: Vec<TerminalSession>,
     active_terminal: usize,
     term_counter: usize,
@@ -399,6 +400,7 @@ impl Workbench {
             commit_card: None,
             commit_tip: None,
             card_gen: 0,
+            card_bounds: Rc::new(Cell::new(None)),
             terminals: Vec::new(),
             active_terminal: 0,
             term_counter: 0,
@@ -4989,9 +4991,7 @@ impl Render for Workbench {
             || self.model.prompt.is_some()
             || self.external_prompt.is_some()
             || self.model.settings_open
-            || self.model.ext_detail.is_some()
-            // The native webview is drawn above everything GPUI paints, so a hover card over it would be cut off.
-            || self.commit_card.is_some();
+            || self.model.ext_detail.is_some();
         let webview_wanted = !overlay_open
             && matches!(
                 self.model.active().map(|t| &t.content),
@@ -5009,12 +5009,31 @@ impl Render for Workbench {
                     f32::from(b.size.height) as i32,
                 )
             });
+        // The native webview paints above everything GPUI draws, so the hover card needs a hole cut out of it.
+        let hole = webview_target
+            .zip(self.commit_card.and(self.card_bounds.get()))
+            .map(|((wx, wy, _, _), b)| {
+                (
+                    f32::from(b.origin.x) as i32 - wx,
+                    f32::from(b.origin.y) as i32 - wy,
+                    f32::from(b.size.width).ceil() as i32,
+                    f32::from(b.size.height).ceil() as i32,
+                )
+            });
+        let scale = window.scale_factor();
+        if let Some(panel) = self.panel.as_mut()
+            && webview_target.is_some()
+            && self.webview_applied == webview_target
+        {
+            panel.set_hole(hole, scale);
+        }
         if let Some(panel) = self.panel.as_mut()
             && self.webview_applied != webview_target
         {
             match webview_target {
                 Some((x, y, w, h)) => {
                     panel.set_area(x, y, w, h);
+                    panel.set_hole(hole, scale);
                     panel.set_visible(true);
                 }
                 None => {
