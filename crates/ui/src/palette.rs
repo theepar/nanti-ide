@@ -1225,6 +1225,7 @@ pub struct Palette {
     filtered: Vec<usize>,
     pub selected: usize,
     pub error: Option<String>,
+    pub loading: bool,
 }
 
 impl Palette {
@@ -1277,16 +1278,34 @@ impl Palette {
     }
 
     pub fn files(root: &Path) -> Self {
-        let items = list_files(root)
-            .into_iter()
+        Self::files_from(list_files(root))
+    }
+
+    fn file_items(list: Vec<(String, PathBuf)>) -> Vec<PaletteItem> {
+        list.into_iter()
             .map(|(rel, abs)| PaletteItem {
                 label: rel,
                 detail: None,
                 action: PaletteAction::OpenFile(abs),
                 badge: None,
             })
-            .collect();
-        Self::build(PaletteMode::Files, items)
+            .collect()
+    }
+
+    pub fn files_from(list: Vec<(String, PathBuf)>) -> Self {
+        Self::build(PaletteMode::Files, Self::file_items(list))
+    }
+
+    pub fn files_loading() -> Self {
+        let mut p = Self::build(PaletteMode::Files, Vec::new());
+        p.loading = true;
+        p
+    }
+
+    pub fn set_files(&mut self, list: Vec<(String, PathBuf)>) {
+        self.items = Self::file_items(list);
+        self.loading = false;
+        self.refilter();
     }
 
     fn build(mode: PaletteMode, items: Vec<PaletteItem>) -> Self {
@@ -1297,6 +1316,7 @@ impl Palette {
             filtered: Vec::new(),
             selected: 0,
             error: None,
+            loading: false,
         };
         p.refilter();
         p

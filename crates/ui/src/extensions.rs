@@ -1,4 +1,7 @@
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant, SystemTime};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtensionCommand {
@@ -469,6 +472,66 @@ pub fn download_icon(config_dir: &Path, id: &str, url: &str) -> Result<PathBuf, 
     Ok(dest)
 }
 
+pub fn download_icons(config_dir: &Path, jobs: &[(String, String)]) -> Vec<(String, PathBuf)> {
+    let dir = icon_cache_dir(config_dir);
+    if std::fs::create_dir_all(&dir).is_err() {
+        return Vec::new();
+    }
+    let mut planned: Vec<(String, PathBuf, PathBuf, &str)> = Vec::new();
+    for (id, url) in jobs {
+        if !url.starts_with("https://open-vsx.org/") {
+            continue;
+        }
+        let ext = url
+            .rsplit('/')
+            .next()
+            .and_then(|f| f.rsplit_once('.'))
+            .map(|(_, e)| e.to_ascii_lowercase())
+            .filter(|e| ICON_EXTS.contains(&e.as_str()))
+            .unwrap_or_else(|| "png".to_owned());
+        let stem = icon_stem(id);
+        planned.push((
+            id.clone(),
+            dir.join(format!("{stem}.{ext}")),
+            dir.join(format!("{stem}.{ext}.part")),
+            url,
+        ));
+    }
+    if planned.is_empty() {
+        return Vec::new();
+    }
+    let mut cmd = std::process::Command::new("curl.exe");
+    cmd.args([
+        "-sSL",
+        "--max-time",
+        "30",
+        "--connect-timeout",
+        "8",
+        "--parallel",
+        "--parallel-max",
+        "8",
+    ]);
+    for (_, _, part, url) in &planned {
+        cmd.arg("-o").arg(part).arg(url);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let _ = cmd.output();
+    let mut done = Vec::new();
+    for (id, dest, part, _) in planned {
+        let size = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
+        if size == 0 || size > ICON_MAX || std::fs::rename(&part, &dest).is_err() {
+            let _ = std::fs::remove_file(&part);
+            continue;
+        }
+        done.push((id, dest));
+    }
+    done
+}
+
 pub fn download_readme(url: &str) -> Result<String, String> {
     fetch_text(url, README_MAX)
 }
@@ -531,25 +594,9 @@ pub fn download_extra(publisher: &str, name: &str) -> Result<ExtExtra, String> {
 }
 
 fn fetch_text(url: &str, cap: usize) -> Result<String, String> {
-    if !url.starts_with("https://open-vsx.org/") {
-        return Err("refusing to download from an address that is not Open VSX".into());
-    }
-    let mut cmd = std::process::Command::new("curl.exe");
-    cmd.arg("-sSL").arg("--max-time").arg("15").arg(url);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000);
-    }
-    let out = cmd.output().map_err(|e| format!("cannot run curl: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "could not load the description: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
-    let bytes = &out.stdout[..out.stdout.len().min(cap)];
-    Ok(String::from_utf8_lossy(bytes).into_owned())
+    let body =
+        http_get(url, 15, cap).map_err(|e| format!("could not load the description: {e}"))?;
+    Ok(String::from_utf8_lossy(&body[..body.len().min(cap)]).into_owned())
 }
 
 pub fn list_installed(config_dir: &Path, extra: Option<&Path>) -> Vec<Extension> {
@@ -624,17 +671,64 @@ pub fn install_vsix(config_dir: &Path, vsix: &Path) -> Result<Extension, String>
             "{safe_id}-{}",
             manifest.version.replace(['/', '\\', ':'], "_")
         ));
-        if dest.exists() {
+        let dest_is_valid = dest.is_dir() && dest.join("package.json").is_file();
+        if dest_is_valid {
             return Err(format!(
                 "{} {} is already installed",
                 manifest.id, manifest.version
             ));
+        } else if dest.exists() {
+            let _ = remove_dir_force(&dest);
         }
-        std::fs::rename(&inner, &dest).map_err(|e| e.to_string())?;
+        if std::fs::rename(&inner, &dest).is_err() {
+            if let Err(e) = copy_dir_all(&inner, &dest) {
+                return Err(format!("cannot install into {}: {e}", dest.display()));
+            }
+            let _ = remove_dir_force(&inner);
+        }
         read_manifest(&dest).ok_or_else(|| "the installed manifest cannot be read".to_owned())
     })();
-    let _ = std::fs::remove_dir_all(&staging);
+    let _ = remove_dir_force(&staging);
     result
+}
+
+pub fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let dest_child = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_all(&entry.path(), &dest_child)?;
+        } else {
+            std::fs::copy(entry.path(), dest_child)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn remove_dir_force(dir: &Path) -> std::io::Result<()> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            let _ = remove_dir_force(&path);
+        } else {
+            #[cfg(windows)]
+            if let Ok(metadata) = std::fs::metadata(&path) {
+                let mut perms = metadata.permissions();
+                if perms.readonly() {
+                    perms.set_readonly(false);
+                    let _ = std::fs::set_permissions(&path, perms);
+                }
+            }
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+    std::fs::remove_dir(dir)
 }
 
 pub fn uninstall(config_dir: &Path, dir: &Path) -> Result<(), String> {
@@ -642,7 +736,7 @@ pub fn uninstall(config_dir: &Path, dir: &Path) -> Result<(), String> {
     if dir.parent() != Some(root.as_path()) || !dir.is_dir() {
         return Err("only extensions installed by nanti. can be removed here".into());
     }
-    std::fs::remove_dir_all(dir).map_err(|e| e.to_string())
+    remove_dir_force(dir).map_err(|e| e.to_string())
 }
 
 pub fn save_panel_choice(config_dir: &Path, dir: &Path, view_type: &str) -> Result<(), String> {
@@ -660,6 +754,76 @@ pub fn load_panel_choice(config_dir: &Path) -> Option<(PathBuf, String)> {
     (dir.join("package.json").is_file() && !view.is_empty()).then_some((dir, view))
 }
 
+const HTTP_TTL: Duration = Duration::from_secs(600);
+const HTTP_CACHE_MAX: usize = 64;
+const RECOMMENDED_TTL: Duration = Duration::from_secs(6 * 3600);
+const RECOMMENDED_URL: &str =
+    "https://open-vsx.org/api/-/search?sortBy=downloadCount&sortOrder=desc&size=30";
+
+#[derive(Default)]
+struct HttpCache {
+    entries: HashMap<String, (Instant, Vec<u8>)>,
+}
+
+impl HttpCache {
+    fn get(&self, key: &str, now: Instant) -> Option<Vec<u8>> {
+        self.entries
+            .get(key)
+            .filter(|(at, _)| now.saturating_duration_since(*at) < HTTP_TTL)
+            .map(|(_, body)| body.clone())
+    }
+
+    fn put(&mut self, key: String, now: Instant, body: Vec<u8>) {
+        if self.entries.len() >= HTTP_CACHE_MAX
+            && !self.entries.contains_key(&key)
+            && let Some(oldest) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, (at, _))| *at)
+                .map(|(k, _)| k.clone())
+        {
+            self.entries.remove(&oldest);
+        }
+        self.entries.insert(key, (now, body));
+    }
+}
+
+fn http_cache() -> &'static Mutex<HttpCache> {
+    static CACHE: OnceLock<Mutex<HttpCache>> = OnceLock::new();
+    CACHE.get_or_init(Mutex::default)
+}
+
+fn http_get(url: &str, max_time: u32, cap: usize) -> Result<Vec<u8>, String> {
+    if !url.starts_with("https://open-vsx.org/") {
+        return Err("refusing to download from an address that is not Open VSX".into());
+    }
+    if let Ok(cache) = http_cache().lock()
+        && let Some(hit) = cache.get(url, Instant::now())
+    {
+        return Ok(hit);
+    }
+    let mut cmd = std::process::Command::new("curl.exe");
+    cmd.args(["-sSL", "--fail", "--compressed", "--connect-timeout", "8"])
+        .arg("--max-time")
+        .arg(max_time.to_string())
+        .arg("--max-filesize")
+        .arg(cap.to_string())
+        .arg(url);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let out = cmd.output().map_err(|e| format!("cannot run curl: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_owned());
+    }
+    if let Ok(mut cache) = http_cache().lock() {
+        cache.put(url.to_owned(), Instant::now(), out.stdout.clone());
+    }
+    Ok(out.stdout)
+}
+
 pub fn search_marketplace(query: &str) -> Result<Vec<MarketplaceExtension>, String> {
     let q = query.trim();
     if q.is_empty() {
@@ -672,28 +836,71 @@ pub fn search_marketplace(query: &str) -> Result<Vec<MarketplaceExtension>, Stri
 }
 
 pub fn recommended_marketplace() -> Result<Vec<MarketplaceExtension>, String> {
-    fetch_marketplace(
-        "https://open-vsx.org/api/-/search?sortBy=downloadCount&sortOrder=desc&size=30",
-    )
+    recommended_cached(None)
+}
+
+pub fn recommended_cached(config_dir: Option<&Path>) -> Result<Vec<MarketplaceExtension>, String> {
+    let path = config_dir.map(|d| d.join("cache").join("recommended.json"));
+    recommended_with(path.as_deref(), SystemTime::now(), || {
+        http_get(RECOMMENDED_URL, 10, 4_000_000)
+    })
+}
+
+fn read_fresh(path: &Path, now: SystemTime, ttl: Duration) -> Option<Vec<u8>> {
+    let age = now.duration_since(std::fs::metadata(path).ok()?.modified().ok()?);
+    if age.is_ok_and(|a| a > ttl) {
+        return None;
+    }
+    std::fs::read(path).ok()
+}
+
+fn recommended_with(
+    path: Option<&Path>,
+    now: SystemTime,
+    fetch: impl FnOnce() -> Result<Vec<u8>, String>,
+) -> Result<Vec<MarketplaceExtension>, String> {
+    if let Some(p) = path
+        && let Some(bytes) = read_fresh(p, now, RECOMMENDED_TTL)
+        && let Ok(list) = parse_marketplace(&bytes)
+        && !list.is_empty()
+    {
+        return Ok(list);
+    }
+    match fetch().and_then(|bytes| parse_marketplace(&bytes).map(|list| (bytes, list))) {
+        Ok((bytes, list)) if !list.is_empty() => {
+            if let Some(p) = path {
+                if let Some(parent) = p.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let part = p.with_extension("json.part");
+                if std::fs::write(&part, &bytes).is_ok() {
+                    let _ = std::fs::rename(&part, p);
+                }
+            }
+            Ok(list)
+        }
+        other => {
+            let stale = path
+                .and_then(|p| std::fs::read(p).ok())
+                .and_then(|b| parse_marketplace(&b).ok())
+                .filter(|l| !l.is_empty());
+            match (stale, other) {
+                (Some(list), _) => Ok(list),
+                (None, Err(e)) => Err(e),
+                (None, Ok(_)) => Ok(Vec::new()),
+            }
+        }
+    }
 }
 
 fn fetch_marketplace(url: &str) -> Result<Vec<MarketplaceExtension>, String> {
-    let mut cmd = std::process::Command::new("curl.exe");
-    cmd.arg("-sSL").arg("--max-time").arg("10").arg(url);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000);
-    }
-    let out = cmd.output().map_err(|e| format!("cannot run curl: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "search request failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        ));
-    }
-    let val: serde_json::Value = serde_json::from_slice(&out.stdout)
-        .map_err(|e| format!("invalid search response JSON: {e}"))?;
+    let bytes = http_get(url, 10, 4_000_000).map_err(|e| format!("search request failed: {e}"))?;
+    parse_marketplace(&bytes)
+}
+
+fn parse_marketplace(bytes: &[u8]) -> Result<Vec<MarketplaceExtension>, String> {
+    let val: serde_json::Value =
+        serde_json::from_slice(bytes).map_err(|e| format!("invalid search response JSON: {e}"))?;
 
     let mut list = Vec::new();
     if let Some(items) = val.get("extensions").and_then(|e| e.as_array()) {
@@ -827,6 +1034,166 @@ pub fn resolve_package(
     ))
 }
 
+const VSIX_CACHE_KEEP: usize = 8;
+const PREFETCH_MAX_BYTES: u64 = 40 * 1024 * 1024;
+
+pub fn vsix_cache_dir(config_dir: &Path) -> PathBuf {
+    config_dir.join("cache").join("vsix")
+}
+
+fn cache_file_name(url: &str) -> Option<String> {
+    let name = url.split(['?', '#']).next()?.rsplit('/').next()?;
+    let plain = name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+'));
+    (plain && name.len() > 5 && name.to_ascii_lowercase().ends_with(".vsix"))
+        .then(|| name.to_owned())
+}
+
+fn cached_is_complete(path: &Path, expected: u64) -> bool {
+    std::fs::metadata(path).is_ok_and(|m| m.len() > 0 && (expected == 0 || m.len() == expected))
+}
+
+pub fn prune_vsix_cache(dir: &Path, keep: usize) {
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut packages: Vec<(SystemTime, PathBuf)> = Vec::new();
+    for e in read.filter_map(Result::ok) {
+        let path = e.path();
+        let modified = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if name.ends_with(".vsix") {
+            packages.push((modified, path));
+        } else if name.ends_with(".part")
+            && SystemTime::now()
+                .duration_since(modified)
+                .is_ok_and(|a| a > Duration::from_secs(3600))
+        {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+    packages.sort_by(|a, b| b.0.cmp(&a.0));
+    for (_, path) in packages.into_iter().skip(keep) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+fn download_file(url: &str, dest: &Path, progress: Option<&Progress>) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+    let mut cmd = std::process::Command::new("curl.exe");
+    cmd.args([
+        "-sSL",
+        "--fail",
+        "--connect-timeout",
+        "15",
+        "--max-time",
+        "1800",
+    ])
+    .args(["--speed-limit", "2048", "--speed-time", "30"])
+    .arg("-o")
+    .arg(dest)
+    .arg(url)
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let mut child = cmd.spawn().map_err(|e| format!("cannot run curl: {e}"))?;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if let Some(p) = progress {
+                    let got = std::fs::metadata(dest).map_or(0, |m| m.len());
+                    p.done.store(got, Ordering::Relaxed);
+                }
+                std::thread::sleep(Duration::from_millis(250));
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(dest);
+                return Err(format!("download failed: {e}"));
+            }
+        }
+    };
+    if let Some(p) = progress {
+        p.done.store(
+            std::fs::metadata(dest).map_or(0, |m| m.len()),
+            Ordering::Relaxed,
+        );
+    }
+    if status.success() {
+        return Ok(());
+    }
+    let mut why = String::new();
+    if let Some(mut e) = child.stderr.take() {
+        use std::io::Read;
+        let _ = e.read_to_string(&mut why);
+    }
+    let _ = std::fs::remove_file(dest);
+    Err(format!("download failed: {}", why.trim()))
+}
+
+fn in_flight() -> &'static Mutex<HashSet<String>> {
+    static SET: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    SET.get_or_init(Mutex::default)
+}
+
+fn fetch_into_cache(
+    config_dir: &Path,
+    url: &str,
+    size: u64,
+    progress: Option<&Progress>,
+) -> Result<PathBuf, String> {
+    let name = cache_file_name(url).ok_or("unexpected package address")?;
+    let dir = vsix_cache_dir(config_dir);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let dest = dir.join(&name);
+    if cached_is_complete(&dest, size) {
+        return Ok(dest);
+    }
+    let part = dir.join(format!("{name}.part"));
+    download_file(url, &part, progress)?;
+    if !cached_is_complete(&part, size) {
+        let _ = std::fs::remove_file(&part);
+        return Err("download failed: the package is incomplete".into());
+    }
+    std::fs::rename(&part, &dest).map_err(|e| e.to_string())?;
+    prune_vsix_cache(&dir, VSIX_CACHE_KEEP);
+    Ok(dest)
+}
+
+pub fn prefetch_package(
+    config_dir: &Path,
+    publisher: &str,
+    name: &str,
+    listed_url: &str,
+) -> Result<(), String> {
+    if !listed_url.starts_with("https://open-vsx.org/") {
+        return Err("refusing to download from an address that is not Open VSX".into());
+    }
+    let (url, size) = resolve_package(publisher, name, listed_url)?;
+    if size > PREFETCH_MAX_BYTES || cache_file_name(&url).is_none() {
+        return Ok(());
+    }
+    if !in_flight()
+        .lock()
+        .is_ok_and(|mut set| set.insert(url.clone()))
+    {
+        return Ok(());
+    }
+    let result = fetch_into_cache(config_dir, &url, size, None);
+    if let Ok(mut set) = in_flight().lock() {
+        set.remove(&url);
+    }
+    result.map(|_| ())
+}
+
 pub fn download_and_install(
     config_dir: &Path,
     publisher: &str,
@@ -841,62 +1208,14 @@ pub fn download_and_install(
     let (url, size) = resolve_package(publisher, name, listed_url)?;
     progress.done.store(0, Ordering::Relaxed);
     progress.total.store(size, Ordering::Relaxed);
-
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_nanos());
-    let tmp = std::env::temp_dir().join(format!("nanti-ext-{}-{stamp}.vsix", std::process::id()));
-    let mut cmd = std::process::Command::new("curl.exe");
-    // --fail: an HTTP error must not be saved as if it were the package.
-    cmd.args([
-        "-sSL",
-        "--fail",
-        "--connect-timeout",
-        "15",
-        "--max-time",
-        "1800",
-    ])
-    .args(["--speed-limit", "2048", "--speed-time", "30"])
-    .arg("-o")
-    .arg(&tmp)
-    .arg(&url)
-    .stdout(std::process::Stdio::null())
-    .stderr(std::process::Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000);
+    let package = fetch_into_cache(config_dir, &url, size, Some(progress))?;
+    let len = std::fs::metadata(&package).map_or(0, |m| m.len());
+    progress.total.store(len, Ordering::Relaxed);
+    progress.done.store(len, Ordering::Relaxed);
+    let res = install_vsix(config_dir, &package);
+    if res.is_err() {
+        let _ = std::fs::remove_file(&package);
     }
-    let mut child = cmd.spawn().map_err(|e| format!("cannot run curl: {e}"))?;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) => {
-                let got = std::fs::metadata(&tmp).map_or(0, |m| m.len());
-                progress.done.store(got, Ordering::Relaxed);
-                std::thread::sleep(std::time::Duration::from_millis(250));
-            }
-            Err(e) => {
-                let _ = std::fs::remove_file(&tmp);
-                return Err(format!("download failed: {e}"));
-            }
-        }
-    };
-    progress.done.store(
-        std::fs::metadata(&tmp).map_or(0, |m| m.len()),
-        Ordering::Relaxed,
-    );
-    if !status.success() {
-        let mut why = String::new();
-        if let Some(mut e) = child.stderr.take() {
-            use std::io::Read;
-            let _ = e.read_to_string(&mut why);
-        }
-        let _ = std::fs::remove_file(&tmp);
-        return Err(format!("download failed: {}", why.trim()));
-    }
-    let res = install_vsix(config_dir, &tmp);
-    let _ = std::fs::remove_file(&tmp);
     res
 }
 
@@ -1154,6 +1473,315 @@ mod tests {
         assert!(
             load_panel_choice(&cfg).is_none(),
             "an extension that was removed is not loaded"
+        );
+    }
+
+    const SAMPLE_LIST: &str = r#"{"extensions":[{"namespace":"acme","name":"tool","version":"1.0.0",
+        "files":{"download":"https://open-vsx.org/api/acme/tool/1.0.0/file/acme.tool-1.0.0.vsix"}}]}"#;
+
+    fn age_file(path: &Path, by: Duration) {
+        let f = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+        f.set_modified(SystemTime::now() - by).unwrap();
+    }
+
+    #[test]
+    fn the_http_cache_expires_entries_and_stays_bounded() {
+        let mut c = HttpCache::default();
+        let t0 = Instant::now();
+        c.put("a".into(), t0, b"A".to_vec());
+        assert_eq!(c.get("a", t0 + Duration::from_secs(5)), Some(b"A".to_vec()));
+        assert_eq!(c.get("a", t0 + HTTP_TTL + Duration::from_secs(1)), None);
+        for i in 0..HTTP_CACHE_MAX + 10 {
+            c.put(
+                format!("k{i}"),
+                t0 + Duration::from_millis(i as u64),
+                vec![0],
+            );
+        }
+        assert_eq!(c.entries.len(), HTTP_CACHE_MAX);
+        assert!(
+            c.get("k0", t0).is_none(),
+            "the oldest entries are dropped first"
+        );
+        assert!(c.get(&format!("k{}", HTTP_CACHE_MAX + 9), t0).is_some());
+        c.put("k20".into(), t0, vec![1]);
+        assert_eq!(
+            c.entries.len(),
+            HTTP_CACHE_MAX,
+            "replacing a key does not evict another"
+        );
+    }
+
+    #[test]
+    fn the_recommended_list_is_served_from_disk_while_fresh() {
+        let dir = tmp("recfresh");
+        let path = dir.0.join("cache").join("recommended.json");
+        let list = recommended_with(Some(&path), SystemTime::now(), || {
+            Ok(SAMPLE_LIST.as_bytes().to_vec())
+        })
+        .unwrap();
+        assert_eq!(list[0].id, "acme.tool");
+        assert!(path.is_file(), "the response was cached");
+        let again = recommended_with(Some(&path), SystemTime::now(), || {
+            panic!("no network while the cache is fresh")
+        })
+        .unwrap();
+        assert_eq!(again, list);
+    }
+
+    #[test]
+    fn a_stale_recommended_list_is_refreshed_or_used_when_offline() {
+        let dir = tmp("recstale");
+        let path = dir.0.join("cache").join("recommended.json");
+        recommended_with(Some(&path), SystemTime::now(), || {
+            Ok(SAMPLE_LIST.as_bytes().to_vec())
+        })
+        .unwrap();
+        age_file(&path, RECOMMENDED_TTL + Duration::from_secs(60));
+        let offline =
+            recommended_with(Some(&path), SystemTime::now(), || Err("offline".into())).unwrap();
+        assert_eq!(offline[0].id, "acme.tool", "stale data beats an error");
+        let newer = SAMPLE_LIST.replace("acme", "other");
+        let refreshed = recommended_with(Some(&path), SystemTime::now(), || {
+            Ok(newer.clone().into_bytes())
+        })
+        .unwrap();
+        assert_eq!(refreshed[0].id, "other.tool");
+        assert!(std::fs::read_to_string(&path).unwrap().contains("other"));
+    }
+
+    #[test]
+    fn with_no_cache_a_failure_or_empty_answer_is_reported_not_cached() {
+        let dir = tmp("recnone");
+        let path = dir.0.join("cache").join("recommended.json");
+        assert_eq!(
+            recommended_with(Some(&path), SystemTime::now(), || Err("offline".into())).unwrap_err(),
+            "offline"
+        );
+        assert!(
+            recommended_with(Some(&path), SystemTime::now(), || Ok(b"not json".to_vec())).is_err()
+        );
+        let empty = recommended_with(Some(&path), SystemTime::now(), || {
+            Ok(br#"{"extensions":[]}"#.to_vec())
+        })
+        .unwrap();
+        assert!(empty.is_empty());
+        assert!(!path.exists(), "nothing useful is cached");
+        assert!(
+            recommended_with(None, SystemTime::now(), || Ok(SAMPLE_LIST
+                .as_bytes()
+                .to_vec()))
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn package_cache_names_are_plain_vsix_file_names_only() {
+        let ok = "https://open-vsx.org/api/a/b/1.0.0/file/a.b-1.0.0.vsix";
+        assert_eq!(cache_file_name(ok).as_deref(), Some("a.b-1.0.0.vsix"));
+        assert_eq!(
+            cache_file_name(&format!("{ok}?x=1")).as_deref(),
+            Some("a.b-1.0.0.vsix")
+        );
+        for bad in [
+            "https://open-vsx.org/api/a/b/file/a.zip",
+            "https://open-vsx.org/api/a/b/file/",
+            "https://open-vsx.org/api/a/b/file/..%2F..%2Fevil.vsix",
+            "https://open-vsx.org/api/a/b/file/a b.vsix",
+            "https://open-vsx.org/api/a/b/file/.vsix",
+        ] {
+            assert_eq!(cache_file_name(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_cached_package_is_reused_only_when_complete_and_the_oldest_are_pruned() {
+        let dir = tmp("vsixcache");
+        let cfg = dir.0.join("cfg");
+        let url = "https://open-vsx.org/api/a/b/1.0.0/file/a.b-1.0.0.vsix";
+        let cached = vsix_cache_dir(&cfg).join("a.b-1.0.0.vsix");
+        std::fs::create_dir_all(cached.parent().unwrap()).unwrap();
+        std::fs::write(&cached, b"12345").unwrap();
+        assert_eq!(
+            fetch_into_cache(&cfg, url, 5, None).unwrap(),
+            cached,
+            "complete: no network is needed"
+        );
+        assert_eq!(
+            fetch_into_cache(&cfg, url, 0, None).unwrap(),
+            cached,
+            "unknown size accepts a non-empty file"
+        );
+        assert!(cached_is_complete(&cached, 5) && !cached_is_complete(&cached, 6));
+        assert!(fetch_into_cache(&cfg, "https://open-vsx.org/x/evil.zip", 0, None).is_err());
+
+        let cache = vsix_cache_dir(&cfg);
+        for i in 0..12 {
+            let f = cache.join(format!("p{i}.vsix"));
+            std::fs::write(&f, b"x").unwrap();
+            age_file(&f, Duration::from_secs(1000 - i * 10));
+        }
+        let old_part = cache.join("old.vsix.part");
+        std::fs::write(&old_part, b"x").unwrap();
+        age_file(&old_part, Duration::from_secs(7200));
+        let new_part = cache.join("new.vsix.part");
+        std::fs::write(&new_part, b"x").unwrap();
+        prune_vsix_cache(&cache, 8);
+        let kept: usize = std::fs::read_dir(&cache)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".vsix"))
+            .count();
+        assert_eq!(kept, 8);
+        assert!(
+            cache.join("p11.vsix").exists() && !cache.join("p0.vsix").exists(),
+            "the newest are kept"
+        );
+        assert!(
+            !old_part.exists() && new_part.exists(),
+            "only stale partial downloads are removed"
+        );
+    }
+
+    #[test]
+    fn batched_icon_downloads_refuse_other_hosts_without_running_anything() {
+        let dir = tmp("iconbatch");
+        let jobs = vec![
+            ("a.b".to_owned(), "https://evil.example/icon.png".to_owned()),
+            ("c.d".to_owned(), "http://open-vsx.org/icon.png".to_owned()),
+        ];
+        assert!(download_icons(&dir.0, &jobs).is_empty());
+        assert!(download_icons(&dir.0, &[]).is_empty());
+    }
+
+    #[test]
+    #[ignore = "needs the network: measures real Open VSX timings"]
+    fn real_marketplace_timings_cold_versus_cached() {
+        let dir = tmp("realtiming");
+        let time = |label: &str, f: &mut dyn FnMut()| -> Duration {
+            let start = Instant::now();
+            f();
+            let took = start.elapsed();
+            println!("{label:<46} {took:>10.1?}");
+            took
+        };
+        let mut n = 0usize;
+        let cold_search = time("search 'prettier' (cold)", &mut || {
+            n = search_marketplace("prettier").unwrap().len()
+        });
+        assert!(n > 0);
+        let warm_search = time("search 'prettier' again (memory cache)", &mut || {
+            search_marketplace("prettier").unwrap();
+        });
+        assert!(warm_search < cold_search / 4 && warm_search < Duration::from_millis(100));
+
+        let cfg = dir.0.join("cfg");
+        let mut recommended = Vec::new();
+        let cold_rec = time("recommended list (cold, network)", &mut || {
+            recommended = recommended_cached(Some(&cfg)).unwrap()
+        });
+        let path = cfg.join("cache").join("recommended.json");
+        let disk_rec = time("recommended list (disk cache, no network)", &mut || {
+            recommended_with(Some(&path), SystemTime::now(), || panic!("must not fetch")).unwrap();
+        });
+        assert!(disk_rec < Duration::from_millis(50) && disk_rec < cold_rec);
+
+        let mut extra = None;
+        let cold_detail = time("details: metadata + readme + manifest (cold)", &mut || {
+            extra = Some(download_extra("esbenp", "prettier-vscode").unwrap())
+        });
+        assert!(extra.unwrap().manifest.is_some());
+        let warm_detail = time("details again (memory cache)", &mut || {
+            download_extra("esbenp", "prettier-vscode").unwrap();
+        });
+        assert!(warm_detail < cold_detail / 3);
+
+        let jobs: Vec<(String, String)> = recommended
+            .iter()
+            .filter_map(|m| m.icon_url.clone().map(|u| (m.id.clone(), u)))
+            .take(20)
+            .collect();
+        let seq_dir = dir.0.join("seq");
+        let batch_dir = dir.0.join("batch");
+        let mut seq_ok = 0;
+        let sequential = time(
+            &format!("{} icons, one curl process each", jobs.len()),
+            &mut || {
+                seq_ok = jobs
+                    .iter()
+                    .filter(|(id, url)| download_icon(&seq_dir, id, url).is_ok())
+                    .count();
+            },
+        );
+        let mut batch_ok = 0;
+        let batched = time(
+            &format!("{} icons, batched curl --parallel", jobs.len()),
+            &mut || {
+                batch_ok = jobs
+                    .chunks(8)
+                    .map(|c| download_icons(&batch_dir, c).len())
+                    .sum();
+            },
+        );
+        println!("icons saved: sequential {seq_ok}, batched {batch_ok}");
+        assert!(batch_ok + 2 >= seq_ok);
+        assert!(
+            batched < sequential,
+            "batching must be faster than one process per icon"
+        );
+
+        let progress = Progress::default();
+        let mut cold_install = Duration::ZERO;
+        cold_install += time(
+            "install errorlens (cold: resolve + download + unpack)",
+            &mut || {
+                download_and_install(
+                    &cfg,
+                    "usernamehw",
+                    "errorlens",
+                    "https://open-vsx.org/api/usernamehw/errorlens/latest/file/x.vsix",
+                    &progress,
+                )
+                .map(|_| ())
+                .or_else(|e| {
+                    if e.contains("already installed") {
+                        Ok(())
+                    } else {
+                        Err(e)
+                    }
+                })
+                .unwrap();
+            },
+        );
+        let listed = search_marketplace("tamasfe.even-better-toml")
+            .unwrap()
+            .into_iter()
+            .find(|m| m.id == "tamasfe.even-better-toml")
+            .expect("listed");
+        let mut prefetched = Duration::ZERO;
+        prefetched += time(
+            "prefetch even-better-toml (what opening details does)",
+            &mut || {
+                prefetch_package(&cfg, &listed.publisher, &listed.name, &listed.download_url)
+                    .unwrap()
+            },
+        );
+        let install_after = time("install even-better-toml after the prefetch", &mut || {
+            download_and_install(
+                &cfg,
+                &listed.publisher,
+                &listed.name,
+                &listed.download_url,
+                &progress,
+            )
+            .unwrap();
+        });
+        println!(
+            "(cold install {cold_install:.1?} for one package, prefetch {prefetched:.1?}, click-to-installed after prefetch {install_after:.1?})"
+        );
+        assert!(
+            install_after < Duration::from_secs(5),
+            "after a prefetch the install is just resolve + unpack"
         );
     }
 }

@@ -408,7 +408,10 @@ impl Workbench {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         use crate::extensions::Readme;
-        let installed = self.model.extensions.iter().find(|e| e.id == d.id);
+        let installed = self.model.extensions.iter().find(|e| {
+            e.id.eq_ignore_ascii_case(&d.id)
+                || e.display_name.eq_ignore_ascii_case(&d.display_name)
+        });
         let installed_root = self
             .model
             .config_dir
@@ -704,11 +707,11 @@ impl Workbench {
         m: &crate::extensions::MarketplaceExtension,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let is_installed = self
-            .model
-            .extensions
-            .iter()
-            .any(|e| e.id == m.id || e.id == m.name);
+        let is_installed = self.model.extensions.iter().any(|e| {
+            e.id.eq_ignore_ascii_case(&m.id)
+                || e.id.eq_ignore_ascii_case(&m.name)
+                || e.display_name.eq_ignore_ascii_case(&m.display_name)
+        });
         let download_url = m.download_url.clone();
         let stats = if m.downloads > 0 {
             format!("{}  ·  {}", m.publisher, short_count(m.downloads))

@@ -634,20 +634,14 @@ impl Model {
         if jobs.is_empty() {
             return;
         }
-        let workers = jobs.len().min(4);
-        let jobs = std::sync::Arc::new(std::sync::Mutex::new(jobs));
-        for _ in 0..workers {
-            let (jobs, tx, cfg) = (jobs.clone(), self.icon_tx.clone(), cfg.clone());
-            std::thread::spawn(move || {
-                loop {
-                    let job = jobs.lock().ok().and_then(|mut j| j.pop());
-                    let Some((id, url)) = job else { break };
-                    if let Ok(path) = extensions::download_icon(&cfg, &id, &url) {
-                        let _ = tx.send((id, path));
-                    }
+        let tx = self.icon_tx.clone();
+        std::thread::spawn(move || {
+            for batch in jobs.chunks(8) {
+                for item in extensions::download_icons(&cfg, batch) {
+                    let _ = tx.send(item);
                 }
-            });
-        }
+            }
+        });
     }
 
     pub fn open_market_detail(&mut self, index: usize) {
@@ -665,6 +659,15 @@ impl Model {
                 let _ = tx.send((id, extensions::download_extra(&publisher, &name)));
             });
             self.readme_rx = Some(rx);
+        }
+        if self.marketplace_enabled
+            && let Some(cfg) = self.config_dir.clone()
+        {
+            let (publisher, name, url) =
+                (m.publisher.clone(), m.name.clone(), m.download_url.clone());
+            std::thread::spawn(move || {
+                let _ = extensions::prefetch_package(&cfg, &publisher, &name, &url);
+            });
         }
         let readme = Readme::Loading;
         self.ext_detail = Some(extensions::ExtDetail {
@@ -754,8 +757,9 @@ impl Model {
         }
         self.recommend_tried = true;
         let (tx, rx) = std::sync::mpsc::channel();
+        let cfg = self.config_dir.clone();
         std::thread::spawn(move || {
-            let _ = tx.send(extensions::recommended_marketplace());
+            let _ = tx.send(extensions::recommended_cached(cfg.as_deref()));
         });
         self.marketplace_rx = Some(rx);
         self.marketplace_recommended = true;

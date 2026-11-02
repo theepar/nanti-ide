@@ -17,6 +17,8 @@ use crate::tasks::Task;
 
 const HIDDEN_DIRS: [&str; 3] = [".git", "node_modules", "target"];
 pub const INDENT_UNIT: &str = "    ";
+type FileList = Vec<(String, PathBuf)>;
+const FILE_INDEX_TTL: std::time::Duration = std::time::Duration::from_secs(15);
 pub const MAX_OPEN_BYTES: u64 = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -205,6 +207,8 @@ pub struct Model {
     pub search: SearchState,
     pub scm: ScmState,
     pub folder_open: bool,
+    pub file_index: Option<(std::time::Instant, std::sync::Arc<FileList>)>,
+    pub index_rx: Option<std::sync::mpsc::Receiver<FileList>>,
     pub panel_request: Option<(PathBuf, String)>,
     pub explorer_sel: Option<PathBuf>,
     pub explorer_gen: u64,
@@ -259,6 +263,8 @@ impl Model {
         Self {
             scm: ScmState::new(root.clone()),
             folder_open: true,
+            file_index: None,
+            index_rx: None,
             panel_request: None,
             explorer_sel: None,
             explorer_gen: 0,
@@ -319,6 +325,52 @@ impl Model {
 
     pub fn invalidate_explorer(&mut self) {
         self.explorer_gen = self.explorer_gen.wrapping_add(1);
+        self.file_index = None;
+    }
+
+    fn files_palette(&mut self) -> Palette {
+        if !self.folder_open {
+            return Palette::files_from(Vec::new());
+        }
+        if let Some((at, list)) = &self.file_index
+            && at.elapsed() < FILE_INDEX_TTL
+        {
+            return Palette::files_from(list.as_ref().clone());
+        }
+        if self.index_rx.is_none() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let root = self.root.clone();
+            std::thread::spawn(move || {
+                let _ = tx.send(crate::palette::list_files(&root));
+            });
+            self.index_rx = Some(rx);
+        }
+        Palette::files_loading()
+    }
+
+    pub fn pump_index(&mut self) -> bool {
+        use std::sync::mpsc::TryRecvError;
+        let Some(rx) = &self.index_rx else {
+            return false;
+        };
+        let list = match rx.try_recv() {
+            Ok(list) => list,
+            Err(TryRecvError::Empty) => return false,
+            Err(TryRecvError::Disconnected) => {
+                self.index_rx = None;
+                return true;
+            }
+        };
+        self.index_rx = None;
+        let list = std::sync::Arc::new(list);
+        if let Some(p) = self.palette.as_mut()
+            && p.loading
+            && p.mode == PaletteMode::Files
+        {
+            p.set_files(list.as_ref().clone());
+        }
+        self.file_index = Some((std::time::Instant::now(), list));
+        true
     }
 
     pub fn explorer_signature(&self) -> u64 {
@@ -827,7 +879,7 @@ impl Model {
     pub fn open_palette(&mut self, mode: PaletteMode) {
         self.palette = Some(match mode {
             PaletteMode::Commands => Palette::commands(&self.extensions),
-            PaletteMode::Files => Palette::files(&self.root),
+            PaletteMode::Files => self.files_palette(),
             PaletteMode::Branches => Palette::branches(&self.scm.branches),
             PaletteMode::LanguageMode => Palette::language_modes(),
             PaletteMode::Input(kind) => Palette::input(kind, ""),
@@ -1218,6 +1270,10 @@ impl Model {
             "Replaced {replaced} occurrence{}",
             if replaced == 1 { "" } else { "s" }
         ));
+    }
+
+    pub fn pump_search(&mut self) -> bool {
+        self.search.poll()
     }
 
     pub fn run_search(&mut self) {
@@ -1903,6 +1959,14 @@ mod tests {
         let ws = workspace("qo");
         let mut m = Model::new(ws.0.clone());
         m.run_command(Command::QuickOpen);
+        assert!(
+            m.palette.as_ref().unwrap().loading,
+            "the index is built in the background"
+        );
+        while m.index_rx.is_some() {
+            m.pump_index();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
         {
             let p = m.palette.as_mut().expect("palette open");
             assert_eq!(p.mode, PaletteMode::Files);
@@ -1997,6 +2061,7 @@ mod tests {
         assert!(m.search.focused);
         assert_eq!(m.search.query.text(), "beta");
         m.run_search();
+        m.search.wait();
         assert_eq!(m.search.results.as_ref().unwrap().total_hits, 1);
     }
 

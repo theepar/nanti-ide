@@ -258,6 +258,9 @@ fn find_in_files_runs_on_enter_and_lists_hits(cx: &mut TestAppContext) {
         "typing went to the search box"
     );
     cx.simulate_keystrokes("enter");
+    window
+        .update(cx, |wb, _, _| wb.model_mut().search.wait())
+        .unwrap();
     let (hits, files) = window
         .read_with(cx, |wb, _| {
             let r = wb.model().search.results.as_ref().unwrap();
@@ -276,6 +279,9 @@ fn find_in_files_prefills_from_selection_and_alt_toggles_apply(cx: &mut TestAppC
     let (window, cx) = open(cx, &ws.0, "a.txt");
     cx.simulate_keystrokes("shift-right shift-right shift-right ctrl-shift-f");
     cx.simulate_keystrokes("enter");
+    window
+        .update(cx, |wb, _, _| wb.model_mut().search.wait())
+        .unwrap();
     let n = window
         .read_with(cx, |wb, _| {
             wb.model().search.results.as_ref().unwrap().total_hits
@@ -283,6 +289,9 @@ fn find_in_files_prefills_from_selection_and_alt_toggles_apply(cx: &mut TestAppC
         .unwrap();
     assert_eq!(n, 2, "case-insensitive by default");
     cx.simulate_keystrokes("alt-c enter");
+    window
+        .update(cx, |wb, _, _| wb.model_mut().search.wait())
+        .unwrap();
     let n = window
         .read_with(cx, |wb, _| {
             wb.model().search.results.as_ref().unwrap().total_hits

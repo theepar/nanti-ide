@@ -241,7 +241,41 @@ struct Scrolls {
     search: ScrollHandle,
 }
 
-type HlCache = (PathBuf, u64, Option<Rc<Vec<Vec<LineSpan>>>>);
+type Spans = Rc<Vec<Vec<LineSpan>>>;
+type HlCache = (PathBuf, u64, Option<Spans>);
+type HlResult = (PathBuf, u64, Option<Vec<Vec<LineSpan>>>);
+
+/// Files above this size are highlighted on a background thread so typing never waits for them.
+const HIGHLIGHT_SYNC_BYTES: usize = 60_000;
+
+struct HlJob {
+    rx: std::sync::mpsc::Receiver<HlResult>,
+}
+
+#[derive(Default)]
+struct HlState {
+    exact: Option<HlCache>,
+    last_good: Option<(PathBuf, Spans)>,
+    provisional: Option<HlCache>,
+    job: Option<HlJob>,
+    ready: Option<HlResult>,
+}
+
+fn adjust_spans(old: &[Vec<LineSpan>], new_lines: usize, cursor_line: usize) -> Vec<Vec<LineSpan>> {
+    let mut v = old.to_vec();
+    if new_lines > v.len() {
+        let at = cursor_line.min(v.len());
+        for _ in 0..new_lines - v.len() {
+            v.insert(at, Vec::new());
+        }
+    } else if new_lines < v.len() {
+        let at = (cursor_line + 1).min(v.len());
+        let remove = (v.len() - new_lines).min(v.len() - at);
+        v.drain(at..at + remove);
+        v.resize(new_lines, Vec::new());
+    }
+    v
+}
 type ExplorerCache = (std::time::Instant, u64, Rc<Vec<model::Entry>>);
 
 pub struct Workbench {
@@ -267,8 +301,8 @@ pub struct Workbench {
     active_terminal: usize,
     term_counter: usize,
     term_metrics: GridMetrics,
-    highlighter: RefCell<SyntaxHighlighter>,
-    hl_cache: RefCell<Option<HlCache>>,
+    highlighter: std::sync::Arc<std::sync::Mutex<SyntaxHighlighter>>,
+    hl: RefCell<HlState>,
     explorer_cache: RefCell<Option<ExplorerCache>>,
     scroll: ScrollHandle,
     scrolls: Scrolls,
@@ -313,8 +347,8 @@ impl Workbench {
             active_terminal: 0,
             term_counter: 0,
             term_metrics: GridMetrics::default(),
-            highlighter: RefCell::new(SyntaxHighlighter::new()),
-            hl_cache: RefCell::new(None),
+            highlighter: std::sync::Arc::new(std::sync::Mutex::new(SyntaxHighlighter::new())),
+            hl: RefCell::new(HlState::default()),
             explorer_cache: RefCell::new(None),
             scroll: ScrollHandle::new(),
             scrolls: Scrolls::default(),
@@ -541,6 +575,9 @@ impl Workbench {
         }
         let mut changed = self.pump_terminals();
         changed |= self.model.pump_scm();
+        changed |= self.model.pump_search();
+        changed |= self.model.pump_index();
+        changed |= self.pump_highlight();
         changed |= self.model.pump_problems();
         changed |= self.model.pump_marketplace();
 
@@ -2079,7 +2116,7 @@ impl Workbench {
                 Prompt::RemoveExtension(p) => (
                     "Uninstall Extension",
                     format!(
-                        "Remove the extension {}? Its files are deleted.",
+                        "Remove the extension {}? All of its files will be permanently deleted.",
                         p.file_name()
                             .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
                     ),
@@ -2377,7 +2414,7 @@ impl Workbench {
             Some(TabContent::Diff(view)) => base.flex().flex_col().children(Self::diff_rows(view)),
             Some(TabContent::Text(editor)) => {
                 let active_tab = self.model.active();
-                let hl = active_tab.and_then(|t| self.highlights(editor, &t.path));
+                let hl = active_tab.and_then(|t| self.highlights_for_tab(editor, t));
                 let active_problems: Vec<syntax::Diagnostic> = active_tab
                     .and_then(|t| {
                         self.model
@@ -2912,52 +2949,101 @@ impl Workbench {
         }
     }
 
-    fn highlights_for_tab(&self, editor: &Editor, tab: &Tab) -> Option<Rc<Vec<Vec<LineSpan>>>> {
-        let version = editor.version();
+    fn highlights_for_tab(&self, editor: &Editor, tab: &Tab) -> Option<Spans> {
         let lang = tab
             .language_override
             .as_deref()
             .and_then(Language::from_id)
             .or_else(|| Language::from_path(&tab.path))?;
-        if let Some((p, v, spans)) = &*self.hl_cache.borrow()
+        let version = editor.version();
+        self.poll_highlight_job();
+        let mut st = self.hl.borrow_mut();
+        if let Some((p, v, spans)) = &st.exact
             && p == &tab.path
             && *v == version
         {
             return spans.clone();
         }
+        if let Some((p, v, spans)) = st.ready.take_if(|(p, v, _)| p == &tab.path && *v == version) {
+            let spans = spans.map(Rc::new);
+            if let Some(s) = &spans {
+                st.last_good = Some((p.clone(), s.clone()));
+            }
+            st.exact = Some((p, v, spans.clone()));
+            return spans;
+        }
         let text = editor.text();
-        let spans = if text.split('\n').count() == editor.buffer().len_lines() {
-            self.highlighter
-                .borrow_mut()
-                .highlight(lang, &text)
-                .map(Rc::new)
-        } else {
-            None
-        };
-        *self.hl_cache.borrow_mut() = Some((tab.path.clone(), version, spans.clone()));
-        spans
-    }
-
-    fn highlights(&self, editor: &Editor, path: &Path) -> Option<Rc<Vec<Vec<LineSpan>>>> {
-        let version = editor.version();
-        if let Some((p, v, spans)) = &*self.hl_cache.borrow()
-            && p == path
+        if text.len() <= HIGHLIGHT_SYNC_BYTES {
+            let spans = self
+                .highlighter
+                .lock()
+                .ok()
+                .and_then(|mut h| h.highlight(lang, &text))
+                .map(Rc::new);
+            if let Some(s) = &spans {
+                st.last_good = Some((tab.path.clone(), s.clone()));
+            }
+            st.exact = Some((tab.path.clone(), version, spans.clone()));
+            return spans;
+        }
+        if st.job.is_none() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let highlighter = self.highlighter.clone();
+            let path = tab.path.clone();
+            std::thread::spawn(move || {
+                let spans = highlighter
+                    .lock()
+                    .ok()
+                    .and_then(|mut h| h.highlight(lang, &text));
+                let _ = tx.send((path, version, spans));
+            });
+            st.job = Some(HlJob { rx });
+        }
+        let stale = st
+            .last_good
+            .as_ref()
+            .filter(|(p, _)| p == &tab.path)
+            .map(|(_, spans)| spans.clone())?;
+        if let Some((p, v, spans)) = &st.provisional
+            && p == &tab.path
             && *v == version
         {
             return spans.clone();
         }
-        let lang = Language::from_path(path)?;
-        let text = editor.text();
-        let spans = if text.split('\n').count() == editor.buffer().len_lines() {
-            self.highlighter
-                .borrow_mut()
-                .highlight(lang, &text)
-                .map(Rc::new)
+        let new_lines = editor.buffer().len_lines();
+        let adjusted = if stale.len() == new_lines {
+            stale
         } else {
-            None
+            Rc::new(adjust_spans(&stale, new_lines, editor.line_col().0))
         };
-        *self.hl_cache.borrow_mut() = Some((path.to_path_buf(), version, spans.clone()));
-        spans
+        st.provisional = Some((tab.path.clone(), version, Some(adjusted.clone())));
+        Some(adjusted)
+    }
+
+    fn poll_highlight_job(&self) -> bool {
+        let mut st = self.hl.borrow_mut();
+        let Some(job) = &st.job else {
+            return false;
+        };
+        match job.rx.try_recv() {
+            Ok(result) => {
+                st.job = None;
+                if let (path, _, Some(spans)) = &result {
+                    st.last_good = Some((path.clone(), Rc::new(spans.clone())));
+                }
+                st.ready = Some(result);
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                st.job = None;
+                true
+            }
+        }
+    }
+
+    pub fn pump_highlight(&mut self) -> bool {
+        self.poll_highlight_job()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -3220,6 +3306,7 @@ impl Workbench {
             Target::Search,
         );
         let summary = match &s.results {
+            None if s.running => "Searching...".to_owned(),
             None => "Type and press Enter to search the workspace.".to_owned(),
             Some(r) if r.error.is_some() => r.error.clone().unwrap_or_default(),
             Some(r) if r.total_hits == 0 => {
@@ -3237,6 +3324,11 @@ impl Workbench {
                     ""
                 },
             ),
+        };
+        let summary = if s.running && s.results.is_some() {
+            "Searching...".to_owned()
+        } else {
+            summary
         };
         let mut rows: Vec<AnyElement> = Vec::new();
         let mut hit_id = 0usize;
@@ -3980,7 +4072,11 @@ impl Workbench {
                 .py_2()
                 .text_size(px(13.))
                 .text_color(rgb(theme::TEXT_DIM))
-                .child("No matching results")
+                .child(if p.loading {
+                    "Indexing files..."
+                } else {
+                    "No matching results"
+                })
         });
 
         Some(

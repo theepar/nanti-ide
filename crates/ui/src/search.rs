@@ -1,5 +1,8 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
 use editor_core::find::{FindOptions, Finder};
@@ -38,6 +41,15 @@ pub struct SearchResults {
 }
 
 pub fn search_workspace(root: &Path, query: &str, opts: FindOptions) -> SearchResults {
+    search_cancellable(root, query, opts, &AtomicBool::new(false))
+}
+
+pub fn search_cancellable(
+    root: &Path,
+    query: &str,
+    opts: FindOptions,
+    cancel: &AtomicBool,
+) -> SearchResults {
     let mut out = SearchResults::default();
     let finder = match Finder::new(query, opts) {
         Ok(Some(f)) => f,
@@ -49,6 +61,9 @@ pub fn search_workspace(root: &Path, query: &str, opts: FindOptions) -> SearchRe
     };
     let started = Instant::now();
     for (rel, abs) in list_files(root) {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
         if started.elapsed() > TIME_BUDGET
             || out.total_hits >= MAX_HITS
             || out.files.len() >= MAX_FILES_WITH_HITS
@@ -124,6 +139,9 @@ pub struct SearchState {
     pub results: Option<SearchResults>,
     pub collapsed: BTreeSet<PathBuf>,
     pub focused: bool,
+    pub running: bool,
+    rx: Option<Receiver<SearchResults>>,
+    cancel: Option<Arc<AtomicBool>>,
 }
 
 impl SearchState {
@@ -134,12 +152,56 @@ impl SearchState {
             results: None,
             collapsed: BTreeSet::new(),
             focused: false,
+            running: false,
+            rx: None,
+            cancel: None,
         }
     }
 
     pub fn run(&mut self, root: &Path) {
+        if let Some(previous) = self.cancel.take() {
+            previous.store(true, Ordering::Relaxed);
+        }
         self.collapsed.clear();
-        self.results = Some(search_workspace(root, self.query.text(), self.opts));
+        let (tx, rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (root, query, opts, flag) = (
+            root.to_path_buf(),
+            self.query.text().to_owned(),
+            self.opts,
+            cancel.clone(),
+        );
+        std::thread::spawn(move || {
+            let _ = tx.send(search_cancellable(&root, &query, opts, &flag));
+        });
+        self.rx = Some(rx);
+        self.cancel = Some(cancel);
+        self.running = true;
+    }
+
+    pub fn poll(&mut self) -> bool {
+        let Some(rx) = &self.rx else {
+            return false;
+        };
+        match rx.try_recv() {
+            Ok(results) => self.results = Some(results),
+            Err(mpsc::TryRecvError::Empty) => return false,
+            Err(mpsc::TryRecvError::Disconnected) => {}
+        }
+        self.rx = None;
+        self.cancel = None;
+        self.running = false;
+        true
+    }
+
+    pub fn wait(&mut self) {
+        if let Some(rx) = self.rx.take() {
+            if let Ok(results) = rx.recv() {
+                self.results = Some(results);
+            }
+            self.cancel = None;
+            self.running = false;
+        }
     }
 
     pub fn toggle_file(&mut self, path: &Path) {
@@ -281,6 +343,7 @@ mod tests {
         let mut s = SearchState::new();
         s.query.insert("hello");
         s.run(&d.0);
+        s.wait();
         let first = s.results.as_ref().unwrap().files[0].path.clone();
         s.toggle_file(&first);
         assert!(s.collapsed.contains(&first));
@@ -289,5 +352,78 @@ mod tests {
         s.toggle_file(&first);
         s.run(&d.0);
         assert!(s.collapsed.is_empty(), "a new search resets collapsing");
+    }
+
+    fn big_tree(tag: &str, files: usize) -> Tmp {
+        let d = ws(tag);
+        for i in 0..files {
+            let dir = d.0.join(format!("d{:02}", i % 40));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join(format!("f{i}.txt")),
+                format!("line {i}\nneedle {i}\n"),
+            )
+            .unwrap();
+        }
+        d
+    }
+
+    #[test]
+    fn starting_a_search_does_not_block_and_results_arrive_later() {
+        let d = big_tree("async", 3000);
+        let mut s = SearchState::new();
+        s.query.insert("needle");
+        let start = Instant::now();
+        s.run(&d.0);
+        let started_in = start.elapsed();
+        assert!(s.running && s.results.is_none());
+        assert!(
+            started_in < Duration::from_millis(50),
+            "run() returned in {started_in:?}"
+        );
+        let mut polls = 0;
+        while !s.poll() {
+            polls += 1;
+            assert!(
+                start.elapsed() < Duration::from_secs(20),
+                "the search finished"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        println!(
+            "3000-file search: started in {started_in:?}, {polls} polls, done in {:?}",
+            start.elapsed()
+        );
+        let r = s.results.as_ref().unwrap();
+        assert!(!s.running && r.total_hits > 0);
+        assert!(!s.poll(), "nothing more to report");
+    }
+
+    #[test]
+    fn a_newer_search_replaces_an_older_one_that_is_still_running() {
+        let d = big_tree("replace", 1500);
+        let mut s = SearchState::new();
+        s.query.insert("line");
+        s.run(&d.0);
+        s.query.clear();
+        s.query.insert("needle 7");
+        s.run(&d.0);
+        s.wait();
+        let r = s.results.as_ref().unwrap();
+        assert!(
+            r.files
+                .iter()
+                .all(|f| f.hits.iter().all(|h| h.preview.contains("needle 7"))),
+            "only the newest query is shown"
+        );
+        assert!(!s.running);
+    }
+
+    #[test]
+    fn a_cancelled_search_stops_early() {
+        let d = big_tree("cancel", 800);
+        let cancel = AtomicBool::new(true);
+        let r = search_cancellable(&d.0, "needle", FindOptions::default(), &cancel);
+        assert_eq!((r.files_scanned, r.total_hits), (0, 0));
     }
 }
