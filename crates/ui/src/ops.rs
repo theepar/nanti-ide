@@ -529,7 +529,24 @@ impl Model {
         })
     }
 
+    fn extension_vector_icon(&self) -> Option<PathBuf> {
+        let dir = self.panel_extension.as_deref()?;
+        let manifest: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("package.json")).ok()?).ok()?;
+        let containers = manifest
+            .pointer("/contributes/viewsContainers")?
+            .as_object()?;
+        containers
+            .values()
+            .flat_map(|list| list.as_array().into_iter().flatten())
+            .filter_map(|c| c.get("icon")?.as_str())
+            .filter(|rel| rel.to_ascii_lowercase().ends_with(".svg"))
+            .map(|rel| dir.join(rel))
+            .find(|p| p.starts_with(dir) && p.is_file())
+    }
+
     pub fn open_extension_tab(&mut self) {
+        self.panel_icon = self.extension_vector_icon();
         self.ext_detail = None;
         self.settings_open = false;
         let path = PathBuf::from("nanti://extension-panel");

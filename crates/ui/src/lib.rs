@@ -2795,12 +2795,13 @@ impl Workbench {
     }
 
     fn extension_icon(&self, size: f32) -> AnyElement {
-        let icon = self
-            .model
-            .panel_extension
-            .as_deref()
-            .and_then(|dir| self.model.extensions.iter().find(|e| e.dir == dir))
-            .and_then(|e| e.icon.clone());
+        let icon = self.model.panel_icon.clone().or_else(|| {
+            self.model
+                .panel_extension
+                .as_deref()
+                .and_then(|dir| self.model.extensions.iter().find(|e| e.dir == dir))
+                .and_then(|e| e.icon.clone())
+        });
         match icon {
             Some(path) => gpui::img(path)
                 .flex_none()
