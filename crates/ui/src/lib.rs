@@ -2462,13 +2462,15 @@ impl Workbench {
                 .child(SharedString::from(reason.clone())),
             Some(TabContent::Webview) => {
                 let slot = self.webview_bounds.clone();
+                let entity = cx.entity();
                 base.child(
                     canvas(
                         |_, _, _| (),
-                        move |bounds, (), window, _cx| {
+                        move |bounds, (), _window, cx| {
                             if slot.get() != Some(bounds) {
                                 slot.set(Some(bounds));
-                                window.refresh();
+                                let entity = entity.clone();
+                                cx.defer(move |cx| entity.update(cx, |_, cx| cx.notify()));
                             }
                         },
                     )
