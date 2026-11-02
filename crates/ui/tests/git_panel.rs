@@ -1,5 +1,3 @@
-//! Source control (GT-01, GT-02) against REAL git repositories: model-level flows, then the
-//! workbench through GPUI's headless platform.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -35,7 +33,6 @@ fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
-/// A repo with one commit containing a.txt and dir/b.txt.
 fn repo(tag: &str) -> Tmp {
     let root = std::env::temp_dir().join(format!("nanti-ui-git-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
@@ -56,7 +53,6 @@ fn repo(tag: &str) -> Tmp {
     Tmp(root)
 }
 
-/// Apply git results until nothing is running or queued.
 fn settle(m: &mut Model) {
     let start = Instant::now();
     loop {
@@ -150,7 +146,6 @@ fn stage_unstage_and_commit_change_the_real_repository() {
     settle(&mut m);
     assert_eq!(m.scm.staged_count(), 0);
 
-    // refused before git runs: no message, then nothing staged
     assert!(m.scm.commit().is_err());
     m.scm.message.insert("only message");
     assert!(m.scm.commit().unwrap_err().contains("nothing is staged"));
@@ -230,7 +225,6 @@ fn diff_tab_loads_dedupes_and_follows_stage_changes() {
     m.open_diff("a.txt", false);
     assert_eq!(m.tabs.len(), 1, "the same diff is not opened twice");
 
-    // staging moves the change to the Index: the working-tree tab empties, the Index tab fills
     m.scm.stage("a.txt");
     settle(&mut m);
     assert!(matches!(diff_state(&m, 0), DiffState::Ready(d) if d.is_empty()));
@@ -240,7 +234,6 @@ fn diff_tab_loads_dedupes_and_follows_stage_changes() {
     settle(&mut m);
     assert!(matches!(diff_state(&m, 1), DiffState::Ready(d) if d.added() == 2));
 
-    // committing empties the Index tab too
     m.scm.message.insert("c");
     m.scm.commit().unwrap();
     settle(&mut m);
@@ -292,7 +285,6 @@ fn untracked_binary_deleted_and_renamed_files_open_sensible_diffs() {
         matches!(diff_state(&m, 2), DiffState::Ready(d) if d.removed() == 1 && d.notes == ["deleted file"])
     );
     assert!(matches!(diff_state(&m, 3), DiffState::Ready(d) if d.notes == ["renamed from a.txt"]));
-    // unstaging a rename restores both paths
     m.scm.unstage("renamed.txt");
     settle(&mut m);
     assert!(
@@ -360,7 +352,7 @@ fn outside_a_repository_the_panel_explains_instead_of_failing() {
     );
     assert_eq!(m.branch_label(), "no repository");
     assert!(m.scm.commit().is_err());
-    m.open_diff("x.txt", false); // must not panic or hang
+    m.open_diff("x.txt", false);  // must not panic or hang
     settle(&mut m);
 }
 
@@ -398,7 +390,6 @@ fn source_control_commands_run_from_the_command_model() {
     m.run_command(Command::GitUnstageAll);
     settle(&mut m);
     assert_eq!(m.scm.staged_count(), 0);
-    // commit without a message: opens Source Control and puts the caret in the message field
     m.activity = Activity::Explorer;
     m.run_command(Command::GitCommit);
     assert_eq!(m.activity, Activity::SourceControl);
@@ -407,8 +398,6 @@ fn source_control_commands_run_from_the_command_model() {
     m.run_command(Command::GitRefresh);
     settle(&mut m);
 }
-
-// ---- through the workbench (headless GPUI) --------------------------------------------------
 
 fn open<'a>(
     cx: &'a mut TestAppContext,
@@ -463,7 +452,6 @@ fn keyboard_flow_opens_the_view_types_a_message_and_commits(cx: &mut TestAppCont
     assert_eq!((activity, sidebar), (Activity::SourceControl, true));
     wait_idle(window, cx);
 
-    // a Ctrl+Enter with an empty message is refused with an explanation, nothing is committed
     window
         .update(cx, |wb, window, cx| {
             wb.focus_commit_message(window);
@@ -480,7 +468,6 @@ fn keyboard_flow_opens_the_view_types_a_message_and_commits(cx: &mut TestAppCont
         "{notice:?}"
     );
 
-    // type a message (IME-style text input path), stage, commit with the keyboard
     cx.simulate_input("fix the thing");
     window
         .update(cx, |wb, _, _| wb.model_mut().scm.stage("a.txt"))
@@ -557,7 +544,6 @@ fn rendering_every_source_control_state_does_not_panic(cx: &mut TestAppContext) 
     for _ in 0..3 {
         wait_idle(window, cx);
     }
-    // every tab (diff, diff, diff) drawn, then the collapsed variant and the explorer decorations
     for i in 0..3 {
         window
             .update(cx, |wb, _, cx| {

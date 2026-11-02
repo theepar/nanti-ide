@@ -1,4 +1,3 @@
-// Adapted from Zed GPUI example `input.rs` (Apache-2.0), gpui 0.2.2. Gate A spike: IME, clipboard, resize.
 use std::ops::Range;
 
 use gpui::{

@@ -1,6 +1,3 @@
-//! Language Server Protocol (LSP) client for real language intelligence.
-//! Spawns `rust-analyzer` and `gopls` in the background without popups (CREATE_NO_WINDOW),
-//! synchronizes open buffers, and routes compiler/linter diagnostics directly into Problems.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -51,10 +48,6 @@ pub struct LspServer {
 }
 
 impl Drop for LspServer {
-    /// Dropping a `std::process::Child` does NOT stop the process, so without this every
-    /// rust-analyzer / gopls we start would outlive the IDE (hundreds of MB each) and a new one
-    /// would be added on every launch or folder switch. Closing the pipes ends our reader/writer
-    /// threads once the process is gone.
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
@@ -85,7 +78,7 @@ impl LspServer {
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
-            proc_cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+            proc_cmd.creation_flags(0x0800_0000);
         }
 
         let mut child = proc_cmd.spawn().ok()?;
@@ -95,7 +88,6 @@ impl LspServer {
         let (cmd_tx, cmd_rx) = mpsc::channel::<LspCommand>();
         let (event_tx, event_rx) = mpsc::channel::<LspEvent>();
 
-        // Writer thread
         thread::spawn(move || {
             let mut writer = stdin;
             while let Ok(cmd) = cmd_rx.recv() {
@@ -111,7 +103,7 @@ impl LspServer {
                                 "textDocument": {
                                     "synchronization": {
                                         "openClose": true,
-                                        "change": 1, // Full
+                                        "change": 1,
                                         "save": true
                                     },
                                     "publishDiagnostics": {
@@ -174,7 +166,6 @@ impl LspServer {
                     break;
                 }
 
-                // If this was initialize, follow up with initialized notification
                 if matches!(msg.get("method").and_then(|m| m.as_str()), Some("initialize")) {
                     let init_done = json!({
                         "jsonrpc": "2.0",
@@ -191,7 +182,6 @@ impl LspServer {
             }
         });
 
-        // Reader thread
         thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
             loop {
@@ -199,7 +189,7 @@ impl LspServer {
                 loop {
                     let mut line = String::new();
                     if reader.read_line(&mut line).unwrap_or(0) == 0 {
-                        return; // EOF
+                        return;
                     }
                     let trimmed = line.trim();
                     if trimmed.is_empty() {
@@ -313,8 +303,6 @@ impl LspServer {
 #[derive(Default)]
 pub struct LspManager {
     servers: HashMap<Language, LspServer>,
-    /// Languages whose server could not be started (binary missing). Without this the IDE would
-    /// search PATH and try to spawn again on every 30 ms tick.
     unavailable: HashSet<Language>,
 }
 
@@ -340,15 +328,12 @@ impl LspManager {
         self.servers.get_mut(&lang)
     }
 
-    /// A running server for `lang`, without starting one.
     pub fn get_mut(&mut self, lang: Language) -> Option<&mut LspServer> {
         self.servers.get_mut(&lang)
     }
 
-    /// Stop every server (they are started again, rooted at the current folder, on demand).
-    /// Used when the workspace folder changes and when the app quits.
     pub fn shutdown_all(&mut self) {
-        self.servers.clear(); // `LspServer::drop` kills each process
+        self.servers.clear();
         self.unavailable.clear();
     }
 
@@ -455,7 +440,6 @@ mod tests {
     fn a_missing_server_binary_is_not_retried_on_every_call() {
         let mut m = LspManager::new();
         m.unavailable.insert(Language::Rust);
-        // would try to spawn (and search PATH) if the failure were not remembered
         assert!(m.ensure_server(Language::Rust, Path::new(".")).is_none());
         m.shutdown_all();
         assert!(m.unavailable.is_empty());

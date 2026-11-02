@@ -1,5 +1,4 @@
-// Supported subset of the `vscode` API (PRD 5.4). Anything else throws UnsupportedCapability
-// and is logged; never a fake success.
+// Anything else throws UnsupportedCapability and is logged; never a fake success.
 import fs from "node:fs/promises";
 import crypto from "node:crypto";
 import os from "node:os";
@@ -9,7 +8,6 @@ import { watch as fsWatch, existsSync } from "node:fs";
 import { ConfigStore, CONFIGURATION_TARGET } from "./configuration.mjs";
 import { createWebviewHub } from "./webview.mjs";
 
-/** Glob subset used by file watchers: `**`, `*`, `?`, `{a,b}`; matched against `/`-separated relative paths. */
 export function globToRegExp(pattern) {
   let re = "";
   let braces = 0;
@@ -56,9 +54,7 @@ function strict(path, impl) {
   });
 }
 
-// Discovery mode (compatibility probing only, never on by default): unsupported APIs are
-// recorded in `collector` and answered with an inert stub so activation can continue and we
-// learn the full set. Results from a run in this mode never count as "working" (PRD 5.5).
+// Results from a run in this mode never count as "working" (PRD 5.5).
 let collector = null;
 export function setDiscoveryCollector(set) {
   collector = set;
@@ -80,7 +76,6 @@ function stub(name) {
 
 export const unsupportedValue = (name) => unsupported(name);
 
-// Probing (`vscode.debug`) is allowed; calling it or reaching into it throws.
 function unsupported(name) {
   const fail = (n) => {
     console.error(`[host] UnsupportedCapability: ${n}`);
@@ -214,9 +209,7 @@ export const TerminalExitReason = Object.freeze({
   Extension: 4,
 });
 
-// Public top-level `vscode` exports we do not implement. Bundlers (`__toESM`) snapshot only own
-// keys, so unlisted names would become `undefined` and fail with a misleading TypeError.
-// Each is exposed as an own getter that yields an "unsupported" proxy (throws on use).
+// Public top-level `vscode` exports we do not implement.
 const UNSUPPORTED_TOP_LEVEL = [
   "authentication", "chat", "comments", "debug", "env", "extensions", "l10n", "languages", "lm",
   "notebooks", "scm", "tasks", "tests",
@@ -258,11 +251,9 @@ const LANGUAGE_BY_EXT = {
   ".rs": "rust", ".go": "go", ".dart": "dart", ".toml": "toml", ".yaml": "yaml", ".yml": "yaml",
 };
 
-/** One vscode namespace instance per host; `notify` pushes host->IDE notifications. */
 export function createVscode({ workspaceFolders = [], notify, settings = {}, getExtensions = () => [] }) {
   const commandTable = new Map();
   const contextKeys = new Map();
-  // Built-in command the extensions rely on; keys are forwarded so the IDE can evaluate `when` clauses.
   commandTable.set("setContext", (key, value) => {
     contextKeys.set(key, value);
     notify("context.set", { key, value: value ?? null });
@@ -316,9 +307,6 @@ export function createVscode({ workspaceFolders = [], notify, settings = {}, get
   const emitter = (name) => (emitters[name] ??= new EventEmitter());
   const providers = { fileSystem: new Map(), textDocumentContent: new Map() };
 
-  // Editor/document state. Empty until the IDE pushes state (not wired yet): this reports "nothing
-  // open", it does not mirror IDE buffers. `openTextDocument` reads from DISK, so unsaved IDE
-  // edits are NOT visible to extensions yet (tracked limitation, see api-compatibility-matrix).
   const state = { documents: new Map(), visibleEditors: [], activeEditor: undefined };
 
   let termSeq = 0;
@@ -689,7 +677,6 @@ export function createVscode({ workspaceFolders = [], notify, settings = {}, get
         },
       });
     },
-    // Plain OutputChannel, or LogOutputChannel when `{ log: true }` is passed.
     createOutputChannel(name, options) {
       const line = (text) => notify("window.outputChannel.appendLine", { name, line: String(text) });
       const channel = {
@@ -718,8 +705,6 @@ export function createVscode({ workspaceFolders = [], notify, settings = {}, get
     },
   });
 
-  // Browser opening requires an explicit decision from the native IDE; clipboard remains unsupported.
-  // appName is honest: this is not VS Code (PRD 3 #6).
   const env = strict("vscode.env", {
     openExternal,
     appName: "Nanti",
@@ -768,9 +753,6 @@ export function createVscode({ workspaceFolders = [], notify, settings = {}, get
     TerminalLocation,
     TerminalExitReason,
     RelativePattern,
-    // Honest: the host's own version, NOT a VS Code version (PRD 5.4: no spoofed API version).
-    // Extensions that gate on `vscode.version` will see an old/unknown editor and degrade or fail;
-    // whether to declare a compat level is an open ADR (see api-compatibility-matrix).
     version: HOST_VERSION,
     NotebookCellOutputItem,
     commands,
@@ -786,11 +768,9 @@ export function createVscode({ workspaceFolders = [], notify, settings = {}, get
       get: () => unsupported(`vscode.${name}`),
     });
   }
-  // Base `window` also carries owner-less webview methods (default roots = workspace folders only).
   Object.assign(window, hub.forOwner(null));
   const vscode = strict("vscode", impl);
 
-  // Per-extension facade: only `window.*` registrations that need an owner are overridden.
   const norm = (p) => (process.platform === "win32" ? p.toLowerCase() : p);
   const facades = new Map();
   function forFile(filename) {

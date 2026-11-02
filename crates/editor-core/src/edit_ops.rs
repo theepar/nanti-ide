@@ -1,8 +1,3 @@
-//! Editing commands built on the buffer: word movement and deletion, word/line selection,
-//! auto-indent, indent/outdent, line comments and line operations (move, duplicate, delete).
-//!
-//! Every command is ONE undo step and keeps the selection sensible. Line endings follow the file
-//! (`Editor::eol`), so CRLF files stay CRLF.
 
 use crate::Editor;
 
@@ -26,15 +21,12 @@ fn class(c: char) -> Class {
     }
 }
 
-/// One replacement in a list applied together: remove `remove` chars at `at`, insert `insert`.
 struct LineEdit {
     at: usize,
     remove: usize,
     insert: String,
 }
 
-/// Where `pos` ends up after `edits`. A pure insertion exactly at `pos` moves it only when
-/// `shift_at_equal` (a caret, or the end of a selection) so a selection keeps its start.
 fn map_through(edits: &[LineEdit], pos: usize, shift_at_equal: bool) -> usize {
     let mut shift: isize = 0;
     for e in edits {
@@ -42,7 +34,6 @@ fn map_through(edits: &[LineEdit], pos: usize, shift_at_equal: bool) -> usize {
         if pos > e.at + e.remove || (pos == e.at + e.remove && (shift_at_equal || e.remove > 0)) {
             shift += ins - e.remove as isize;
         } else if pos > e.at {
-            // inside a removed span: lands where that span started
             return (e.at as isize + shift).max(0) as usize;
         } else {
             break;
@@ -59,8 +50,6 @@ impl Editor {
     fn eol_len(&self) -> usize {
         self.eol.as_str().chars().count()
     }
-
-    // ---- word movement ---------------------------------------------------------------------
 
     fn word_left(&self, pos: usize) -> usize {
         let mut i = pos;
@@ -132,7 +121,6 @@ impl Editor {
         self.set_cursor(to, extend);
     }
 
-    /// Ctrl+Backspace: delete the selection, or the word before the caret.
     pub fn delete_word_left(&mut self) {
         if self.has_selection() {
             return self.backspace();
@@ -141,7 +129,6 @@ impl Editor {
         self.delete_span(from, self.cursor);
     }
 
-    /// Ctrl+Delete.
     pub fn delete_word_right(&mut self) {
         if self.has_selection() {
             return self.delete_forward();
@@ -162,9 +149,6 @@ impl Editor {
         self.goal_col = None;
     }
 
-    // ---- word / line selection (double and triple click) ------------------------------------
-
-    /// Select the word (or the run of spaces / punctuation) at `pos`.
     pub fn select_word_at(&mut self, pos: usize) {
         self.end_composition();
         self.typing_run = false;
@@ -193,7 +177,6 @@ impl Editor {
         self.goal_col = None;
     }
 
-    /// Select the whole line at `pos`, including its line break.
     pub fn select_line_at(&mut self, pos: usize) {
         self.end_composition();
         self.typing_run = false;
@@ -209,10 +192,6 @@ impl Editor {
         self.goal_col = None;
     }
 
-    // ---- helpers for line commands ------------------------------------------------------------
-
-    /// First and last line touched by the selection; a selection that ends at column 0 of a later
-    /// line does not include that line.
     fn line_span(&self) -> (usize, usize) {
         let sel = self.selection();
         let first = self.buffer.line_of(sel.start);
@@ -257,9 +236,6 @@ impl Editor {
             .collect()
     }
 
-    // ---- indentation -----------------------------------------------------------------------------
-
-    /// Tab on a multi-line selection: indent every selected non-empty line by `unit`.
     pub fn indent_lines(&mut self, unit: &str) {
         let (first, last) = self.line_span();
         let edits: Vec<LineEdit> = (first..=last)
@@ -273,7 +249,6 @@ impl Editor {
         self.apply_edits(&edits);
     }
 
-    /// Shift+Tab: remove one indent level (a tab, or up to `unit` width of spaces) from each line.
     pub fn outdent_lines(&mut self, unit: &str) {
         let width = unit.chars().count().max(1);
         let (first, last) = self.line_span();
@@ -296,8 +271,6 @@ impl Editor {
         self.apply_edits(&edits);
     }
 
-    /// Enter: keep the indentation of the current line; between `{}` / `()` / `[]` open an indented
-    /// line and put the closer on its own line. One undo step.
     pub fn smart_newline(&mut self, unit: &str) {
         self.end_composition();
         self.typing_run = false;
@@ -341,7 +314,6 @@ impl Editor {
         self.goal_col = None;
     }
 
-    /// Ctrl+Enter / Ctrl+Shift+Enter: open an indented empty line below / above the current one.
     pub fn insert_line(&mut self, below: bool, unit: &str) {
         self.end_composition();
         self.typing_run = false;
@@ -370,10 +342,6 @@ impl Editor {
         self.goal_col = None;
     }
 
-    // ---- comments --------------------------------------------------------------------------------
-
-    /// Ctrl+/: comment the selected lines with `prefix`, or remove it when all of them are commented.
-    /// Blank lines are left alone. Returns true if the text changed.
     pub fn toggle_line_comment(&mut self, prefix: &str) -> bool {
         let (first, last) = self.line_span();
         let lines: Vec<(usize, String)> = (first..=last)
@@ -417,14 +385,11 @@ impl Editor {
         self.buffer.version() != before
     }
 
-    // ---- line operations ---------------------------------------------------------------------------
-
     fn shift_selection(&mut self, delta: isize) {
         self.anchor = (self.anchor as isize + delta).max(0) as usize;
         self.cursor = (self.cursor as isize + delta).max(0) as usize;
     }
 
-    /// Alt+Up / Alt+Down: swap the selected lines with the line above / below.
     pub fn move_lines(&mut self, down: bool) -> bool {
         self.end_composition();
         self.typing_run = false;
@@ -467,7 +432,6 @@ impl Editor {
         true
     }
 
-    /// Shift+Alt+Down / Shift+Alt+Up: copy the selected lines below / above; the caret goes to the copy.
     pub fn duplicate_lines(&mut self, down: bool) {
         self.end_composition();
         self.typing_run = false;
@@ -484,12 +448,10 @@ impl Editor {
         } else {
             let at = self.buffer.line_start(a);
             self.buffer.insert(at, &format!("{block}{eol}"));
-            // the text above is the copy; the selection keeps its offsets and now sits on the copy
         }
         self.goal_col = None;
     }
 
-    /// Ctrl+Shift+K: delete the selected lines including their line breaks.
     pub fn delete_lines(&mut self) {
         self.end_composition();
         self.typing_run = false;
@@ -697,19 +659,16 @@ mod tests {
         );
         e.outdent_lines("  ");
         assert_eq!(e.text(), "a\n\nb\nc");
-        // outdent: tab, partial spaces, and no-op lines
         let mut t = ed("\ta\n b\nc", 0);
         t.select_all();
         t.outdent_lines("    ");
         assert_eq!(t.text(), "a\nb\nc");
         assert!(t.undo());
         assert_eq!(t.text(), "\ta\n b\nc", "outdent is one undo step");
-        // a selection ending at column 0 does not include that line
         let mut s = ed("x\ny\nz", 0);
         s.select_range(0..4);
         s.indent_lines("--");
         assert_eq!(s.text(), "--x\n--y\nz");
-        // no selection: the current line
         let mut c = ed("one\ntwo", 5);
         c.outdent_lines("  ");
         assert_eq!(c.text(), "one\ntwo");

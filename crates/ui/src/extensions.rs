@@ -1,9 +1,3 @@
-//! Extension manager (the Extensions view): lists what is installed, installs a local `.vsix`,
-//! removes an extension, and remembers which one fills the right-hand panel at the next start.
-//!
-//! Installing means unpacking a package the user chose; nothing is downloaded and the vendor's
-//! files are never copied anywhere except the user's own extensions folder. A package is
-//! rejected unless it contains `extension/package.json` with a name and a publisher.
 
 use std::path::{Path, PathBuf};
 
@@ -14,13 +8,10 @@ pub struct Extension {
     pub display_name: String,
     pub version: String,
     pub description: String,
-    /// `engines.vscode` range the extension declares.
     pub engine: String,
-    /// Webview view type it contributes (usable in the right-hand panel), if any.
     pub view_type: Option<String>,
     pub commands: usize,
     pub publisher: String,
-    /// The extension's own icon file (`"icon"` in package.json), if it exists.
     pub icon: Option<PathBuf>,
 }
 
@@ -33,17 +24,14 @@ pub struct MarketplaceExtension {
     pub version: String,
     pub description: String,
     pub download_url: String,
-    /// Open VSX file URLs for the list icon and the detail page.
     pub icon_url: Option<String>,
     pub readme_url: Option<String>,
     pub downloads: u64,
     pub rating: Option<f64>,
     pub rating_count: u64,
-    /// ISO timestamp of the latest release.
     pub updated: Option<String>,
 }
 
-/// What the extension detail page shows.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExtDetail {
     pub id: String,
@@ -51,7 +39,6 @@ pub struct ExtDetail {
     pub publisher: String,
     pub version: String,
     pub description: String,
-    /// Set for marketplace entries (what Install downloads).
     pub download_url: Option<String>,
     pub downloads: Option<u64>,
     pub rating: Option<f64>,
@@ -62,7 +49,6 @@ pub struct ExtDetail {
     pub readme: Readme,
 }
 
-/// What the Open VSX detail endpoint adds to a search result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtExtra {
     pub readme: Option<String>,
@@ -72,14 +58,12 @@ pub struct ExtExtra {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Readme {
-    /// The extension ships none.
     None,
     Loading,
     Ready(String),
     Failed(String),
 }
 
-/// Where extensions live: `<config dir>/extensions`.
 pub fn extensions_dir(config_dir: &Path) -> PathBuf {
     config_dir.join("extensions")
 }
@@ -100,7 +84,7 @@ fn read_manifest(dir: &Path) -> Option<Extension> {
     let display = j
         .get("displayName")
         .and_then(|v| v.as_str())
-        .filter(|d| !d.starts_with('%')) // "%extension.name%" placeholders need the l10n file
+        .filter(|d| !d.starts_with('%'))
         .unwrap_or(&name)
         .to_owned();
     let description = j
@@ -149,7 +133,6 @@ fn read_manifest(dir: &Path) -> Option<Extension> {
     })
 }
 
-/// README of an installed extension (first `readme*` file in its folder, capped in size).
 pub fn read_local_readme(dir: &Path) -> Option<String> {
     let entry = std::fs::read_dir(dir).ok()?.filter_map(Result::ok).find(|e| {
         e.file_name()
@@ -165,7 +148,6 @@ const README_MAX: usize = 400_000;
 const ICON_MAX: u64 = 2_000_000;
 const ICON_EXTS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "svg"];
 
-/// Folder for downloaded marketplace icons: `<config>/cache/icons`.
 pub fn icon_cache_dir(config_dir: &Path) -> PathBuf {
     config_dir.join("cache").join("icons")
 }
@@ -182,7 +164,6 @@ fn icon_stem(id: &str) -> String {
         .collect()
 }
 
-/// A previously downloaded icon of extension `id`.
 pub fn cached_icon(config_dir: &Path, id: &str) -> Option<PathBuf> {
     let dir = icon_cache_dir(config_dir);
     let stem = icon_stem(id);
@@ -192,7 +173,6 @@ pub fn cached_icon(config_dir: &Path, id: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-/// Download an icon from Open VSX into the cache (gpui draws it from the local file).
 pub fn download_icon(config_dir: &Path, id: &str, url: &str) -> Result<PathBuf, String> {
     if !url.starts_with("https://open-vsx.org/") {
         return Err("refusing to download an icon from an address that is not Open VSX".into());
@@ -225,13 +205,10 @@ pub fn download_icon(config_dir: &Path, id: &str, url: &str) -> Result<PathBuf, 
     Ok(dest)
 }
 
-/// Download an extension's README (Markdown) from Open VSX.
 pub fn download_readme(url: &str) -> Result<String, String> {
     fetch_text(url, README_MAX)
 }
 
-/// The detail endpoint (`/api/{publisher}/{name}`) knows the README and metadata that the search
-/// results leave out. README and metadata are fetched together, on a worker thread.
 pub fn download_extra(publisher: &str, name: &str) -> Result<ExtExtra, String> {
     let plain = |s: &str| {
         !s.is_empty()
@@ -289,7 +266,6 @@ fn fetch_text(url: &str, cap: usize) -> Result<String, String> {
     Ok(String::from_utf8_lossy(bytes).into_owned())
 }
 
-/// Extensions in `<config>/extensions/*`, plus `extra` (the one passed with `NANTI_EXTENSION`).
 pub fn list_installed(config_dir: &Path, extra: Option<&Path>) -> Vec<Extension> {
     let mut out: Vec<Extension> = Vec::new();
     if let Ok(read) = std::fs::read_dir(extensions_dir(config_dir)) {
@@ -311,8 +287,6 @@ pub fn list_installed(config_dir: &Path, extra: Option<&Path>) -> Vec<Extension>
     out
 }
 
-/// Unpack a `.vsix` (a zip) into `<config>/extensions/<publisher.name-version>`.
-/// Returns the installed extension. An existing folder of the same id/version is not touched.
 pub fn install_vsix(config_dir: &Path, vsix: &Path) -> Result<Extension, String> {
     if !vsix.is_file() {
         return Err(format!("{} is not a file", vsix.display()));
@@ -329,7 +303,6 @@ pub fn install_vsix(config_dir: &Path, vsix: &Path) -> Result<Extension, String>
     let _ = std::fs::remove_dir_all(&staging);
     std::fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
     let result = (|| {
-        // bsdtar (shipped with Windows 10+) reads zip files and refuses absolute and `..` entries.
         let mut cmd = std::process::Command::new("tar");
         cmd.arg("-xf").arg(vsix).arg("-C").arg(&staging);
         #[cfg(windows)]
@@ -378,7 +351,6 @@ pub fn install_vsix(config_dir: &Path, vsix: &Path) -> Result<Extension, String>
     result
 }
 
-/// Delete an installed extension folder. Only folders directly inside `<config>/extensions` qualify.
 pub fn uninstall(config_dir: &Path, dir: &Path) -> Result<(), String> {
     let root = extensions_dir(config_dir);
     if dir.parent() != Some(root.as_path()) || !dir.is_dir() {
@@ -387,7 +359,6 @@ pub fn uninstall(config_dir: &Path, dir: &Path) -> Result<(), String> {
     std::fs::remove_dir_all(dir).map_err(|e| e.to_string())
 }
 
-/// Remember which extension/view fills the right-hand panel (read at the next start).
 pub fn save_panel_choice(config_dir: &Path, dir: &Path, view_type: &str) -> Result<(), String> {
     std::fs::create_dir_all(config_dir).map_err(|e| e.to_string())?;
     let json = serde_json::json!({ "dir": dir.to_string_lossy(), "view": view_type });
@@ -403,7 +374,6 @@ pub fn load_panel_choice(config_dir: &Path) -> Option<(PathBuf, String)> {
     (dir.join("package.json").is_file() && !view.is_empty()).then_some((dir, view))
 }
 
-/// Query Open VSX Registry (`https://open-vsx.org/api/-/search?query={q}&size=20`).
 pub fn search_marketplace(query: &str) -> Result<Vec<MarketplaceExtension>, String> {
     let q = query.trim();
     if q.is_empty() {
@@ -415,7 +385,6 @@ pub fn search_marketplace(query: &str) -> Result<Vec<MarketplaceExtension>, Stri
     ))
 }
 
-/// The most downloaded extensions: what the Extensions view recommends before anything is searched.
 pub fn recommended_marketplace() -> Result<Vec<MarketplaceExtension>, String> {
     fetch_marketplace(
         "https://open-vsx.org/api/-/search?sortBy=downloadCount&sortOrder=desc&size=30",
@@ -487,14 +456,12 @@ fn fetch_marketplace(url: &str) -> Result<Vec<MarketplaceExtension>, String> {
     Ok(list)
 }
 
-/// Bytes downloaded so far / expected, shared with the UI to show install progress.
 #[derive(Debug, Default)]
 pub struct Progress {
     pub done: std::sync::atomic::AtomicU64,
     pub total: std::sync::atomic::AtomicU64,
 }
 
-/// The Open VSX target platform of this machine (extensions may ship one package per platform).
 fn target_platform() -> &'static str {
     if cfg!(target_arch = "aarch64") {
         "win32-arm64"
@@ -503,12 +470,6 @@ fn target_platform() -> &'static str {
     }
 }
 
-/// Which package to download for `publisher.name`, and its size (0 if unknown).
-///
-/// Search results point at ONE build of a platform-specific extension (often another platform's:
-/// "alpine-arm64"), so the package for this machine is looked up in the detail endpoint. An
-/// extension that has platform builds but none for Windows is refused instead of installing a
-/// binary that cannot run.
 pub fn resolve_package(publisher: &str, name: &str, listed_url: &str) -> Result<(String, u64), String> {
     let plain = |s: &str| {
         !s.is_empty()
@@ -520,7 +481,7 @@ pub fn resolve_package(publisher: &str, name: &str, listed_url: &str) -> Result<
     }
     let Ok(json) = fetch_text(&format!("https://open-vsx.org/api/{publisher}/{name}"), 4_000_000)
     else {
-        return Ok((listed_url.to_owned(), 0)); // detail unavailable: use what the search gave
+        return Ok((listed_url.to_owned(), 0));
     };
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) else {
         return Ok((listed_url.to_owned(), 0));
@@ -546,7 +507,6 @@ pub fn resolve_package(publisher: &str, name: &str, listed_url: &str) -> Result<
     ))
 }
 
-/// Download a package from Open VSX and install it into `<config>/extensions`.
 pub fn download_and_install(
     config_dir: &Path,
     publisher: &str,
@@ -555,7 +515,6 @@ pub fn download_and_install(
     progress: &Progress,
 ) -> Result<Extension, String> {
     use std::sync::atomic::Ordering;
-    // Fail fast, without touching the network, on an address that is not Open VSX.
     if !listed_url.starts_with("https://open-vsx.org/") {
         return Err("refusing to download from an address that is not Open VSX".into());
     }
@@ -569,7 +528,6 @@ pub fn download_and_install(
     let tmp = std::env::temp_dir().join(format!("nanti-ext-{}-{stamp}.vsix", std::process::id()));
     let mut cmd = std::process::Command::new("curl.exe");
     // --fail: an HTTP error must not be saved as if it were the package.
-    // Large packages are fine; a connection that stalls for 30 s is not.
     cmd.args(["-sSL", "--fail", "--connect-timeout", "15", "--max-time", "1800"])
         .args(["--speed-limit", "2048", "--speed-time", "30"])
         .arg("-o")
@@ -631,8 +589,6 @@ mod tests {
         Tmp(p)
     }
 
-    /// Installs real extensions from Open VSX. Needs the network; run it with
-    /// `cargo test -p ui --lib -- --ignored installs_real_extensions --nocapture`.
     #[test]
     #[ignore = "needs the network and downloads real packages"]
     fn installs_real_extensions_from_open_vsx() {
@@ -732,7 +688,6 @@ mod tests {
         std::fs::write(dir.join("package.json"), json).unwrap();
     }
 
-    /// Build a .vsix (zip) with bsdtar so the install path is exercised for real.
     fn make_vsix(work: &Path, name: &str, manifest: &str) -> PathBuf {
         let src = work.join(format!("src-{name}"));
         write_manifest(&src.join("extension"), manifest);

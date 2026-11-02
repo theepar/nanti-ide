@@ -1,6 +1,4 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="130 146 252 220">
-  <!-- Inward Wings mark on a transparent background; recolor it with the CSS/GPUI text color.
-       The left wing cuts a thin gap out of the right wing via a mask (no black stroke needed). -->
   <defs>
     <mask id="gap" maskUnits="userSpaceOnUse" x="100" y="120" width="312" height="272">
       <rect x="100" y="120" width="312" height="272" fill="#fff"/>

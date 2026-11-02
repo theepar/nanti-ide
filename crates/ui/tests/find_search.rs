@@ -1,4 +1,3 @@
-//! Find / replace, workspace search and syntax highlighting through GPUI's headless platform.
 
 use std::path::{Path, PathBuf};
 
@@ -81,8 +80,6 @@ fn match_count(window: WindowHandle<Workbench>, cx: &mut VisualTestContext) -> u
         .unwrap()
 }
 
-// ------------------------------------------------------------------ find
-
 #[gpui::test]
 fn ctrl_f_opens_find_and_typing_goes_to_the_query_not_the_editor(cx: &mut TestAppContext) {
     let ws = workspace("f1", &[("a.txt", "foo bar foo\nfoo")]);
@@ -92,7 +89,6 @@ fn ctrl_f_opens_find_and_typing_goes_to_the_query_not_the_editor(cx: &mut TestAp
     assert_eq!(text(window, cx), "foo bar foo\nfoo", "editor untouched");
     cx.run_until_parked();
     assert_eq!(match_count(window, cx), 3);
-    // incremental: the first match at/after the cursor is already selected
     assert_eq!(selection(window, cx), 0..3);
     assert_eq!(status(window, cx).as_deref(), Some("1 of 3"));
 }
@@ -127,7 +123,6 @@ fn escape_closes_find_and_typing_returns_to_the_editor_and_f3_navigates(cx: &mut
     cx.simulate_input("Z");
     assert!(text(window, cx).contains('Z'), "typing went to the editor");
     cx.simulate_keystrokes("ctrl-z");
-    // F3 with the bar closed opens it and keeps working from the editor
     cx.simulate_keystrokes("f3");
     assert!(status(window, cx).is_some());
 }
@@ -169,16 +164,15 @@ fn replace_current_and_replace_all_with_a_single_undo(cx: &mut TestAppContext) {
         "a1 a2 a3",
         "typing in the inputs does not edit the file"
     );
-    // first Enter in the replace field: the first match is selected by incremental search, so it is replaced
     cx.simulate_keystrokes("enter");
     assert_eq!(text(window, cx), "Z1 a2 a3");
-    cx.simulate_keystrokes("shift-enter"); // replace all
+    cx.simulate_keystrokes("shift-enter");
     assert_eq!(text(window, cx), "Z1 Z2 Z3");
     let msg = window
         .read_with(cx, |wb, _| wb.model().message.clone())
         .unwrap();
     assert!(msg.unwrap().starts_with("Replaced 2"));
-    cx.simulate_keystrokes("escape"); // close find, focus editor
+    cx.simulate_keystrokes("escape");
     cx.simulate_keystrokes("ctrl-z");
     assert_eq!(
         text(window, cx),
@@ -241,8 +235,6 @@ fn ctrl_f_prefills_from_a_one_line_selection(cx: &mut TestAppContext) {
     assert_eq!(match_count(window, cx), 2);
 }
 
-// ------------------------------------------------------------------ workspace search
-
 #[gpui::test]
 fn find_in_files_runs_on_enter_and_lists_hits(cx: &mut TestAppContext) {
     let ws = workspace(
@@ -274,7 +266,6 @@ fn find_in_files_runs_on_enter_and_lists_hits(cx: &mut TestAppContext) {
         })
         .unwrap();
     assert_eq!((hits, files), (3, 2));
-    // Escape leaves the search box; typing goes to the editor again
     cx.simulate_keystrokes("escape");
     cx.simulate_input("Q");
     assert!(text(window, cx).starts_with('Q'));
@@ -300,8 +291,6 @@ fn find_in_files_prefills_from_selection_and_alt_toggles_apply(cx: &mut TestAppC
         .unwrap();
     assert_eq!(n, 1, "Alt+C = match case");
 }
-
-// ------------------------------------------------------------------ highlighting
 
 #[gpui::test]
 fn rust_file_is_highlighted_and_follows_edits(cx: &mut TestAppContext) {
@@ -356,7 +345,6 @@ fn plain_text_and_unknown_files_have_no_highlighting_and_crlf_rust_works(cx: &mu
         .expect("crlf rust");
     assert!(spans[0].iter().any(|s| s.token == Token::Comment));
     assert!(spans[1].iter().any(|s| s.token == Token::Keyword));
-    // a lone CR is a line break for the buffer but not for the highlighter: refuse instead of misaligning
     window
         .update(cx, |wb, _, _| wb.open_path(&ws.0.join("odd.rs")))
         .unwrap();

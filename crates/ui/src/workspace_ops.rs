@@ -1,8 +1,3 @@
-//! File operations behind the explorer (create, rename, delete to the Recycle Bin). GUI-free.
-//!
-//! Safety rules: every new path must stay inside the workspace, names are validated for Windows,
-//! nothing existing is ever overwritten, and delete goes to the Recycle Bin (recoverable), never
-//! a permanent remove.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -11,7 +6,6 @@ const RESERVED: [&str; 22] = [
     "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
 
-/// Check one path component name.
 pub fn validate_name(name: &str) -> Result<(), String> {
     if name.is_empty() || name == "." || name == ".." {
         return Err("enter a name".into());
@@ -35,8 +29,6 @@ pub fn validate_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Resolve `input` (a name or a relative path like `src/new/mod.rs`) below `dir`.
-/// Fails for empty, absolute or `..` paths, bad names, anything leaving `root`, or an existing target.
 pub fn resolve_new(root: &Path, dir: &Path, input: &str) -> Result<PathBuf, String> {
     let input = input.trim();
     if input.is_empty() {
@@ -79,7 +71,6 @@ pub fn create_file(path: &Path) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    // create_new: fails instead of truncating if somebody created it in the meantime
     std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -92,7 +83,6 @@ pub fn create_folder(path: &Path) -> Result<(), String> {
     std::fs::create_dir_all(path).map_err(|e| e.to_string())
 }
 
-/// Rename `from` to `new_name` in the same folder. Returns the new path.
 pub fn rename(root: &Path, from: &Path, new_name: &str) -> Result<PathBuf, String> {
     let new_name = new_name.trim();
     validate_name(new_name)?;
@@ -103,7 +93,6 @@ pub fn rename(root: &Path, from: &Path, new_name: &str) -> Result<PathBuf, Strin
     if to == from {
         return Err("the name did not change".into());
     }
-    // a case-only change (a.txt -> A.txt) is the same file on Windows and must be allowed
     let case_only = to
         .to_string_lossy()
         .eq_ignore_ascii_case(&from.to_string_lossy());
@@ -114,7 +103,6 @@ pub fn rename(root: &Path, from: &Path, new_name: &str) -> Result<PathBuf, Strin
     Ok(to)
 }
 
-/// Move `path` to the Recycle Bin (recoverable). The workspace root itself is refused.
 pub fn send_to_recycle_bin(root: &Path, path: &Path) -> Result<(), String> {
     if path == root || !path.starts_with(root) {
         return Err("only items inside the workspace can be deleted".into());

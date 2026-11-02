@@ -1,13 +1,3 @@
-//! Git integration through the `git` command line (GT-01, GT-02; PRD O-06: CLI baseline).
-//!
-//! Everything here is explicit and bounded:
-//! * commands run with a timeout and an output cap, so a stuck repo cannot freeze the UI;
-//! * read-only commands never run user-configured programs (`core.fsmonitor`, external diff
-//!   drivers, text conversion are disabled), so merely opening a hostile repository executes nothing;
-//! * paths are literal (no pathspec magic), output is English and machine readable;
-//! * there is NO push, pull, fetch, amend or `--no-verify` anywhere: the only history-changing call
-//!   is `commit`, which the user triggers explicitly, and repository hooks run as they would
-//!   from a terminal.
 
 use std::fmt;
 use std::io::{Read, Write};
@@ -18,7 +8,6 @@ use std::time::{Duration, Instant};
 pub const STATUS_TIMEOUT: Duration = Duration::from_secs(20);
 pub const DIFF_TIMEOUT: Duration = Duration::from_secs(10);
 pub const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
-/// Commit may run hooks (tests, linters), so it gets longer.
 pub const COMMIT_TIMEOUT: Duration = Duration::from_secs(120);
 pub const MAX_STATUS_ENTRIES: usize = 5_000;
 pub const MAX_DIFF_BYTES: usize = 2 * 1024 * 1024;
@@ -30,14 +19,12 @@ pub enum GitError {
     NotInstalled,
     NotARepo,
     Timeout(String),
-    /// Git ran and refused; `stderr` is what it said (hook output included).
     Failed {
         command: String,
         code: Option<i32>,
         stderr: String,
     },
     Io(String),
-    /// Refused before running git (empty commit message, nothing staged, ...).
     Rejected(String),
 }
 
@@ -74,8 +61,6 @@ struct Output {
     truncated: bool,
 }
 
-/// Options that make git safe and predictable for a UI. `read_only` additionally stops it from
-/// taking the index lock (a background refresh must not fight a terminal `git commit`).
 fn base_command(program: &str, cwd: &Path, read_only: bool) -> Command {
     let mut c = Command::new(program);
     c.current_dir(cwd)
@@ -100,7 +85,7 @@ fn base_command(program: &str, cwd: &Path, read_only: bool) -> Command {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        c.creation_flags(0x0800_0000);
     }
     c
 }
@@ -148,7 +133,7 @@ fn run(
                 buf.extend_from_slice(&chunk[..take]);
                 truncated |= take < n;
             } else {
-                truncated = true; // keep draining, drop the rest
+                truncated = true;
             }
         }
         (buf, truncated)
@@ -167,8 +152,7 @@ fn run(
             Ok(None) => {
                 if start.elapsed() > timeout {
                     kill_tree(&mut child);
-                    // Do not join the readers: a grandchild that survived could still hold the
-                    // pipes. The threads end on their own when the pipes close.
+                    // Do not join the readers: a grandchild that survived could still hold the pipes.
                     drop((out_thread, err_thread));
                     return Err(GitError::Timeout(label));
                 }
@@ -187,7 +171,6 @@ fn run(
     })
 }
 
-/// Kill git and whatever it spawned (hooks, aliases, helpers), then reap it.
 fn kill_tree(child: &mut std::process::Child) {
     #[cfg(windows)]
     {
@@ -203,8 +186,6 @@ fn kill_tree(child: &mut std::process::Child) {
     let _ = child.wait();
 }
 
-// ---- status types -------------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Change {
     Modified,
@@ -218,7 +199,6 @@ pub enum Change {
 }
 
 impl Change {
-    /// One-letter badge as shown in source control UIs.
     pub fn letter(self) -> char {
         match self {
             Change::Modified => 'M',
@@ -247,29 +227,22 @@ impl Change {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
-    /// Relative to the repository root, `/` separated. Untracked directories end with `/`.
     pub path: String,
-    /// Where a rename/copy came from.
     pub orig_path: Option<String>,
-    /// State in the index (what the next commit contains).
     pub staged: Option<Change>,
-    /// State in the working tree relative to the index (includes `Untracked`).
     pub unstaged: Option<Change>,
     pub conflicted: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Status {
-    /// Branch name; `None` when HEAD is detached.
     pub branch: Option<String>,
     pub detached: bool,
-    /// Commit id of HEAD, `None` before the first commit.
     pub oid: Option<String>,
     pub upstream: Option<String>,
     pub ahead: u32,
     pub behind: u32,
     pub entries: Vec<Entry>,
-    /// More than `MAX_STATUS_ENTRIES` changes: the list is cut.
     pub truncated: bool,
 }
 
@@ -280,7 +253,6 @@ impl Status {
             .filter(|e| !e.conflicted && e.staged.is_some())
     }
 
-    /// Working-tree changes, untracked files included.
     pub fn changes(&self) -> impl Iterator<Item = &Entry> {
         self.entries
             .iter()
@@ -295,12 +267,10 @@ impl Status {
         self.entries.is_empty()
     }
 
-    /// The entry for `rel` (a `/` path), or the first entry inside it when `rel` is a directory.
     pub fn entry_for(&self, rel: &str) -> Option<&Entry> {
         self.entries.iter().find(|e| e.path == rel)
     }
 
-    /// True when anything under directory `rel` changed.
     pub fn dir_has_changes(&self, rel: &str) -> bool {
         let prefix = if rel.is_empty() || rel.ends_with('/') {
             rel.to_owned()
@@ -310,7 +280,6 @@ impl Status {
         self.entries.iter().any(|e| e.path.starts_with(&prefix))
     }
 
-    /// Does the entry cover `rel`? (untracked directories cover their children)
     pub fn covers<'a>(&'a self, rel: &str) -> Option<&'a Entry> {
         self.entries
             .iter()
@@ -318,7 +287,6 @@ impl Status {
     }
 }
 
-/// Parse `git status --porcelain=v2 -z --branch` output.
 pub fn parse_status(bytes: &[u8]) -> Status {
     let text = String::from_utf8_lossy(bytes);
     let mut st = Status::default();
@@ -351,18 +319,15 @@ pub fn parse_status(bytes: &[u8]) -> Status {
         let mut chars = rec.chars();
         let kind = chars.next().unwrap_or(' ');
         let entry = match kind {
-            // 1 XY sub mH mI mW hH hI path
             '1' => {
                 let f: Vec<&str> = rec.splitn(9, ' ').collect();
                 (f.len() == 9).then(|| make_entry(f[1], f[8], None, false))
             }
-            // 2 XY sub mH mI mW hH hI Xscore path <NUL> origPath
             '2' => {
                 let f: Vec<&str> = rec.splitn(10, ' ').collect();
                 let orig = records.next().map(str::to_owned);
                 (f.len() == 10).then(|| make_entry(f[1], f[9], orig, false))
             }
-            // u XY sub m1 m2 m3 mW h1 h2 h3 path
             'u' => {
                 let f: Vec<&str> = rec.splitn(11, ' ').collect();
                 (f.len() == 11).then(|| make_entry(f[1], f[10], None, true))
@@ -374,7 +339,7 @@ pub fn parse_status(bytes: &[u8]) -> Status {
                 unstaged: Some(Change::Untracked),
                 conflicted: false,
             }),
-            _ => None, // '!' ignored files and anything unknown
+            _ => None,
         };
         if let Some(e) = entry {
             if st.entries.len() >= MAX_STATUS_ENTRIES {
@@ -408,14 +373,11 @@ fn make_entry(xy: &str, path: &str, orig: Option<String>, conflicted: bool) -> E
     }
 }
 
-// ---- diff types ----------------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineKind {
     Context,
     Add,
     Del,
-    /// "\ No newline at end of file"
     NoNewline,
 }
 
@@ -437,9 +399,7 @@ pub struct Hunk {
 pub struct Diff {
     pub hunks: Vec<Hunk>,
     pub binary: bool,
-    /// Output was cut (size or line limit).
     pub truncated: bool,
-    /// Header facts worth showing: "new file", "deleted file", "renamed from x", "mode change".
     pub notes: Vec<String>,
 }
 
@@ -465,7 +425,6 @@ impl Diff {
     }
 }
 
-/// Parse `git diff` unified output for one file.
 pub fn parse_diff(text: &str) -> Diff {
     let mut diff = Diff::default();
     let (mut old, mut new) = (0u32, 0u32);
@@ -473,7 +432,6 @@ pub fn parse_diff(text: &str) -> Diff {
     for raw in text.split('\n') {
         let line = raw.strip_suffix('\r').unwrap_or(raw);
         if let Some(rest) = line.strip_prefix("@@") {
-            // @@ -a,b +c,d @@ context
             let (a, c) = parse_hunk_header(rest);
             old = a;
             new = c;
@@ -484,7 +442,6 @@ pub fn parse_diff(text: &str) -> Diff {
             continue;
         }
         let Some(hunk) = diff.hunks.last_mut() else {
-            // file header area
             if line.starts_with("Binary files ") || line.starts_with("GIT binary patch") {
                 diff.binary = true;
             } else if line.starts_with("new file mode") {
@@ -511,7 +468,7 @@ pub fn parse_diff(text: &str) -> Diff {
             Some('-') => (LineKind::Del, &line[1..]),
             Some(' ') => (LineKind::Context, &line[1..]),
             Some('\\') => (LineKind::NoNewline, line),
-            _ => continue, // trailing blank, or the header of the next file
+            _ => continue,
         };
         let (o, n) = match kind {
             LineKind::Context => {
@@ -543,7 +500,6 @@ pub fn parse_diff(text: &str) -> Diff {
 }
 
 fn parse_hunk_header(rest: &str) -> (u32, u32) {
-    // rest looks like " -12,3 +14,4 @@ fn x()" (the leading "@@" is already stripped)
     let mut old = 1;
     let mut new = 1;
     for tok in rest.split_whitespace() {
@@ -565,8 +521,6 @@ fn parse_hunk_header(rest: &str) -> (u32, u32) {
     (old, new)
 }
 
-// ---- repository -------------------------------------------------------------------------------------
-
 #[derive(Debug, Clone)]
 pub struct Repo {
     pub root: PathBuf,
@@ -574,12 +528,10 @@ pub struct Repo {
 }
 
 impl Repo {
-    /// Find the repository containing `start`.
     pub fn discover(start: &Path) -> Result<Repo, GitError> {
         Self::discover_with("git", start)
     }
 
-    /// A repo handle for `root` without asking git. For callers that only need path handling.
     pub fn at_unchecked(root: PathBuf) -> Repo {
         Repo {
             root,
@@ -668,8 +620,6 @@ impl Repo {
         Ok(st)
     }
 
-    /// Diff of `paths` (normally one file, two for a rename) between index and HEAD (`staged`) or
-    /// working tree and index.
     pub fn diff(&self, paths: &[&str], staged: bool) -> Result<Diff, GitError> {
         let mut args = vec![
             "diff",
@@ -696,7 +646,6 @@ impl Repo {
         Ok(d)
     }
 
-    /// Diff for an untracked file: all of it is "added" (read from disk, capped).
     pub fn diff_untracked(&self, rel: &str) -> Result<Diff, GitError> {
         let path = self.root.join(rel);
         let meta = std::fs::metadata(&path).map_err(|e| GitError::Io(e.to_string()))?;
@@ -769,7 +718,6 @@ impl Repo {
         if paths.is_empty() {
             return Ok(());
         }
-        // Before the first commit there is no HEAD to restore from: drop the entries from the index.
         let mut args = if self.has_head() {
             vec!["restore", "--staged", "--"]
         } else {
@@ -789,8 +737,6 @@ impl Repo {
         }
     }
 
-    /// Commit what is staged. Refuses an empty message or an empty index before running git.
-    /// Never amends, never skips hooks, never pushes. Returns git's one-line summary.
     pub fn commit(&self, message: &str) -> Result<String, GitError> {
         if message.trim().is_empty() {
             return Err(GitError::Rejected("enter a commit message first".into()));
@@ -814,7 +760,6 @@ impl Repo {
             let stdout = String::from_utf8_lossy(&out.stdout);
             Ok(stdout.lines().next().unwrap_or("committed").to_owned())
         } else {
-            // Hook output and identity errors arrive on either stream.
             let mut text = out.stderr;
             let so = String::from_utf8_lossy(&out.stdout);
             if !so.trim().is_empty() {
@@ -839,7 +784,6 @@ mod tests {
     struct Tmp(PathBuf);
     impl Drop for Tmp {
         fn drop(&mut self) {
-            // git marks some object files read-only on Windows
             let _ = Command::new("cmd")
                 .args(["/C", "rmdir", "/S", "/Q"])
                 .arg(&self.0)
@@ -891,8 +835,6 @@ mod tests {
         sh(&repo.root, &["commit", "-q", "-m", msg]);
     }
 
-    // ---- pure parsing ----
-
     #[test]
     fn parse_status_handles_every_record_kind() {
         let raw = b"# branch.oid 0123456789abcdef\0# branch.head main\0# branch.upstream origin/main\0# branch.ab +2 -1\0\
@@ -942,7 +884,7 @@ u UU N... 100644 100644 100644 100644 aaaa bbbb cccc conflict.txt\0\
             "ignored files are not listed"
         );
         assert_eq!(st.staged().count(), 4);
-        assert_eq!(st.changes().count(), 4); // work tree, both, untracked x2
+        assert_eq!(st.changes().count(), 4);
         assert_eq!(st.conflicts().count(), 1);
         assert!(
             st.covers("dir/inner/file.rs").is_some(),
@@ -1025,8 +967,6 @@ u UU N... 100644 100644 100644 100644 aaaa bbbb cccc conflict.txt\0\
         assert!(parse_diff("").is_empty());
     }
 
-    // ---- real repositories ----
-
     #[test]
     fn discover_finds_the_root_from_a_subdirectory_and_rejects_non_repos() {
         let (tmp, repo) = new_repo("disc");
@@ -1071,7 +1011,7 @@ u UU N... 100644 100644 100644 100644 aaaa bbbb cccc conflict.txt\0\
         write(&repo, "a.txt", "one\ntwo\n");
         write(&repo, "new.txt", "n\n");
         sh(&repo.root, &["add", "new.txt"]);
-        write(&repo, "new.txt", "n\nm\n"); // staged AND modified afterwards
+        write(&repo, "new.txt", "n\nm\n");
         let st = repo.status().unwrap();
         let a = st.entry_for("a.txt").unwrap();
         assert_eq!((a.staged, a.unstaged), (None, Some(Change::Modified)));
@@ -1120,7 +1060,7 @@ u UU N... 100644 100644 100644 100644 aaaa bbbb cccc conflict.txt\0\
         commit_all(&repo, "base");
         write(&repo, "a.txt", "l1\nL2\nl3\nl4");
         let d = repo.diff(&["a.txt"], false).unwrap();
-        assert_eq!((d.added(), d.removed()), (2, 1)); // L2 and l4 added, l2 removed
+        assert_eq!((d.added(), d.removed()), (2, 1));
         assert!(
             d.hunks[0]
                 .lines
@@ -1180,7 +1120,6 @@ u UU N... 100644 100644 100644 100644 aaaa bbbb cccc conflict.txt\0\
         for n in names {
             write(&repo, n, "x\n");
         }
-        // decoys that a glob like "[br].txt" would match
         write(&repo, "b.txt", "x\n");
         write(&repo, "r.txt", "x\n");
         repo.stage(&names.iter().map(|s| s.to_string()).collect::<Vec<_>>())
@@ -1193,7 +1132,6 @@ u UU N... 100644 100644 100644 100644 aaaa bbbb cccc conflict.txt\0\
             st.entries
         );
         assert_eq!(st.entry_for("b.txt").unwrap().staged, None);
-        // unstage one before any commit exists
         repo.unstage(&["[br].txt".to_owned()]).unwrap();
         let st = repo.status().unwrap();
         assert_eq!(st.staged().count(), 3);
@@ -1237,7 +1175,7 @@ u UU N... 100644 100644 100644 100644 aaaa bbbb cccc conflict.txt\0\
         repo.stage(&["a.txt".to_owned()]).unwrap();
         assert!(matches!(repo.commit("   \n"), Err(GitError::Rejected(_))));
         commit_all(&repo, "base");
-        write(&repo, "a.txt", "2\n"); // modified but NOT staged
+        write(&repo, "a.txt", "2\n");
         assert!(matches!(repo.commit("msg"), Err(GitError::Rejected(m)) if m.contains("staged")));
         assert_eq!(sh(&repo.root, &["rev-list", "--count", "HEAD"]).trim(), "1");
     }
@@ -1386,7 +1324,6 @@ u UU N... 100644 100644 100644 100644 aaaa bbbb cccc conflict.txt\0\
                 &script.display().to_string().replace('\\', "/"),
             ],
         );
-        // control: plain git does run it (this proves the test can detect the problem)
         let _ = Command::new("git")
             .current_dir(&repo.root)
             .args(["status", "--porcelain"])
@@ -1406,7 +1343,6 @@ u UU N... 100644 100644 100644 100644 aaaa bbbb cccc conflict.txt\0\
         let (_t, repo) = new_repo("lock");
         write(&repo, "a.txt", "1\n");
         commit_all(&repo, "base");
-        // Someone else (a terminal `git commit`) holds the lock: a background status must still work.
         std::fs::write(repo.root.join(".git/index.lock"), "").unwrap();
         assert!(repo.status().is_ok());
         let _ = std::fs::remove_file(repo.root.join(".git/index.lock"));

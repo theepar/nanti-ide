@@ -1,6 +1,3 @@
-//! WebView2 child surface for one extension webview view, plus the host worker thread that feeds it.
-//!
-//! WebView2 only hosts third-party extension HTML (PRD 4.2); the editor itself stays native.
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -18,7 +15,6 @@ use wry::{PageLoadEvent, Rect, WebView, WebViewBuilder, WebViewBuilderExtWindows
 
 use crate::resource::{ORIGIN, ResourceState, serve};
 
-/// What the host worker tells the UI thread.
 #[derive(Debug)]
 pub enum UiEvent {
     Html(String),
@@ -54,7 +50,6 @@ pub enum UiEvent {
     },
 }
 
-/// What the UI thread tells the host worker.
 #[derive(Debug)]
 pub enum HostCommand {
     WebviewMessage(Value),
@@ -85,7 +80,6 @@ pub struct HostConfig {
     pub extension_dir: PathBuf,
     pub view_type: String,
     pub workspace: Option<PathBuf>,
-    /// Log milestones to this file and exit(0) once the mock extension round-trip is proven.
     pub selftest_log: Option<PathBuf>,
 }
 
@@ -113,7 +107,6 @@ const INIT_SCRIPT: &str = r#"
 "#;
 
 fn js_literal(v: &Value) -> String {
-    // JSON is valid JS except for these two separators.
     v.to_string()
         .replace('\u{2028}', "\\u2028")
         .replace('\u{2029}', "\\u2029")
@@ -129,7 +122,6 @@ pub struct Panel {
     queued: Vec<Value>,
     last_bounds: Option<(i32, i32, i32, i32)>,
     diag_log: Option<PathBuf>,
-    /// When the current document finished loading and has not been inspected yet (diagnostics).
     inspect_due: Option<std::time::Instant>,
 }
 
@@ -167,7 +159,6 @@ impl Panel {
                 }
             })
             .with_ipc_handler(move |req| {
-                // Only well-formed `{type:"message"}` envelopes reach the extension.
                 if let Ok(v) = serde_json::from_str::<Value>(req.body()) {
                     if v["type"] == "message" {
                         let _ = ipc_tx.send(HostCommand::WebviewMessage(v["message"].clone()));
@@ -195,13 +186,10 @@ impl Panel {
         })
     }
 
-    /// Show or hide the native webview surface. It floats above GPUI content, so hiding the
-    /// right panel in the layout must hide it too.
     pub fn set_visible(&self, visible: bool) {
         let _ = self.webview.set_visible(visible);
     }
 
-    /// Place the webview over the right-hand panel area (logical pixels).
     pub fn set_area(&mut self, x: i32, y: i32, w: i32, h: i32) {
         let b = (x, y, w.max(1), h.max(1));
         if self.last_bounds == Some(b) {
@@ -214,7 +202,6 @@ impl Panel {
         });
     }
 
-    /// Send a user's browser-opening decision to the extension host.
     pub fn resolve_external(&self, id: String, approved: bool) {
         let _ = self
             .to_host
@@ -246,7 +233,6 @@ impl Panel {
         let _ = self.to_host.send(HostCommand::DocClose { uri });
     }
 
-    /// Apply pending host events; returns the ones the UI itself must show (status items and consent requests).
     pub fn pump(&mut self) -> Vec<UiEvent> {
         let mut ui = Vec::new();
         while let Ok(ev) = self.events.try_recv() {
@@ -316,8 +302,6 @@ fn selftest_log(path: &Option<PathBuf>, line: &str) {
     }
 }
 
-/// Start the Node host on a worker thread: load + activate the extension, resolve its view and
-/// pump notifications to the UI. Returns the UI-side channel ends.
 pub fn spawn_worker(
     cfg: HostConfig,
 ) -> (Receiver<UiEvent>, Sender<HostCommand>, Sender<HostCommand>) {

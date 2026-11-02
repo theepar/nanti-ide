@@ -1,8 +1,3 @@
-//! Text buffer with grouped undo/redo, dirty tracking, and an `Editor` (cursor + selection) on top
-//! (ED-04, CT-001).
-//!
-//! Indices are `char` offsets (Unicode scalar values), not bytes. Cursor movement and deletion
-//! work on grapheme clusters, so emoji sequences and `\r\n` behave as one unit.
 
 use std::ops::Range;
 
@@ -34,7 +29,6 @@ impl Edit {
     }
 }
 
-/// A set of edits undone/redone together.
 type Group = Vec<Edit>;
 
 #[derive(Debug, Default)]
@@ -42,11 +36,8 @@ pub struct Buffer {
     rope: Rope,
     undo: Vec<Group>,
     redo: Vec<Group>,
-    /// Edits of the transaction currently being recorded, if any.
     open: Option<Group>,
-    /// Length of `undo` when the buffer was last saved; `None` if that state is unreachable.
     saved_at: Option<usize>,
-    /// Bumped on every content change (insert, delete, undo, redo, composition rewind).
     version: u64,
 }
 
@@ -77,12 +68,10 @@ impl Buffer {
         self.rope.len_chars()
     }
 
-    /// Changes whenever the text changes; use it to invalidate derived data (highlights, matches).
     pub fn version(&self) -> u64 {
         self.version
     }
 
-    /// Number of lines; a trailing line terminator starts one more (empty) line.
     pub fn len_lines(&self) -> usize {
         self.rope.len_lines()
     }
@@ -91,12 +80,10 @@ impl Buffer {
         self.saved_at != Some(self.undo.len()) || self.open.as_ref().is_some_and(|g| !g.is_empty())
     }
 
-    /// Mark current content as persisted to disk.
     pub fn mark_saved(&mut self) {
         self.saved_at = Some(self.undo.len());
     }
 
-    /// Offset conversions for platform text services, which count UTF-16 code units.
     pub fn char_to_utf16(&self, char_idx: usize) -> usize {
         self.rope.char_to_utf16_cu(char_idx.min(self.len_chars()))
     }
@@ -106,8 +93,6 @@ impl Buffer {
             .utf16_cu_to_char(utf16_idx.min(self.rope.len_utf16_cu()))
     }
 
-    /// Start an undo group that stays open across calls (an IME composition). Edits are recorded
-    /// into it until `close_group`, which commits them as ONE undo step.
     pub fn open_group(&mut self) {
         if self.open.is_none() {
             self.open = Some(Vec::new());
@@ -122,8 +107,6 @@ impl Buffer {
         }
     }
 
-    /// Revert the edits recorded in the open group so far (keeping the group open). Used to redo a
-    /// composition update from the pre-composition state without polluting undo history.
     pub fn rewind_open_group(&mut self) {
         if let Some(group) = self.open.as_mut() {
             for edit in group.drain(..).rev() {
@@ -141,7 +124,6 @@ impl Buffer {
         self.rope.line_to_char(line)
     }
 
-    /// Char index of the end of `line`, excluding its terminator.
     pub fn line_end(&self, line: usize) -> usize {
         let l = self.rope.line(line);
         let mut n = l.len_chars();
@@ -157,7 +139,6 @@ impl Buffer {
         self.rope.char_to_line(char_idx)
     }
 
-    /// Text of `line` without its terminator.
     pub fn line_text(&self, line: usize) -> String {
         self.slice(self.line_start(line)..self.line_end(line))
     }
@@ -175,9 +156,6 @@ impl Buffer {
         });
     }
 
-    /// Like `insert`, but extends the previous undo step when it was a single insert that ends
-    /// exactly at `at` (so a run of typed characters undoes as one step). Never coalesces across a
-    /// save point, which would make a modified buffer look clean.
     pub fn insert_coalescing(&mut self, at: usize, text: &str) {
         let can_merge = self.open.is_none()
             && self.redo.is_empty()
@@ -214,7 +192,6 @@ impl Buffer {
         });
     }
 
-    /// Run `f`; every edit it makes becomes one undo step.
     pub fn transact<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
         let nested = self.open.is_some();
         if !nested {
@@ -231,7 +208,6 @@ impl Buffer {
         r
     }
 
-    /// Undo one step. Returns where the cursor should go, or `None` if nothing to undo.
     pub fn undo(&mut self) -> Option<usize> {
         let group = self.undo.pop()?;
         let mut hint = 0;
@@ -247,7 +223,6 @@ impl Buffer {
         Some(hint)
     }
 
-    /// Redo one step. Returns where the cursor should go, or `None` if nothing to redo.
     pub fn redo(&mut self) -> Option<usize> {
         let group = self.redo.pop()?;
         let mut hint = 0;
@@ -271,7 +246,6 @@ impl Buffer {
     }
 
     fn commit(&mut self, group: Group) {
-        // A new edit drops the redo branch; a saved state living in it becomes unreachable.
         if !self.redo.is_empty() {
             self.redo.clear();
             if self.saved_at.is_some_and(|s| s > self.undo.len()) {
@@ -306,27 +280,21 @@ impl Eol {
     }
 }
 
-/// How many chars around the cursor are inspected to find grapheme boundaries.
 const GRAPHEME_WINDOW: usize = 32;
 
-/// An IME composition in progress: `origin` is what the composition replaced (restored on every
-/// update, so intermediate states never reach the undo history), `marked` the pre-edit text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Composition {
     origin: Range<usize>,
     marked: Range<usize>,
 }
 
-/// Buffer + cursor + selection. The selection is `anchor..cursor` (either order).
 #[derive(Debug)]
 pub struct Editor {
     buffer: Buffer,
     cursor: usize,
     anchor: usize,
-    /// Column to return to on vertical moves through shorter lines.
     goal_col: Option<usize>,
     eol: Eol,
-    /// True while consecutive typing should merge into one undo step.
     typing_run: bool,
     composition: Option<Composition>,
 }
@@ -349,9 +317,6 @@ impl Editor {
         }
     }
 
-    // ---- IME composition -------------------------------------------------------------------
-
-    /// Char range of the text being composed (underlined pre-edit text), if any.
     pub fn marked_range(&self) -> Option<Range<usize>> {
         self.composition.as_ref().map(|c| c.marked.clone())
     }
@@ -365,9 +330,6 @@ impl Editor {
         r.start.min(n)..r.end.min(n)
     }
 
-    /// Replace `range` (default: the composition's origin, else the selection) with pre-edit
-    /// `text` and mark it as composing. `selected` is the cursor/selection inside `text`, in chars.
-    /// The whole composition is a single undo step, committed when it ends.
     pub fn compose(
         &mut self,
         range: Option<Range<usize>>,
@@ -403,15 +365,12 @@ impl Editor {
         self.goal_col = None;
     }
 
-    /// Finish composing (the platform committed or abandoned the pre-edit text); text stays.
     pub fn end_composition(&mut self) {
         if self.composition.take().is_some() {
             self.buffer.close_group();
         }
     }
 
-    /// Replace `range` (default: composition origin, else selection) with final `text`, ending any
-    /// composition. This is what the IME calls with the committed result.
     pub fn commit_text(&mut self, range: Option<Range<usize>>, text: &str) {
         let text = self.normalize_eol(text);
         let target = match self.composition.take() {
@@ -437,7 +396,6 @@ impl Editor {
         self.goal_col = None;
     }
 
-    /// UTF-16 selection `(range, reversed)` as platform text services expect it.
     pub fn selection_utf16(&self) -> (Range<usize>, bool) {
         (
             self.chars_range_to_utf16(self.selection()),
@@ -498,15 +456,11 @@ impl Editor {
         self.buffer.slice(self.selection())
     }
 
-    /// `(line, column)` of the cursor, both 0-based, column in chars.
     pub fn line_col(&self) -> (usize, usize) {
         let line = self.buffer.line_of(self.cursor);
         (line, self.cursor - self.buffer.line_start(line))
     }
 
-    // ---- editing -------------------------------------------------------------------------
-
-    /// Replace the selection with `text` (line breaks are converted to the file's EOL).
     pub fn insert(&mut self, text: &str) {
         self.end_composition();
         let text = self.normalize_eol(text);
@@ -574,7 +528,6 @@ impl Editor {
         self.goal_col = None;
     }
 
-    /// Delete the selection and return its text (for cut).
     pub fn cut(&mut self) -> String {
         self.end_composition();
         let text = self.selected_text();
@@ -621,14 +574,11 @@ impl Editor {
         }
     }
 
-    /// Select `range` (anchor at its start) so it is highlighted and replaced by typing.
     pub fn select_range(&mut self, range: Range<usize>) {
         self.set_cursor(range.start, false);
         self.set_cursor(range.end, true);
     }
 
-    /// Replace matches of `finder` with `replacement`: every match, or only the one equal to
-    /// `only` (a char range). One undo step. Returns how many were replaced.
     pub fn replace_matches(
         &mut self,
         finder: &find::Finder,
@@ -644,7 +594,6 @@ impl Editor {
         if matches.is_empty() {
             return 0;
         }
-        // Walk the text once to get each match start as a byte offset (needed for capture expansion).
         let mut reps: Vec<(Range<usize>, String)> = Vec::with_capacity(matches.len());
         let (mut chars, mut bytes) = (0usize, 0usize);
         for m in &matches {
@@ -674,9 +623,6 @@ impl Editor {
         reps.len()
     }
 
-    // ---- movement ------------------------------------------------------------------------
-
-    /// Move the cursor to `pos`; with `extend` the anchor stays so the selection grows.
     pub fn set_cursor(&mut self, pos: usize, extend: bool) {
         self.end_composition();
         self.typing_run = false;
@@ -767,8 +713,6 @@ impl Editor {
         self.cursor = self.buffer.len_chars();
     }
 
-    // ---- helpers -------------------------------------------------------------------------
-
     fn normalize_eol(&self, text: &str) -> String {
         if !text.contains(['\r', '\n']) {
             return text.to_owned();
@@ -804,8 +748,6 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ---- Buffer ----
 
     #[test]
     fn insert_delete_roundtrip_with_unicode() {
@@ -867,7 +809,7 @@ mod tests {
             b.insert(0, "bye");
         });
         assert_eq!(b.to_string(), "bye world");
-        assert_eq!(b.undo(), Some(5)); // cursor lands after the restored text
+        assert_eq!(b.undo(), Some(5));
         assert_eq!(b.to_string(), "hello world");
         assert!(b.undo().is_none());
         b.redo();
@@ -877,7 +819,7 @@ mod tests {
     #[test]
     fn coalescing_merges_typing_but_never_across_a_save() {
         let mut b = Buffer::from_text("");
-        b.insert_coalescing(0, "a"); // no previous group: plain insert
+        b.insert_coalescing(0, "a");
         b.insert_coalescing(1, "b");
         b.insert_coalescing(2, "c");
         assert_eq!(b.to_string(), "abc");
@@ -885,7 +827,7 @@ mod tests {
         assert_eq!(b.to_string(), "");
         b.redo();
         b.mark_saved();
-        b.insert_coalescing(3, "d"); // must not merge into the saved step
+        b.insert_coalescing(3, "d");  // must not merge into the saved step
         assert!(b.is_dirty());
         b.undo();
         assert_eq!(b.to_string(), "abc");
@@ -902,8 +844,6 @@ mod tests {
         assert_eq!(b.line_end(0) - b.line_start(0), 2);
         assert_eq!(b.line_of(b.line_start(2)), 2);
     }
-
-    // ---- Editor ----
 
     fn ed(text: &str, cursor: usize) -> Editor {
         let mut e = Editor::new(text);
@@ -927,7 +867,7 @@ mod tests {
     #[test]
     fn typing_over_selection_replaces_it_as_one_undo_step() {
         let mut e = ed("hello world", 0);
-        e.set_cursor(5, true); // select "hello"
+        e.set_cursor(5, true);
         e.insert("bye");
         assert_eq!(e.text(), "bye world");
         assert!(e.undo());
@@ -937,15 +877,15 @@ mod tests {
 
     #[test]
     fn backspace_and_delete_remove_whole_graphemes() {
-        let family = "👨‍👩‍👧"; // 5 scalar values, one grapheme
+        let family = "👨‍👩‍👧";
         let mut e = ed(&format!("a{family}b"), 6);
-        e.move_left(false); // jumps over the whole 5-scalar cluster
+        e.move_left(false);
         assert_eq!(e.cursor(), 1);
         e.move_right(false);
         assert_eq!(e.cursor(), 6);
-        e.backspace(); // removes the whole cluster at once
+        e.backspace();
         assert_eq!(e.text(), "ab");
-        let mut e = ed("e\u{301}x", 0); // 'e' + combining acute
+        let mut e = ed("e\u{301}x", 0);
         e.delete_forward();
         assert_eq!(e.text(), "x");
     }
@@ -954,11 +894,11 @@ mod tests {
     fn crlf_is_one_unit_and_newline_keeps_file_eol() {
         let mut e = ed("a\r\nb", 3);
         assert_eq!(e.eol(), Eol::CrLf);
-        e.backspace(); // removes the whole \r\n
+        e.backspace();
         assert_eq!(e.text(), "ab");
         e.newline();
         assert_eq!(e.text(), "a\r\nb");
-        e.insert("x\ny"); // pasted LF becomes CRLF
+        e.insert("x\ny");
         assert_eq!(e.text(), "a\r\nx\r\nyb");
         let mut lf = ed("a", 1);
         lf.newline();
@@ -979,9 +919,9 @@ mod tests {
     fn vertical_movement_keeps_goal_column() {
         let mut e = ed("abcdef\nab\nabcdef", 5);
         e.move_down(false);
-        assert_eq!(e.line_col(), (1, 2)); // clamped to the short line
+        assert_eq!(e.line_col(), (1, 2));
         e.move_down(false);
-        assert_eq!(e.line_col(), (2, 5)); // goal column restored
+        assert_eq!(e.line_col(), (2, 5));
         e.move_up(false);
         e.move_up(false);
         assert_eq!(e.line_col(), (0, 5));
@@ -996,7 +936,7 @@ mod tests {
         e.move_right(true);
         assert_eq!(e.selection(), 2..4);
         assert_eq!(e.selected_text(), "cd");
-        e.move_left(false); // collapse to start
+        e.move_left(false);
         assert_eq!((e.cursor(), e.has_selection()), (2, false));
         e.select_all();
         assert_eq!(e.selected_text(), "abcdef");
@@ -1027,7 +967,7 @@ mod tests {
         assert!(e.is_dirty());
         e.mark_saved();
         assert!(!e.is_dirty());
-        e.insert("b"); // typing right after a save must not merge into the saved step
+        e.insert("b");  // typing right after a save must not merge into the saved step
         assert!(e.is_dirty());
         e.undo();
         assert!(!e.is_dirty());
@@ -1049,11 +989,9 @@ mod tests {
         assert_eq!(e.text(), "");
     }
 
-    // ---- IME composition ----
-
     #[test]
     fn composition_updates_replace_each_other_and_commit_as_one_undo_step() {
-        let mut e = ed("ab", 1); // a|b
+        let mut e = ed("ab", 1);
         e.compose(None, "n", Some(1..1));
         assert_eq!((e.text().as_str(), e.marked_range()), ("anb", Some(1..2)));
         e.compose(None, "ni", Some(2..2));
@@ -1065,7 +1003,6 @@ mod tests {
         e.commit_text(None, "你");
         assert_eq!((e.text().as_str(), e.cursor()), ("a你b", 2));
         assert!(!e.is_composing());
-        // one undo reverts the whole composition, no intermediate states
         assert!(e.undo());
         assert_eq!(e.text(), "ab");
         assert!(!e.undo());
@@ -1076,7 +1013,7 @@ mod tests {
     #[test]
     fn composition_over_a_selection_replaces_it_and_commit_restores_on_undo() {
         let mut e = ed("hello world", 0);
-        e.set_cursor(5, true); // select "hello"
+        e.set_cursor(5, true);
         e.compose(None, "こ", Some(1..1));
         assert_eq!(e.text(), "こ world");
         e.compose(None, "こん", Some(2..2));
@@ -1090,7 +1027,7 @@ mod tests {
     fn cancelled_composition_leaves_no_trace_in_history() {
         let mut e = ed("ab", 1);
         e.compose(None, "n", None);
-        e.compose(None, "", None); // IME cancels: empty pre-edit
+        e.compose(None, "", None);
         e.end_composition();
         assert_eq!(e.text(), "ab");
         assert!(!e.is_dirty());
@@ -1101,7 +1038,7 @@ mod tests {
     fn ending_composition_keeps_the_text_and_is_one_step() {
         let mut e = ed("", 0);
         e.compose(None, "ka", Some(2..2));
-        e.end_composition(); // unmark without replace: pre-edit becomes real text
+        e.end_composition();
         assert_eq!(e.text(), "ka");
         assert!(e.undo());
         assert_eq!(e.text(), "");
@@ -1119,14 +1056,14 @@ mod tests {
     fn ordinary_edit_during_composition_ends_it_cleanly() {
         let mut e = ed("x", 1);
         e.compose(None, "ab", None);
-        e.insert("!"); // should not happen with a real IME, but must stay consistent
+        e.insert("!");
         assert!(!e.is_composing());
         assert_eq!(e.text(), "xab!");
     }
 
     #[test]
     fn utf16_offsets_count_surrogate_pairs() {
-        let e = ed("a🌍b", 0); // 🌍 is 2 UTF-16 units
+        let e = ed("a🌍b", 0);
         assert_eq!(e.chars_range_to_utf16(0..3), 0..4);
         assert_eq!(e.utf16_range_to_chars(1..3), 1..2);
         let mut e = ed("a🌍b", 2);
@@ -1136,8 +1073,6 @@ mod tests {
         e.set_cursor(2, true);
         assert_eq!(e.selection_utf16(), (1..3, false));
     }
-
-    // ---- find / replace ----
 
     use crate::find::{FindOptions, Finder};
 

@@ -1,5 +1,3 @@
-//! Terminal panel with REAL shells (ConPTY) driven through GPUI's headless platform.
-//! Every test spawns PowerShell, so they take a few hundred ms each.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -52,7 +50,6 @@ fn editor_text(window: WindowHandle<Workbench>, cx: &mut VisualTestContext) -> S
         .unwrap()
 }
 
-/// Pump terminal events until `needle` shows in the active terminal.
 fn wait_text(
     window: WindowHandle<Workbench>,
     cx: &mut VisualTestContext,
@@ -82,7 +79,6 @@ fn screen(window: WindowHandle<Workbench>, cx: &mut VisualTestContext) -> String
         .unwrap()
 }
 
-/// Wait for a shell prompt in the active terminal.
 fn wait_prompt(window: WindowHandle<Workbench>, cx: &mut VisualTestContext) {
     let start = Instant::now();
     loop {
@@ -147,7 +143,6 @@ fn ctrl_backtick_opens_a_terminal_in_the_workspace_and_typing_runs_commands(
         1
     );
     wait_prompt(window, cx);
-    // TR-02: the shell starts in the workspace folder
     let leaf = ws.0.file_name().unwrap().to_string_lossy().into_owned();
     assert!(
         screen(window, cx).contains(&leaf),
@@ -176,7 +171,6 @@ fn terminal_keeps_the_keyboard_until_toggled_away(cx: &mut TestAppContext) {
     wait_prompt(window, cx);
     cx.simulate_input("zzz");
     assert_eq!(editor_text(window, cx), "x");
-    // Ctrl+` again hides the panel and returns the keyboard to the editor
     cx.simulate_keystrokes("ctrl-`");
     assert!(
         !window
@@ -185,7 +179,6 @@ fn terminal_keeps_the_keyboard_until_toggled_away(cx: &mut TestAppContext) {
     );
     cx.simulate_input("Q");
     assert_eq!(editor_text(window, cx), "Qx");
-    // and shows it again with the SAME shell (not a new one)
     cx.simulate_keystrokes("ctrl-`");
     assert_eq!(
         window.read_with(cx, |wb, _| wb.terminal_count()).unwrap(),
@@ -208,7 +201,7 @@ fn ctrl_c_interrupts_and_ctrl_v_pastes(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("enter");
     std::thread::sleep(Duration::from_millis(800));
     let before = window.update(cx, |wb, _, _| prompts(wb)).unwrap();
-    cx.simulate_keystrokes("ctrl-c"); // no selection: this is the interrupt
+    cx.simulate_keystrokes("ctrl-c");
     let start = Instant::now();
     while window
         .update(cx, |wb, _, _| {
@@ -226,7 +219,6 @@ fn ctrl_c_interrupts_and_ctrl_v_pastes(cx: &mut TestAppContext) {
         cx.run_until_parked();
         std::thread::sleep(Duration::from_millis(30));
     }
-    // paste goes to the shell
     cx.write_to_clipboard(ClipboardItem::new_string(
         "echo (\"pa-\"+\"ste\")".to_owned(),
     ));
@@ -305,9 +297,8 @@ fn new_terminal_exit_status_and_kill_command(cx: &mut TestAppContext) {
             .unwrap(),
         Some(3)
     );
-    cx.simulate_input("ignored"); // typing into an exited terminal must not panic or reach the editor
+    cx.simulate_input("ignored");  // typing into an exited terminal must not panic or reach the editor
     assert_eq!(editor_text(window, cx), "x");
-    // kill it through the palette
     cx.simulate_keystrokes("ctrl-shift-p");
     cx.simulate_input("kill active");
     cx.simulate_keystrokes("enter");
@@ -408,7 +399,6 @@ fn terminal_and_editor_shortcuts_coexist(cx: &mut TestAppContext) {
     let (window, cx) = open(cx, &ws.0);
     cx.simulate_keystrokes("ctrl-`");
     wait_prompt(window, cx);
-    // Ctrl+P (quick open) and Ctrl+Shift+P still reach the workbench while the shell has focus
     cx.simulate_keystrokes("ctrl-p");
     assert!(
         window
@@ -421,7 +411,6 @@ fn terminal_and_editor_shortcuts_coexist(cx: &mut TestAppContext) {
             .read_with(cx, |wb, _| wb.model().palette.is_none())
             .unwrap()
     );
-    // after Escape the keyboard returns to the terminal
     cx.simulate_input("echo (\"back-\"+\"ok\")");
     cx.simulate_keystrokes("enter");
     assert!(

@@ -30,7 +30,6 @@ fn mock_extension() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/mock-extension")
 }
 
-/// Gate B: a real extension (not a stub) loads, activates, runs commands and touches the workspace.
 #[test]
 fn mock_extension_end_to_end() {
     let ws = std::env::temp_dir().join(format!("nanti-ws-{}", std::process::id()));
@@ -77,7 +76,6 @@ fn mock_webview_extension() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/mock-webview-extension")
 }
 
-/// Wait for a notification with `method`, returning it; panics after a few seconds.
 fn wait_for(host: &mut ExtensionHost, method: &str) -> app::host::Notification {
     for _ in 0..50 {
         if let Some(n) = host.recv_notification(std::time::Duration::from_millis(100)) {
@@ -89,7 +87,6 @@ fn wait_for(host: &mut ExtensionHost, method: &str) -> app::host::Notification {
     panic!("no '{method}' notification");
 }
 
-/// VH-06/VH-07 over the real IPC: view provider, HTML, resource URI, async messages, URI callback.
 #[test]
 fn webview_view_and_uri_handler_end_to_end() {
     let mut host = ExtensionHost::spawn("node", &entry()).expect("spawn host");

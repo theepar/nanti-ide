@@ -1,15 +1,10 @@
-//! Run tasks detected from the project files (the Run view). Nothing runs by itself: a task is a
-//! command line the user clicks, and it runs in the integrated terminal where its output and any
-//! prompt are visible.
 
 use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Task {
     pub label: String,
-    /// Exact text typed into the terminal.
     pub command: String,
-    /// Which project file it came from.
     pub source: &'static str,
 }
 
@@ -21,7 +16,6 @@ fn task(label: &str, command: &str, source: &'static str) -> Task {
     }
 }
 
-/// Tasks for the project at `root` (Cargo, npm/pnpm/yarn, Go, Dart/Flutter).
 pub fn detect(root: &Path) -> Vec<Task> {
     let mut out = Vec::new();
     if root.join("Cargo.toml").is_file() {
@@ -50,7 +44,6 @@ pub fn detect(root: &Path) -> Vec<Task> {
         let mut names: Vec<&String> = scripts.keys().collect();
         names.sort();
         for n in names {
-            // A script name goes into a shell command line: only plain names are offered.
             if n.chars()
                 .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':' | '.'))
             {

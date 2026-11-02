@@ -1,5 +1,3 @@
-//! Workspace search ("Find in Files", ED-07). Reads files from DISK, so unsaved editor changes are
-//! not searched. Matching is per line, which means a regex cannot match across a line break.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -9,32 +7,24 @@ use editor_core::find::{FindOptions, Finder};
 
 use crate::palette::{TextField, list_files};
 
-/// Files above this size are skipped.
 pub const MAX_FILE_BYTES: u64 = 1_000_000;
 pub const MAX_HITS: usize = 2_000;
 pub const MAX_FILES_WITH_HITS: usize = 200;
-/// A search stops (and says so) after this long, so a huge workspace cannot freeze the UI.
 pub const TIME_BUDGET: Duration = Duration::from_secs(2);
 const PREVIEW_CHARS: usize = 160;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hit {
-    /// 0-based line.
     pub line: usize,
-    /// 0-based char column of the match within the line.
     pub col: usize,
-    /// Match length in chars.
     pub len: usize,
-    /// The line, with leading whitespace trimmed and cut to a readable length.
     pub preview: String,
-    /// Char range of the match within `preview`.
     pub preview_range: std::ops::Range<usize>,
 }
 
 #[derive(Debug, Clone)]
 pub struct FileHits {
     pub path: PathBuf,
-    /// Path relative to the workspace root, with `/`.
     pub rel: String,
     pub hits: Vec<Hit>,
 }
@@ -44,7 +34,6 @@ pub struct SearchResults {
     pub files: Vec<FileHits>,
     pub total_hits: usize,
     pub files_scanned: usize,
-    /// A limit (hits, files or time) cut the search short.
     pub truncated: bool,
     pub error: Option<String>,
 }
@@ -104,13 +93,12 @@ fn read_text(path: &Path) -> Option<String> {
     }
     let bytes = std::fs::read(path).ok()?;
     if bytes.iter().take(8000).any(|&b| b == 0) {
-        return None; // binary
+        return None;
     }
     String::from_utf8(bytes).ok()
 }
 
 fn make_hit(line_no: usize, line: &str, m: std::ops::Range<usize>) -> Hit {
-    // Trim leading whitespace and clip very long lines around the match.
     let lead = line.chars().take_while(|c| c.is_whitespace()).count();
     let chars: Vec<char> = line.chars().collect();
     let start = lead.min(m.start);
@@ -131,14 +119,11 @@ fn make_hit(line_no: usize, line: &str, m: std::ops::Range<usize>) -> Hit {
     }
 }
 
-/// State of the Search sidebar.
 pub struct SearchState {
     pub query: TextField,
     pub opts: FindOptions,
     pub results: Option<SearchResults>,
-    /// Files whose hit list is collapsed in the sidebar.
     pub collapsed: BTreeSet<PathBuf>,
-    /// The query input owns the keyboard.
     pub focused: bool,
 }
 
@@ -250,7 +235,6 @@ mod tests {
         };
         assert_eq!(search_workspace(&d.0, "ell", w).total_hits, 0);
         let re = FindOptions { regex: true, ..CI };
-        // \w is Unicode-aware, so it also matches "héllo" (5 hits, not 4).
         assert_eq!(search_workspace(&d.0, r"h\w+o", re).total_hits, 5);
         let bad = search_workspace(&d.0, "(", re);
         assert!(bad.error.is_some() && bad.files.is_empty());

@@ -1,5 +1,3 @@
-//! Workbench layout: what is visible, how big each region is, persisted between runs.
-//! Pure data, no GUI types. Sizes are clamped so the editor can never be squeezed out.
 
 use std::path::{Path, PathBuf};
 
@@ -13,7 +11,6 @@ pub const RIGHT_MAX: f32 = 900.0;
 pub const RIGHT_DEFAULT: f32 = 320.0;
 pub const PANEL_MIN: f32 = 80.0;
 pub const PANEL_DEFAULT: f32 = 240.0;
-/// The editor column always keeps at least this much room.
 pub const EDITOR_MIN_WIDTH: f32 = 240.0;
 pub const EDITOR_MIN_HEIGHT: f32 = 120.0;
 const ACTIVITY_BAR_WIDTH: f32 = 48.0;
@@ -88,9 +85,7 @@ pub struct Layout {
     pub panel_height: f32,
     pub panel_width: f32,
     pub panel_pos: PanelPos,
-    /// The bottom panel fills the whole editor column.
     pub panel_maximized: bool,
-    /// The right-hand extension panel (AI chat, webviews).
     pub right: bool,
     pub right_width: f32,
     pub status_bar: bool,
@@ -179,13 +174,11 @@ impl Layout {
         self.right_width = w.clamp(RIGHT_MIN, RIGHT_MAX.min(room.max(RIGHT_MIN)));
     }
 
-    /// `window_height` is the height of the area the editor column lives in (status bar excluded).
     pub fn set_panel_height(&mut self, h: f32, window_height: f32) {
         let max = (window_height - EDITOR_MIN_HEIGHT).max(PANEL_MIN);
         self.panel_height = h.clamp(PANEL_MIN, max);
     }
 
-    /// Sizes to actually draw in a window of this size: stored sizes shrink if the window did.
     pub fn effective_sidebar(&self, window_width: f32) -> f32 {
         let room = window_width
             - EDITOR_MIN_WIDTH
@@ -251,8 +244,6 @@ impl Layout {
         .unwrap_or_default()
     }
 
-    /// Parse persisted layout. Unknown fields are ignored, missing or invalid ones fall back to
-    /// the defaults, and sizes are clamped, so a hand-edited or corrupt file can never break the UI.
     pub fn from_json(text: &str) -> Self {
         let mut l = Self::default();
         let Ok(v) = serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')) else {
@@ -294,7 +285,6 @@ impl Layout {
             .unwrap_or_default()
     }
 
-    /// Write atomically (temp file + rename) so a crash cannot leave a half-written config.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
@@ -307,7 +297,6 @@ impl Layout {
     }
 }
 
-/// Where user settings live: `NANTI_CONFIG_DIR`, else `%APPDATA%\nanti`, else `~/.nanti`.
 pub fn config_dir() -> Option<PathBuf> {
     if let Some(d) = std::env::var_os("NANTI_CONFIG_DIR") {
         return Some(PathBuf::from(d));
@@ -405,7 +394,6 @@ mod tests {
         l.set_sidebar_width(10.0, 1280.0);
         assert_eq!(l.sidebar_width, SIDEBAR_MIN);
         l.set_sidebar_width(5000.0, 1280.0);
-        // 1280 - editor min 240 - activity 48 - right 320 = 672
         assert_eq!(l.sidebar_width, 672.0);
         l.set_right_width(5000.0, 1280.0);
         // 1280 - 240 - 48 - 672 = 320, never below the minimum

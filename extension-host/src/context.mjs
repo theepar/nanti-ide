@@ -1,15 +1,7 @@
-// ExtensionContext for the host (VH-08 partial): storage URIs and Memento state.
-// `secrets` is deliberately NOT provided: SecretStorage must be OS-encrypted (PRD 7.2 #7),
-// so it stays an UnsupportedCapability until it is bridged to the Windows credential store.
 import fs from "node:fs";
 import path from "node:path";
 import { Uri, EXTENSION_MODE, unsupportedValue } from "./vscode-api.mjs";
 
-/**
- * vscode.GlobalEnvironmentVariableCollection. Mutations are recorded faithfully, but they are NOT
- * applied to terminals yet: that needs the terminal API (VH-10). Until then extensions can read
- * back what they set, and nothing else.
- */
 export class EnvironmentVariableCollection {
   #mutators = new Map();
   persistent = true;
@@ -46,7 +38,6 @@ export class EnvironmentVariableCollection {
   }
 }
 
-/** vscode.Memento backed by a JSON file; writes are synchronous so a crash loses nothing acknowledged. */
 export class Memento {
   #file;
   #data;
@@ -74,10 +65,6 @@ export class Memento {
   setKeysForSync() {}
 }
 
-/**
- * @param {{dir: string, id: string}} ext
- * @param {{storageRoot: string, workspaceFolders: string[], mode?: number}} env
- */
 export function createContext(ext, { storageRoot, workspaceFolders, mode = EXTENSION_MODE.Production }) {
   const safeId = ext.id.toLowerCase();
   const globalDir = path.join(storageRoot, "global", safeId);
@@ -96,7 +83,6 @@ export function createContext(ext, { storageRoot, workspaceFolders, mode = EXTEN
     workspaceState: new Memento(path.join(wsDir ?? path.join(storageRoot, "no-workspace", safeId), "workspaceState.json")),
     asAbsolutePath: (rel) => path.join(ext.dir, rel),
     environmentVariableCollection: new EnvironmentVariableCollection(),
-    // The extension's own `vscode.Extension` object (state getters stay live).
     extension: {
       id: ext.id,
       extensionPath: ext.dir,

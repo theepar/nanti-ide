@@ -1,4 +1,3 @@
-//! Menu bar and context menus. Every entry is a real `Command`; there are no decorative items.
 
 use crate::palette::Command;
 
@@ -138,7 +137,6 @@ pub fn items(kind: MenuKind) -> Vec<MenuItem> {
     }
 }
 
-/// Right-click menu of an explorer entry.
 pub fn context_items(is_dir: bool) -> Vec<MenuItem> {
     let mut v = Vec::new();
     if is_dir {

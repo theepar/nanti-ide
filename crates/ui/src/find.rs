@@ -1,6 +1,3 @@
-//! Find / replace bar state (ED-07), no GUI types. The match list is recomputed lazily whenever the
-//! pattern, the options, the file or the text version changes, so typing in the editor keeps
-//! the highlights and the "N of M" counter correct.
 
 use std::ops::Range;
 use std::path::PathBuf;
@@ -24,16 +21,13 @@ pub struct FindState {
     pub replace: TextField,
     pub show_replace: bool,
     pub opts: FindOptions,
-    /// Which input currently owns the keyboard.
     pub focus: FindFocus,
     finder: Option<Finder>,
     pub error: Option<String>,
     matches: Vec<Range<usize>>,
     pub current: Option<usize>,
     pub truncated: bool,
-    /// Key the cached `finder` was built for.
     built_for: Option<(String, FindOptions)>,
-    /// File and text version the cached `matches` were computed for.
     matched_for: Option<(Option<PathBuf>, u64)>,
 }
 
@@ -71,7 +65,6 @@ impl FindState {
         self.opts.regex = !self.opts.regex;
     }
 
-    /// Bring `finder` and `matches` up to date for `editor` (cheap when nothing changed).
     pub fn refresh(&mut self, editor: &Editor, path: Option<&PathBuf>) {
         let key = (self.query.text().to_owned(), self.opts);
         let mut dirty = false;
@@ -102,7 +95,6 @@ impl FindState {
         self.current = index_of_selection(&self.matches, &editor.selection());
     }
 
-    /// Label for the counter: "3 of 12", "No results", or the regex error.
     pub fn status(&self) -> String {
         if let Some(e) = &self.error {
             return e.clone();
@@ -124,14 +116,12 @@ impl FindState {
         }
     }
 
-    /// Incremental search: jump to the first match at or after the selection start.
     pub fn select_nearest(&mut self, editor: &mut Editor) {
         let from = editor.selection().start;
         let idx = next_index(&self.matches, from);
         self.select(editor, idx);
     }
 
-    /// Select the next match after the cursor (wrapping).
     pub fn next(&mut self, editor: &mut Editor) {
         let pos = editor.selection().end.max(editor.cursor());
         // From a selected match, step past it; otherwise start at the cursor.
@@ -144,15 +134,12 @@ impl FindState {
         self.select(editor, idx);
     }
 
-    /// Select the previous match before the cursor (wrapping).
     pub fn prev(&mut self, editor: &mut Editor) {
         let from = editor.selection().start;
         let idx = prev_index(&self.matches, from);
         self.select(editor, idx);
     }
 
-    /// Replace the selected match (if the selection is one), then move to the next. If nothing is
-    /// selected yet, just select the next match. Returns how many replacements were made.
     pub fn replace_current(&mut self, editor: &mut Editor) -> usize {
         let Some(finder) = self.finder.clone() else {
             return 0;
@@ -163,7 +150,6 @@ impl FindState {
         } else {
             0
         };
-        // matches changed: recompute before choosing the next one
         self.matched_for = None;
         self.refresh(editor, None);
         self.matched_for = None;
@@ -183,7 +169,7 @@ impl FindState {
 }
 
 #[cfg(test)]
-#[allow(clippy::single_range_in_vec_init)] // expected match lists legitimately have one range
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use super::*;
 
@@ -221,7 +207,7 @@ mod tests {
         assert!(f.error.is_some());
         assert!(f.matches().is_empty());
         assert_eq!(f.status(), f.error.clone().unwrap());
-        f.toggle_regex(); // literal "(" is fine
+        f.toggle_regex();
         f.refresh(&ed, None);
         assert_eq!(f.matches(), [1..2]);
         assert!(f.error.is_none());
@@ -278,14 +264,13 @@ mod tests {
         let mut f = state("a");
         f.replace.insert("Z");
         f.refresh(&ed, None);
-        f.next(&mut ed); // select first "a"
+        f.next(&mut ed);
         assert_eq!(f.replace_current(&mut ed), 1);
         assert_eq!(ed.text(), "Z1 a2 a3");
         assert_eq!(ed.selection(), 3..4, "now on the next match");
         assert_eq!(f.replace_current(&mut ed), 1);
         assert_eq!(f.replace_current(&mut ed), 1);
         assert_eq!(ed.text(), "Z1 Z2 Z3");
-        // with nothing selected a replace only selects
         let mut ed2 = Editor::new("q q");
         let mut f2 = state("q");
         f2.replace.insert("w");

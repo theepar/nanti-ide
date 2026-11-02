@@ -1,14 +1,9 @@
-//! Command palette / quick open (ED-08): commands, fuzzy matching, file listing and a small text
-//! field with IME composition support. No GUI types here, so all of it is unit-tested.
 
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
-/// Directories skipped when listing files (same set the explorer hides).
 const SKIP_DIRS: [&str; 3] = [".git", "node_modules", "target"];
-/// Quick open never lists more than this many files.
 pub const MAX_FILES: usize = 20_000;
-/// The palette shows at most this many matches.
 pub const MAX_RESULTS: usize = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,7 +78,6 @@ pub enum Command {
 }
 
 impl Command {
-    /// Every command shown in the palette. Only things that really work are listed.
     pub const ALL: [Command; 67] = [
         Command::CommandPalette,
         Command::QuickOpen,
@@ -226,7 +220,6 @@ impl Command {
         }
     }
 
-    /// Title without its category (`File: Save` -> `Save`), for menus.
     pub fn menu_label(self) -> &'static str {
         let t = self.title();
         t.split_once(": ").map_or(t, |(_, rest)| rest)
@@ -269,7 +262,6 @@ impl Command {
         }
     }
 
-    /// Shortcut lookup for Ctrl+<key>. `key` is GPUI's key name (lowercase).
     pub fn from_ctrl_key(key: &str, shift: bool) -> Option<Command> {
         Some(match (key, shift) {
             ("p", true) => Command::CommandPalette,
@@ -298,9 +290,6 @@ impl Command {
     }
 }
 
-/// Fuzzy subsequence match of `query` in `candidate` (case-insensitive). Higher is better; `None`
-/// if the query's characters do not all appear in order. Rewards consecutive runs, matches at word
-/// starts and in the file name, and penalizes long candidates.
 pub fn fuzzy_score(query: &str, candidate: &str) -> Option<i32> {
     if query.is_empty() {
         return Some(0);
@@ -318,7 +307,7 @@ pub fn fuzzy_score(query: &str, candidate: &str) -> Option<i32> {
         let found = (ci..cand.len()).find(|&i| cand[i].to_ascii_lowercase() == qc)?;
         score += 10;
         if prev_match == Some(found.wrapping_sub(1)) && found > 0 {
-            score += 15; // consecutive
+            score += 15;
         }
         let word_start =
             found == 0 || matches!(cand[found - 1], '/' | '\\' | '_' | '-' | ' ' | '.' | ':');
@@ -326,16 +315,15 @@ pub fn fuzzy_score(query: &str, candidate: &str) -> Option<i32> {
             score += 12;
         }
         if found >= name_start {
-            score += 6; // inside the file name rather than the directory
+            score += 6;
         }
-        score -= (found - ci) as i32; // gap before this match
+        score -= (found - ci) as i32;
         prev_match = Some(found);
         ci = found + 1;
     }
     Some(score - (cand.len() as i32) / 8)
 }
 
-/// Single-line text input with IME composition, offsets in chars (UTF-16 helpers included).
 #[derive(Debug, Default, Clone)]
 pub struct TextField {
     text: String,
@@ -378,7 +366,6 @@ impl TextField {
         self.marked = None;
     }
 
-    /// Insert plain text at the cursor (line breaks are dropped: this is a single-line field).
     pub fn insert(&mut self, s: &str) {
         self.marked = None;
         let s: String = s.chars().filter(|c| !matches!(c, '\n' | '\r')).collect();
@@ -420,8 +407,6 @@ impl TextField {
         self.marked = None;
         self.cursor = self.len();
     }
-
-    // ---- IME ----
 
     pub fn compose(
         &mut self,
@@ -488,15 +473,12 @@ impl TextField {
 pub enum PaletteMode {
     Commands,
     Files,
-    /// A single-line prompt (no list): Enter submits the text.
     Input(InputKind),
 }
 
-/// What a single-line prompt is asking for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputKind {
     GoToLine,
-    /// Name or relative path for a new file inside this folder.
     NewFile(PathBuf),
     NewFolder(PathBuf),
     Rename(PathBuf),
@@ -533,10 +515,8 @@ pub struct Palette {
     pub mode: PaletteMode,
     pub field: TextField,
     items: Vec<PaletteItem>,
-    /// Indices into `items`, best match first.
     filtered: Vec<usize>,
     pub selected: usize,
-    /// Why the last Enter in an input prompt was refused (shown under the field).
     pub error: Option<String>,
 }
 
@@ -553,7 +533,6 @@ impl Palette {
         Self::build(PaletteMode::Commands, items)
     }
 
-    /// Quick open over every file below `root` (see `MAX_FILES`).
     pub fn files(root: &Path) -> Self {
         let items = list_files(root)
             .into_iter()
@@ -579,14 +558,12 @@ impl Palette {
         p
     }
 
-    /// A prompt without a list, optionally prefilled.
     pub fn input(kind: InputKind, initial: &str) -> Self {
         let mut p = Self::build(PaletteMode::Input(kind), Vec::new());
         p.field.insert(initial);
         p
     }
 
-    /// Recompute matches after the query changed.
     pub fn refilter(&mut self) {
         self.error = None;
         if matches!(self.mode, PaletteMode::Input(_)) {
@@ -654,8 +631,6 @@ impl Palette {
     }
 }
 
-/// Files below `root` as `(relative path with '/', absolute path)`, directories first-come order
-/// sorted by path, skipping heavy/tool directories; capped at `MAX_FILES`.
 pub fn list_files(root: &Path) -> Vec<(String, PathBuf)> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
@@ -756,7 +731,6 @@ mod tests {
         assert_eq!(Command::from_ctrl_key("tab", true), Some(Command::PrevTab));
         assert_eq!(Command::from_ctrl_key("z", true), Some(Command::Redo));
         assert_eq!(Command::from_ctrl_key("q", false), None);
-        // every shown keybinding string has a matching key handler for its first-listed shortcut
         for c in Command::ALL {
             if let Some(kb) = c.keybinding() {
                 assert!(
@@ -798,8 +772,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    // ---- TextField ----
-
     #[test]
     fn text_field_edits_with_unicode() {
         let mut f = TextField::default();
@@ -815,7 +787,7 @@ mod tests {
         f.delete();
         f.end();
         assert_eq!((f.text(), f.cursor()), ("élo", 3));
-        f.insert("a\nb"); // line breaks dropped
+        f.insert("a\nb");
         assert_eq!(f.text(), "éloab");
     }
 
@@ -823,7 +795,7 @@ mod tests {
     fn text_field_ime_composition_replaces_marked_text_then_commits() {
         let mut f = TextField::default();
         f.insert("ab");
-        f.left(); // a|b
+        f.left();
         f.compose(None, "n", Some(1..1));
         assert_eq!((f.text(), f.marked_range()), ("anb", Some(1..2)));
         f.compose(None, "ni", Some(2..2));

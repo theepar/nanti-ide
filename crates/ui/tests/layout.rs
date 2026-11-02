@@ -1,4 +1,3 @@
-//! Customizable layout: show/hide every region, drag the splitters, maximize the panel, persist.
 
 use std::path::{Path, PathBuf};
 
@@ -85,9 +84,9 @@ fn shortcuts_and_palette_toggle_every_region_and_reset_restores_defaults(cx: &mu
     let ws = workspace("toggle");
     let (window, cx) = open(cx, &ws.0, None);
     assert_eq!(layout(window, cx), Layout::default());
-    cx.simulate_keystrokes("ctrl-b"); // sidebar
-    cx.simulate_keystrokes("ctrl-j"); // panel
-    cx.simulate_keystrokes("ctrl-alt-b"); // right panel
+    cx.simulate_keystrokes("ctrl-b");
+    cx.simulate_keystrokes("ctrl-j");
+    cx.simulate_keystrokes("ctrl-alt-b");
     let l = layout(window, cx);
     assert!(!l.sidebar && !l.panel && !l.right);
     for query in ["toggle activity bar", "toggle status bar"] {
@@ -97,7 +96,6 @@ fn shortcuts_and_palette_toggle_every_region_and_reset_restores_defaults(cx: &mu
     }
     let l = layout(window, cx);
     assert!(!l.activity_bar && !l.status_bar);
-    // bring everything back one by one
     cx.simulate_keystrokes("ctrl-b ctrl-j ctrl-alt-b");
     let l = layout(window, cx);
     assert!(l.sidebar && l.panel && l.right && !l.activity_bar && !l.status_bar);
@@ -114,7 +112,6 @@ fn dragging_the_sidebar_splitter_resizes_clamps_and_ignores_moves_without_the_bu
     let ws = workspace("dsb");
     let (window, cx) = open(cx, &ws.0, None);
     let (_vw, vh) = viewport(window, cx);
-    // activity bar 48 + sidebar 260 = 308; the splitter occupies [308, 313)
     drag(cx, (310.0, vh / 2.0), (410.0, vh / 2.0));
     let w = layout(window, cx).sidebar_width;
     assert!(
@@ -137,28 +134,25 @@ fn dragging_the_sidebar_splitter_resizes_clamps_and_ignores_moves_without_the_bu
 fn dragging_the_right_and_bottom_splitters(cx: &mut TestAppContext) {
     let ws = workspace("drp");
     let (window, cx) = open(cx, &ws.0, None);
-    // with no extension the right panel is not shown at all; lay it out empty for this test
     window
         .update(cx, |wb, _, cx| {
             wb.show_empty_right_panel_for_tests();
-            cx.notify(); // redraw so the splitter exists before the drag
+            cx.notify();
         })
         .unwrap();
     cx.run_until_parked();
     let (vw, vh) = viewport(window, cx);
-    // right panel is 320 wide; its splitter sits just left of it
     drag(cx, (vw - 322.0, vh / 2.0), (vw - 420.0, vh / 2.0));
     let r = layout(window, cx).right_width;
     assert!(
         (r - 420.0).abs() < 1.0,
         "right panel width follows the pointer: {r}"
     );
-    // bottom panel: 240 high above the 22 px status bar; splitter just above it
     let top = vh - 22.0 - 240.0;
     drag(cx, (500.0, top - 2.0), (500.0, top - 102.0));
     let h = layout(window, cx).panel_height;
     assert!(
-        (h - 342.0).abs() < 1.0, // pointer at top-102 => 240 + 102
+        (h - 342.0).abs() < 1.0,
         "panel height follows the pointer: {h}"
     );
     drag(cx, (500.0, vh - 22.0 - h - 2.0), (500.0, vh - 5.0));
@@ -209,7 +203,6 @@ fn maximize_and_hide_the_panel_with_the_keyboard(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("ctrl-shift-m ctrl-j");
     let l = layout(window, cx);
     assert!(!l.panel && !l.panel_maximized, "hiding also drops maximize");
-    // the editor still works after all of that
     cx.simulate_input("Q");
     let t = window
         .read_with(cx, |wb, _| match &wb.model().active().unwrap().content {
@@ -228,7 +221,6 @@ fn layout_is_saved_and_restored_across_instances(cx: &mut TestAppContext) {
     {
         let (window, cx) = open(cx, &ws.0, Some(file.clone()));
         assert!(!file.exists(), "nothing is written until something changes");
-        // drag first: a hidden sidebar has no splitter to grab
         let (_vw, vh) = viewport(window, cx);
         drag(cx, (48.0 + 260.0 + 2.0, vh / 2.0), (48.0 + 330.0, vh / 2.0));
         cx.simulate_keystrokes("ctrl-b ctrl-alt-b");

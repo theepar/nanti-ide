@@ -1,21 +1,15 @@
-//! Syntax-level analysis on top of the tree-sitter parse: syntax problems (ED-10, syntax only: this is
-//! NOT a type checker or a language server) and a symbol outline.
 
 use tree_sitter::{Node, Parser};
 
 use crate::{Language, MAX_BYTES};
 
-/// At most this many problems are reported per file (a broken file can produce thousands).
 pub const MAX_DIAGNOSTICS: usize = 200;
-/// At most this many symbols are listed per file.
 pub const MAX_SYMBOLS: usize = 2_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
-    /// 0-based line and char column where the problem starts.
     pub line: usize,
     pub col: usize,
-    /// Number of chars highlighted on that line (at least 1).
     pub len: usize,
     pub message: String,
 }
@@ -23,10 +17,8 @@ pub struct Diagnostic {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Symbol {
     pub name: String,
-    /// Short kind label: `fn`, `struct`, `class`, `h2`, ...
     pub kind: &'static str,
     pub line: usize,
-    /// Nesting level (methods inside an `impl`/class are 1).
     pub depth: usize,
 }
 
@@ -52,7 +44,6 @@ fn parse(lang: Language, source: &str) -> Option<tree_sitter::Tree> {
     parser.parse(source, None)
 }
 
-/// Position of byte offset `byte` as (0-based line, char column).
 fn position(source: &str, line_starts: &[usize], byte: usize) -> (usize, usize) {
     let line = line_starts.partition_point(|&s| s <= byte) - 1;
     let col = source[line_starts[line]..byte.min(source.len())]
@@ -67,8 +58,6 @@ fn line_starts(source: &str) -> Vec<usize> {
         .collect()
 }
 
-/// Syntax errors of `source`: tree-sitter ERROR nodes and tokens the grammar expected but did not find.
-/// Empty when the file parses cleanly or is above `MAX_BYTES`.
 pub fn diagnostics(lang: Language, source: &str) -> Vec<Diagnostic> {
     let Some(tree) = parse(lang, source) else {
         return Vec::new();
@@ -110,7 +99,7 @@ fn collect_errors(node: Node, source: &str, starts: &[usize], out: &mut Vec<Diag
             message,
         });
         if node.is_error() {
-            return; // the children of an error node are noise; report the region once
+            return;
         }
     }
     if !node.has_error() && !node.is_missing() {
@@ -122,8 +111,6 @@ fn collect_errors(node: Node, source: &str, starts: &[usize], out: &mut Vec<Diag
     }
 }
 
-/// Symbols (functions, types, classes, headings) of `source` in document order.
-/// Supported: Rust, JavaScript/TypeScript/TSX, Go, Markdown headings. Other languages return nothing.
 pub fn outline(lang: Language, source: &str) -> Vec<Symbol> {
     if !matches!(
         lang,
@@ -144,7 +131,6 @@ pub fn outline(lang: Language, source: &str) -> Vec<Symbol> {
     out
 }
 
-/// (kind label, is a container whose children are nested one level deeper)
 fn symbol_kind(lang: Language, node_kind: &str) -> Option<(&'static str, bool)> {
     Some(match (lang, node_kind) {
         (Language::Rust, "function_item") => ("fn", false),
@@ -199,7 +185,6 @@ fn walk_symbols(node: Node, lang: Language, source: &str, depth: usize, out: &mu
     if let Some((kind, container)) = symbol_kind(lang, node.kind()) {
         if let Some(name) = symbol_name(node, lang, source).filter(|n| !n.is_empty()) {
             let kind = if kind == "h" {
-                // heading level = number of leading '#'
                 let hashes = source[node.start_byte()..]
                     .chars()
                     .take_while(|c| *c == '#')

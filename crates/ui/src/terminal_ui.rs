@@ -1,6 +1,3 @@
-//! The terminal panel (TR-01..03): sessions, rendering of the emulator grid, keyboard/mouse/IME
-//! input and process lifetime. The PTYs live here (not in `Model`) so the model stays testable
-//! without spawning processes.
 
 use std::cell::Cell;
 use std::ops::Range;
@@ -18,7 +15,6 @@ use crate::model::{PanelTab, TerminalRequest};
 use crate::palette::Command;
 use crate::{FONT_FAMILY, FONT_SIZE, LINE_HEIGHT, Target, Workbench, theme, x_of_col};
 
-/// Initial grid size before the panel has been measured.
 const DEFAULT_COLS: u16 = 100;
 const DEFAULT_ROWS: u16 = 10;
 const SELECTION_BG: u32 = 0x264f78;
@@ -26,13 +22,11 @@ const SELECTION_BG: u32 = 0x264f78;
 pub struct TerminalSession {
     pub term: Terminal,
     pub name: String,
-    /// IME pre-edit text shown at the cursor; it only reaches the shell when committed.
     pub preedit: Option<String>,
     selecting: bool,
     pub ext_id: Option<String>,
 }
 
-/// Where the terminal grid was last painted, shared with the paint closure.
 #[derive(Clone)]
 pub struct GridMetrics {
     pub area: Rc<Cell<Bounds<Pixels>>>,
@@ -49,13 +43,10 @@ impl Default for GridMetrics {
 }
 
 impl Workbench {
-    // ---- inspection (used by tests and the status line) -------------------------------------
-
     pub fn terminal_count(&self) -> usize {
         self.terminals.len()
     }
 
-    /// Visible text of the active terminal.
     pub fn terminal_text(&self) -> Option<String> {
         self.active_terminal().map(|s| s.term.snapshot().text())
     }
@@ -72,7 +63,6 @@ impl Workbench {
         self.active_terminal().and_then(|s| s.term.selection_text())
     }
 
-    /// Plain-text snapshot of terminal `index`.
     pub fn terminal_text_of(&self, index: usize) -> Option<String> {
         self.terminals.get(index).map(|s| s.term.snapshot().text())
     }
@@ -80,8 +70,6 @@ impl Workbench {
     pub(crate) fn active_terminal(&self) -> Option<&TerminalSession> {
         self.terminals.get(self.active_terminal)
     }
-
-    // ---- lifecycle ----------------------------------------------------------------------------
 
     fn grid_size(&self) -> (u16, u16) {
         let area = self.term_metrics.area.get();
@@ -159,7 +147,6 @@ impl Workbench {
             .position(|t| t.ext_id.as_deref() == Some(id))
     }
 
-    /// Close terminal `index`; dropping the session kills its shell.
     pub fn close_terminal(&mut self, index: usize) {
         if index < self.terminals.len() {
             self.terminals.remove(index);
@@ -175,13 +162,11 @@ impl Workbench {
         }
     }
 
-    /// Kill every shell (window close, app exit).
     pub fn kill_all_terminals(&mut self) {
         self.terminals.clear();
         self.model.terminal_focused = false;
     }
 
-    /// Carry out what a command asked for (`Model` cannot spawn processes).
     pub(crate) fn process_terminal_request(&mut self) {
         match self.model.terminal_request.take() {
             Some(TerminalRequest::Ensure) => {
@@ -196,7 +181,6 @@ impl Workbench {
             }
             None => {}
         }
-        // A task from the Run view: type its command line into the active terminal.
         if let Some(command) = self.model.terminal_run.take() {
             if self.terminals.is_empty() {
                 self.spawn_terminal();
@@ -207,7 +191,6 @@ impl Workbench {
         }
     }
 
-    /// Poll for output/exit and keep every PTY the size of the panel. True = redraw needed.
     pub(crate) fn pump_terminals(&mut self) -> bool {
         if self.terminals.is_empty() {
             return false;
@@ -225,8 +208,6 @@ impl Workbench {
         changed
     }
 
-    // ---- keyboard -----------------------------------------------------------------------------
-
     pub(crate) fn on_terminal_key(
         &mut self,
         ev: &KeyDownEvent,
@@ -238,7 +219,6 @@ impl Workbench {
         let key = k.key.as_str();
         let ctrl = m.control && !m.alt;
 
-        // A few shortcuts keep working while the shell has the keyboard (as in VS Code's terminal).
         if ctrl {
             match (key, m.shift) {
                 ("c", _) => return self.terminal_copy_or_interrupt(m.shift, cx),
@@ -268,7 +248,7 @@ impl Workbench {
             shift: m.shift,
         };
         let Some(bytes) = encode_key(key, mods, session.term.app_cursor()) else {
-            return; // printable text: delivered through the InputHandler
+            return;
         };
         session.term.selection_clear();
         session.term.scroll_to_bottom();
@@ -286,7 +266,6 @@ impl Workbench {
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
                 session.term.selection_clear();
             }
-            // Ctrl+C is the interrupt key; Ctrl+Shift+C only ever copies.
             None if !force_copy => {
                 session.term.scroll_to_bottom();
                 session.term.write(vec![0x03]);
@@ -309,8 +288,6 @@ impl Workbench {
         cx.stop_propagation();
         cx.notify();
     }
-
-    // ---- text input (typing and IME) ----------------------------------------------------------
 
     pub(crate) fn term_commit(&mut self, text: &str) {
         if let Some(s) = self.terminals.get_mut(self.active_terminal) {
@@ -352,9 +329,6 @@ impl Workbench {
         })
     }
 
-    // ---- mouse --------------------------------------------------------------------------------
-
-    /// Terminal cell (row, col, right half?) under a window position.
     fn term_cell_at(&self, p: Point<Pixels>) -> (usize, usize, bool) {
         let area = self.term_metrics.area.get();
         let cw = self.term_metrics.cell_width.get().max(1.0);
@@ -424,9 +398,6 @@ impl Workbench {
         }
     }
 
-    // ---- rendering ----------------------------------------------------------------------------
-
-    /// Tabs of the open terminals plus a "+" button.
     #[allow(dead_code)]
     pub(crate) fn terminal_strip(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         div()
@@ -502,7 +473,6 @@ impl Workbench {
             )
     }
 
-    /// Vertical terminal tabs displayed when multiple terminals are open.
     pub(crate) fn terminal_side_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let items: Vec<AnyElement> = self
             .terminals
@@ -646,7 +616,6 @@ impl Workbench {
             )
     }
 
-    /// The emulator grid (or a hint when no terminal is open).
     pub(crate) fn terminal_view(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(session) = self.active_terminal() else {
             return div()
@@ -740,8 +709,6 @@ impl Workbench {
                     .child(SharedString::from(text.clone()))
             });
 
-        // The canvas records where the grid is painted (for resizing and mouse mapping) and
-        // registers the OS text input while the terminal has focus.
         let metrics = self.term_metrics.clone();
         let focus = self.terminal_focus.clone();
         let entity = cx.entity();
@@ -778,7 +745,6 @@ impl Workbench {
             .into_any_element()
     }
 
-    /// Show the Terminal tab and give it the keyboard (used by the panel tab click).
     pub(crate) fn open_terminal_tab(&mut self, window: &mut Window) {
         self.model.panel_tab = PanelTab::Terminal;
         self.model.terminal_focused = true;

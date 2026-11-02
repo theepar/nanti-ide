@@ -1,11 +1,3 @@
-//! Local terminal (TR-01..03): a ConPTY/PTY child plus a terminal emulator, behind a GUI-free API.
-//!
-//! Built on `alacritty_terminal` (see docs/decisions/0002-terminal-backend.md). The emulator runs on
-//! its own thread; this wrapper exposes cheap snapshots (runs of styled text per row) for rendering,
-//! key encoding, bracketed paste, resize, scrollback, selection and process lifetime.
-//!
-//! Not implemented (documented limits): mouse reporting to applications, OSC 52 clipboard access
-//! (deliberately disabled), hyperlinks, ligatures, sixel/images.
 
 use std::io;
 use std::path::PathBuf;
@@ -25,7 +17,6 @@ use alacritty_terminal::vte::ansi::{Color, CursorShape as AlacrittyCursorShape, 
 
 pub const DEFAULT_SCROLLBACK: usize = 10_000;
 
-/// A 24-bit color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Rgb8(pub u8, pub u8, pub u8);
 
@@ -41,7 +32,6 @@ impl From<Rgb> for Rgb8 {
     }
 }
 
-/// Default colors of the terminal view (match the dark workbench theme).
 pub const DEFAULT_FG: Rgb8 = Rgb8(0xcc, 0xcc, 0xcc);
 pub const DEFAULT_BG: Rgb8 = Rgb8(0x18, 0x18, 0x18);
 
@@ -64,7 +54,6 @@ const ANSI: [Rgb8; 16] = [
     Rgb8(0xe5, 0xe5, 0xe5),
 ];
 
-/// xterm 256-color palette: 16 ANSI, 6x6x6 cube, 24 grays.
 pub fn indexed_color(i: u8) -> Rgb8 {
     match i {
         0..=15 => ANSI[i as usize],
@@ -114,10 +103,8 @@ fn dim(c: Rgb8) -> Rgb8 {
     )
 }
 
-/// What to run and where.
 #[derive(Debug, Clone)]
 pub struct TerminalOptions {
-    /// Program and arguments; `None` uses `default_shell()`.
     pub shell: Option<(String, Vec<String>)>,
     pub cwd: PathBuf,
     pub cols: u16,
@@ -143,7 +130,6 @@ impl TerminalOptions {
     }
 }
 
-/// `NANTI_SHELL` ("program arg arg") overrides; otherwise PowerShell on Windows, `$SHELL`/`sh` elsewhere.
 pub fn default_shell() -> (String, Vec<String>) {
     if let Ok(custom) = std::env::var("NANTI_SHELL") {
         let mut parts = custom.split_whitespace().map(str::to_owned);
@@ -169,16 +155,12 @@ pub enum CursorShape {
     HollowBlock,
 }
 
-/// A horizontal span of cells sharing one style.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Run {
-    /// First column of the run.
     pub col: usize,
-    /// Width in cells (wide characters count 2).
     pub cells: usize,
     pub text: String,
     pub fg: Rgb8,
-    /// `None` = the default background (nothing to paint).
     pub bg: Option<Rgb8>,
     pub bold: bool,
     pub italic: bool,
@@ -199,16 +181,13 @@ pub struct Snapshot {
     pub cols: usize,
     pub rows: usize,
     pub lines: Vec<Vec<Run>>,
-    /// `None` when the application hid it or the view is scrolled into history.
     pub cursor: Option<Cursor>,
-    /// How many lines the view is scrolled up (0 = following the output).
     pub display_offset: usize,
     pub history: usize,
     pub alt_screen: bool,
 }
 
 impl Snapshot {
-    /// Plain text of each row (trailing blanks trimmed); wide characters appear once.
     pub fn text_lines(&self) -> Vec<String> {
         self.lines
             .iter()
@@ -268,8 +247,6 @@ impl EventListener for Listener {
             }
             Event::ResetTitle => self.shared.title.lock().unwrap().clear(),
             Event::Bell => self.shared.bell.store(true, Ordering::Release),
-            // The terminal asks questions on the child's behalf (cursor position, size, colors).
-            // ConPTY shells block until these are answered.
             Event::PtyWrite(text) => self.reply(text),
             Event::TextAreaSizeRequest(f) => {
                 let size = *self.size.lock().unwrap();
@@ -376,7 +353,6 @@ impl Terminal {
         let event_loop = EventLoop::new(term.clone(), listener, pty, false, false)?;
         let sender = event_loop.channel();
         let _ = slot.set(event_loop.channel());
-        // The loop thread owns the PTY; it ends (and closes the pseudo console) on Shutdown.
         let _ = event_loop.spawn();
         Ok(Self {
             term,
@@ -386,7 +362,6 @@ impl Terminal {
         })
     }
 
-    /// Write raw bytes to the child's stdin.
     pub fn write(&self, bytes: impl Into<Vec<u8>>) {
         if self.is_alive() {
             let _ = self.sender.send(Msg::Input(bytes.into().into()));
@@ -397,13 +372,11 @@ impl Terminal {
         self.write(text.as_bytes().to_vec());
     }
 
-    /// Paste `text` the way the application expects (bracketed when it asked for it).
     pub fn paste(&self, text: &str) {
         let bracketed = self.term.lock().mode().contains(TermMode::BRACKETED_PASTE);
         self.write(paste_bytes(text, bracketed));
     }
 
-    /// Whether arrow keys must use the application ("SS3") form.
     pub fn app_cursor(&self) -> bool {
         self.term.lock().mode().contains(TermMode::APP_CURSOR)
     }
@@ -436,7 +409,6 @@ impl Terminal {
         (t.columns(), t.screen_lines())
     }
 
-    /// Scroll the view into history (`lines` > 0) or back toward the output (`lines` < 0).
     pub fn scroll_by(&self, lines: i32) {
         self.term.lock().scroll_display(Scroll::Delta(lines));
         self.shared.dirty.store(true, Ordering::Release);
@@ -451,7 +423,6 @@ impl Terminal {
         self.shared.title.lock().unwrap().clone()
     }
 
-    /// Exit code once the child has finished; `None` while it runs.
     pub fn exit_code(&self) -> Option<i32> {
         *self.shared.exit.lock().unwrap()
     }
@@ -460,7 +431,6 @@ impl Terminal {
         self.exit_code().is_none()
     }
 
-    /// True once if anything changed since the last call (content, title, exit, size).
     pub fn take_dirty(&self) -> bool {
         self.shared.dirty.swap(false, Ordering::AcqRel)
     }
@@ -469,12 +439,9 @@ impl Terminal {
         self.shared.bell.swap(false, Ordering::AcqRel)
     }
 
-    /// Stop the child and release the pseudo console.
     pub fn kill(&self) {
         let _ = self.sender.send(Msg::Shutdown);
     }
-
-    // ---- selection (screen coordinates: row 0 = top visible line) -------------------------
 
     fn grid_point(term: &Term<Listener>, row: usize, col: usize) -> Point {
         let offset = term.grid().display_offset() as i32;
@@ -517,8 +484,6 @@ impl Terminal {
             .selection_to_string()
             .filter(|s| !s.is_empty())
     }
-
-    // ---- rendering --------------------------------------------------------------------------
 
     pub fn snapshot(&self) -> Snapshot {
         let term = self.term.lock();
@@ -593,7 +558,6 @@ impl Terminal {
                 selected,
             });
         }
-        // Drop trailing blank, background-less runs: nothing to paint.
         for runs in &mut lines {
             while runs.last().is_some_and(|r| {
                 r.bg.is_none() && !r.selected && !r.underline && r.text.trim().is_empty()
@@ -634,8 +598,6 @@ impl Drop for Terminal {
     }
 }
 
-// ---- keyboard encoding ---------------------------------------------------------------------
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct KeyMods {
     pub ctrl: bool,
@@ -644,15 +606,12 @@ pub struct KeyMods {
 }
 
 impl KeyMods {
-    /// xterm modifier parameter: 1 + shift(1) + alt(2) + ctrl(4); `None` when unmodified.
     fn param(self) -> Option<u8> {
         let v = u8::from(self.shift) + 2 * u8::from(self.alt) + 4 * u8::from(self.ctrl);
         (v > 0).then_some(v + 1)
     }
 }
 
-/// Bytes to send for a non-text key (`key` is GPUI's lowercase name: "enter", "left", "f5", "a"...).
-/// Plain printable keys return `None` on purpose: the OS text input (and IME) delivers those.
 pub fn encode_key(key: &str, mods: KeyMods, app_cursor: bool) -> Option<Vec<u8>> {
     let csi = |final_byte: char, num: Option<u8>| -> Vec<u8> {
         match (num, mods.param()) {
@@ -723,7 +682,6 @@ pub fn encode_key(key: &str, mods: KeyMods, app_cursor: bool) -> Option<Vec<u8>>
                 _ => return None,
             }
         }
-        // Alt+printable = ESC prefix (readline word movement, etc.)
         k if mods.alt && !mods.ctrl && k.chars().count() == 1 => {
             let c = k.chars().next()?;
             let c = if mods.shift {
@@ -740,9 +698,6 @@ pub fn encode_key(key: &str, mods: KeyMods, app_cursor: bool) -> Option<Vec<u8>>
     Some(bytes)
 }
 
-/// Bytes for pasted `text`. In bracketed mode the paste is wrapped and any embedded end marker is
-/// removed, so pasted text cannot break out and run as typed commands. Otherwise line breaks
-/// become CR, which is what Enter sends.
 pub fn paste_bytes(text: &str, bracketed: bool) -> Vec<u8> {
     if bracketed {
         let clean = text.replace("\x1b[201~", "").replace("\x1b[200~", "");
@@ -781,8 +736,6 @@ mod tests {
         alt: false,
         shift: true,
     };
-
-    // ---- pure functions ----
 
     #[test]
     fn keys_encode_like_xterm() {
@@ -872,8 +825,6 @@ mod tests {
         assert_eq!(Rgb8(1, 2, 3).to_u32(), 0x010203);
     }
 
-    // ---- real PTY (Windows ConPTY) ----
-
     fn temp_dir(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("nanti-term-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
@@ -895,7 +846,6 @@ mod tests {
         false
     }
 
-    /// Wait until the shell shows a prompt (a line ending in `>`).
     fn wait_prompt(t: &Terminal) {
         let start = Instant::now();
         while start.elapsed() < Duration::from_secs(30) {
@@ -916,14 +866,12 @@ mod tests {
         let dir = temp_dir("cwd");
         let t = spawn_in(&dir);
         wait_prompt(&t);
-        // TR-02: cwd follows the workspace
         let leaf = dir.file_name().unwrap().to_string_lossy().into_owned();
         assert!(
             t.snapshot().text().contains(&leaf),
             "prompt shows cwd:\n{}",
             t.snapshot().text()
         );
-        // The marker is assembled by the shell so it cannot match the typed command line.
         t.send_text("echo (\"mark-\"+\"er-\"+(40+2))\r");
         assert!(wait_for(&t, "mark-er-42", 15), "{}", t.snapshot().text());
         let _ = std::fs::remove_dir_all(&dir);
@@ -941,7 +889,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(30));
         }
         assert_eq!(t.exit_code(), Some(7));
-        t.send_text("echo ignored\r"); // must not panic or hang
+        t.send_text("echo ignored\r");  // must not panic or hang
         assert!(t.take_dirty());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1011,7 +959,6 @@ mod tests {
         let t = Terminal::spawn(opts).unwrap();
         wait_prompt(&t);
         t.send_text("1..5000 | % { \"row $_\" }; echo (\"big-\"+\"done\")\r");
-        // The UI keeps taking snapshots while output floods in
         let start = Instant::now();
         let mut snaps = 0;
         while !t.snapshot().text().contains("big-done") {
@@ -1025,7 +972,6 @@ mod tests {
         assert!(snaps > 0);
         let snap = t.snapshot();
         assert_eq!(snap.history, 500, "scrollback is capped");
-        // scroll up into history and back
         t.scroll_by(100);
         let up = t.snapshot();
         assert_eq!(up.display_offset, 100);
@@ -1052,8 +998,6 @@ mod tests {
         std::thread::sleep(Duration::from_millis(800));
         let before = prompts(&t);
         t.write(encode_key("c", CTRL, false).unwrap());
-        // The interrupt brings a fresh prompt back. (PowerShell discards type-ahead on interrupt,
-        // so the next command must only be sent after that prompt.)
         let start = Instant::now();
         while prompts(&t) <= before {
             assert!(
@@ -1074,8 +1018,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Ask the shell for its own PID and wait until the number shows up in the OUTPUT (the typed
-    /// command line also contains "pid=", so only digits count).
     fn shell_pid(t: &Terminal) -> u32 {
         t.send_text("echo (\"pid=\"+$PID+\"=\")\r");
         let start = Instant::now();
@@ -1163,7 +1105,6 @@ mod tests {
             24,
         ));
         if let Ok(t) = r {
-            // some platforms spawn first and fail inside the child: it must then exit by itself
             let start = Instant::now();
             while t.is_alive() && start.elapsed() < Duration::from_secs(15) {
                 std::thread::sleep(Duration::from_millis(50));

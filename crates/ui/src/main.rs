@@ -1,4 +1,3 @@
-// Release builds are a pure GUI app: no console window next to the IDE.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::path::PathBuf;
@@ -10,9 +9,6 @@ use gpui::{
 use ui::Workbench;
 use ui::panel::{HostConfig, Panel, spawn_worker};
 
-/// The extension shown in the right panel: `NANTI_EXTENSION` + `NANTI_VIEW` win; otherwise the one
-/// chosen in the Extensions view (saved in the config folder). `NANTI_SELFTEST_LOG` makes the run
-/// self-verifying against the mock extension.
 fn panel_choice(config_dir: Option<&std::path::Path>) -> Option<(PathBuf, String)> {
     if let (Some(dir), Ok(view)) = (
         std::env::var_os("NANTI_EXTENSION"),
@@ -36,8 +32,6 @@ fn host_config_from_env(config_dir: Option<&std::path::Path>) -> Option<HostConf
     })
 }
 
-/// Without a console the "windows" subsystem gives console children (the Node extension host) a
-/// visible window of their own. Give the process a hidden console that they inherit instead.
 #[cfg(all(windows, not(debug_assertions)))]
 fn hide_console() {
     use std::ffi::c_void;
@@ -53,7 +47,7 @@ fn hide_console() {
         if AllocConsole() != 0 {
             let hwnd = GetConsoleWindow();
             if !hwnd.is_null() {
-                ShowWindow(hwnd, 0); // SW_HIDE
+                ShowWindow(hwnd, 0);
             }
         }
     }
@@ -85,10 +79,8 @@ fn main() {
             .open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    // the name shows in the title bar, the taskbar and Alt+Tab on every run
                     titlebar: Some(TitlebarOptions {
                         title: Some("nanti.".into()),
-                        // no system title bar: the menu bar is the title bar (one bar, not two)
                         appears_transparent: true,
                         ..Default::default()
                     }),
@@ -103,7 +95,6 @@ fn main() {
                         if let Some(dir) = config_dir.clone() {
                             workbench.set_config_dir(dir, panel_extension.clone());
                         }
-                        // Visibility and sizes of every region are remembered between runs.
                         if let Some(path) = ui::layout::layout_path() {
                             workbench.set_layout_path(path);
                         }
@@ -121,7 +112,6 @@ fn main() {
             )
             .unwrap();
 
-        // Closing the window with unsaved tabs must ask first (CT-001).
         window
             .update(cx, |_, window, cx| {
                 let entity = cx.entity();
@@ -135,7 +125,6 @@ fn main() {
             })
             .unwrap();
 
-        // Poll the extension host a few times per frame budget; redraw only when needed.
         cx.spawn(async move |cx| {
             loop {
                 cx.background_executor()

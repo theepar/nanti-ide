@@ -1,4 +1,3 @@
-// Embeds the app icon and version info into nanti-ui.exe (Windows only).
 fn main() {
     println!("cargo:rerun-if-changed=assets/app.rc");
     println!("cargo:rerun-if-changed=assets/nanti.ico");

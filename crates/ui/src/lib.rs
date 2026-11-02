@@ -1,9 +1,3 @@
-//! Workbench: activity bar | sidebar | editor (tabs + bottom panel) | extension panel, status bar below.
-//! Dark theme only for now (PRD 6). State lives in [`model::Model`]; this file renders it and maps
-//! input to model/editor calls. Things that are not implemented say so on screen instead of faking it.
-//!
-//! Text input goes through GPUI's InputHandler (IME composition, UTF-16 offsets). Limits (tracked in
-//! docs/m0-status.md): no horizontal scroll or word wrap; IME verified by handler-level tests only.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
@@ -47,33 +41,21 @@ use layout::{Layout, PanelPos, Side};
 use model::{Activity, Model, PanelTab, Prompt, SaveOutcome, TabContent, language_of};
 use palette::{Command, TextField};
 
-/// Result rows shown at once in the palette.
 const PALETTE_ROWS: usize = 12;
 const PALETTE_INPUT_PAD: f32 = 12.0;
-/// Left padding inside the find / search inputs.
 const FIELD_PAD: f32 = 8.0;
 use panel::{Panel, UiEvent};
 
 const AI_PANEL_HEADER: f32 = 30.0;
 const STATUS_BAR_HEIGHT: f32 = 22.0;
-/// Height of the menu bar at the top of the window.
 const MENU_BAR_HEIGHT: f32 = 30.0;
-/// Width of the draggable splitter between regions.
 const SPLITTER: f32 = 5.0;
 const ACTIVITY_BAR_WIDTH: f32 = 48.0;
-/// Height taken by the editor tab bar (used to bound the panel size).
 const TAB_BAR_HEIGHT: f32 = 35.0;
-/// The editor renders at most this many lines per file until it is virtualized.
 const MAX_RENDERED_LINES: usize = 2000;
-/// The text editor only builds rows near the viewport (see `OVERSCAN_ROWS`), so this is a cap on
-/// how many lines it will show at all, not a per-frame cost like `MAX_RENDERED_LINES` (diffs).
 const EDITOR_MAX_LINES: usize = 100_000;
-/// Extra rows built above and below the viewport so scrolling never shows blank gaps.
 const OVERSCAN_ROWS: usize = 10;
-/// Height of one explorer row; the list is virtualized with it, so rows must keep this height.
 const EXPLORER_ROW_H: f32 = 22.0;
-/// A cached explorer listing is rebuilt at least this often, to notice changes made outside the
-/// IDE (a terminal, git checkout) without reading every directory on every frame.
 const EXPLORER_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(2);
 const LINE_HEIGHT: f32 = 20.0;
 const GUTTER_WIDTH: f32 = 56.0;
@@ -83,7 +65,6 @@ const EDITOR_PAD_Y: f32 = 8.0;
 const TAB_WIDTH: usize = 4;
 
 pub mod theme {
-    /// Scrollbar colors: a dark track and a clearly visible light grey thumb.
     pub const SCROLL_TRACK: u32 = 0x1e1e1e;
     pub const SCROLL_THUMB: u32 = 0x424242;
     pub const ACTIVITY_BAR: u32 = 0x181818;
@@ -95,15 +76,12 @@ pub mod theme {
     pub const BORDER: u32 = 0x2b2b2b;
     pub const TEXT: u32 = 0xcccccc;
     pub const TEXT_DIM: u32 = 0x858585;
-    /// Toolbar and status-bar icons: brighter than `TEXT_DIM` so small glyphs stay readable.
     pub const ICON: u32 = 0xb4b4b4;
-    /// Highlights are white, not blue.
     pub const ACCENT: u32 = 0xe6e6e6;
     pub const LINE_NUMBER: u32 = 0x6e7681;
     pub const LINE_NUMBER_ACTIVE: u32 = 0xc6c6c6;
     pub const HOVER: u32 = 0x2a2d2e;
     pub const SELECTED: u32 = 0x37373d;
-    /// Hovered menu row.
     pub const HOVER_STRONG: u32 = 0x3c3f41;
     pub const SELECTION: u32 = 0x264f7880;
     pub const BANNER: u32 = 0x2b2a1f;
@@ -112,7 +90,6 @@ pub mod theme {
     pub const FIND_CURRENT: u32 = 0xe5c07b99;
     pub const MENU_BG: u32 = 0x252526;
 
-    /// Dark-theme color for a syntax token.
     pub fn token_color(t: syntax::Token) -> u32 {
         use syntax::Token::*;
         match t {
@@ -134,7 +111,6 @@ pub mod theme {
     }
 }
 
-/// Text color of a change in the explorer and the Source Control list.
 pub fn tone_color(t: scm::Tone) -> u32 {
     match t {
         scm::Tone::Modified => 0xe2c08d,
@@ -154,7 +130,6 @@ fn activity_icon(a: Activity) -> &'static str {
     }
 }
 
-/// Text as drawn: tabs become spaces so columns and pixels agree.
 fn display_text(s: &str) -> String {
     s.replace('\t', &" ".repeat(TAB_WIDTH))
 }
@@ -173,7 +148,6 @@ fn shape(window: &Window, text: String) -> ShapedLine {
         .shape_line(SharedString::from(text), px(FONT_SIZE), &[run], None)
 }
 
-/// Pixel x of char column `col` within `line` (0 = start of text).
 fn x_of_col(window: &Window, line: &str, col: usize) -> Pixels {
     let prefix: String = line.chars().take(col).collect();
     let shown = display_text(&prefix);
@@ -183,7 +157,6 @@ fn x_of_col(window: &Window, line: &str, col: usize) -> Pixels {
     shape(window, shown.clone()).x_for_index(shown.len())
 }
 
-/// Inverse of `x_of_col`: nearest char column for a pixel x.
 fn col_at_x(window: &Window, line: &str, x: Pixels) -> usize {
     let shown = display_text(line);
     if shown.is_empty() {
@@ -201,8 +174,6 @@ fn col_at_x(window: &Window, line: &str, x: Pixels) -> usize {
     line.chars().count()
 }
 
-/// A line of text as an element: plain, or with syntax colors. `spans` are byte ranges in the RAW
-/// line; tabs are drawn as spaces so ranges are shifted by +3 bytes per preceding tab.
 fn line_element(text: &str, spans: Option<&[LineSpan]>) -> AnyElement {
     let shown = SharedString::from(display_text(text));
     let Some(spans) = spans.filter(|s| !s.is_empty()) else {
@@ -231,14 +202,11 @@ fn line_element(text: &str, spans: Option<&[LineSpan]>) -> AnyElement {
         .into_any_element()
 }
 
-/// Byte range of a char range within `s`.
 fn char_range_to_bytes(s: &str, r: Range<usize>) -> Range<usize> {
     let byte = |c: usize| s.char_indices().nth(c).map_or(s.len(), |(b, _)| b);
     byte(r.start)..byte(r.end)
 }
 
-/// Which input owns the keyboard right now. The OS text input (typing, IME) is routed by this.
-/// Which splitter is being dragged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Drag {
     Sidebar,
@@ -259,7 +227,6 @@ enum Target {
     ExtSearch,
 }
 
-/// Scroll state of the sidebar and panel lists (the editor has its own handle).
 #[derive(Default)]
 struct Scrolls {
     explorer: ScrollHandle,
@@ -273,19 +240,15 @@ struct Scrolls {
     search: ScrollHandle,
 }
 
-/// Cached syntax highlights for one file at one text version.
 type HlCache = (PathBuf, u64, Option<Rc<Vec<Vec<LineSpan>>>>);
 
 pub struct Workbench {
     model: Model,
     panel: Option<Panel>,
-    /// Status bar items contributed by extensions (id -> text), only visible ones.
     status_items: BTreeMap<String, String>,
     external_prompt: Option<(String, String)>,
     focus: FocusHandle,
     palette_focus: FocusHandle,
-    /// Fallback focus for the root element, so global shortcuts keep working when the focused
-    /// element is not drawn (editor hidden by a maximized panel) or nothing was ever focused.
     root_focus: FocusHandle,
     find_query_focus: FocusHandle,
     find_replace_focus: FocusHandle,
@@ -296,9 +259,7 @@ pub struct Workbench {
     drag: Option<Drag>,
     layout_path: Option<PathBuf>,
     layout_saved: Layout,
-    /// Last visibility applied to the native webview (avoid calling it every frame).
     right_applied: Option<bool>,
-    /// Tests only: lay the right panel out even though no extension fills it.
     force_right_panel: bool,
     terminals: Vec<TerminalSession>,
     active_terminal: usize,
@@ -306,16 +267,12 @@ pub struct Workbench {
     term_metrics: GridMetrics,
     highlighter: RefCell<SyntaxHighlighter>,
     hl_cache: RefCell<Option<HlCache>>,
-    /// (built at, `Model::explorer_signature`, listing) so a frame does not re-read directories.
     explorer_cache: RefCell<Option<(std::time::Instant, u64, Rc<Vec<model::Entry>>)>>,
     scroll: ScrollHandle,
     scrolls: Scrolls,
-    /// Scroll area whose scrollbar thumb is being dragged.
     scroll_drag: Option<ScrollHandle>,
-    /// Outline section of the explorer is expanded.
     outline_open: bool,
     dragging: bool,
-    /// Set once the user confirmed leaving, so closing the window is not intercepted again.
     quitting: bool,
     last_synced_versions: HashMap<PathBuf, u64>,
     lsp: lsp::LspManager,
@@ -364,12 +321,10 @@ impl Workbench {
         &self.model
     }
 
-    /// Direct access to the state, for tests and embedders that drive the workbench without a mouse.
     pub fn model_mut(&mut self) -> &mut Model {
         &mut self.model
     }
 
-    /// Open a file in a tab (same as clicking it in the explorer).
     pub fn open_path(&mut self, path: &std::path::Path) {
         self.model.open_file(path);
     }
@@ -378,32 +333,24 @@ impl Workbench {
         &self.focus
     }
 
-    /// Where extensions and the right-panel choice live; `panel_extension` is the folder loaded now.
     pub fn set_config_dir(&mut self, dir: PathBuf, panel_extension: Option<PathBuf>) {
         self.model.config_dir = Some(dir);
         self.model.panel_extension = panel_extension;
         self.model.refresh_extensions();
     }
 
-    /// Start using git for the workspace (status, diffs, stage/commit). The app calls this at startup.
     pub fn enable_source_control(&mut self) {
         self.model.enable_source_control();
     }
 
-    /// Let the Extensions view load recommendations from Open VSX. The app calls this at startup;
-    /// tests leave it off so they never touch the network.
     pub fn enable_marketplace(&mut self) {
         self.model.marketplace_enabled = true;
     }
 
-    /// Serve Open File / Open Folder / Install VSIX with the system dialog. The app calls this at
-    /// startup; tests leave it off so no dialog can open.
     pub fn enable_native_dialogs(&mut self) {
         self.model.native_dialogs = true;
     }
 
-    /// Show the system file/folder dialog in this process, owned by the IDE window (no helper
-    /// program, no extra taskbar entry), and apply the choice when it closes.
     fn start_picker(
         &mut self,
         req: crate::model::PickRequest,
@@ -424,7 +371,7 @@ impl Workbench {
         });
         cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(paths))) = chosen.await else {
-                return; // cancelled or failed
+                return;
             };
             let Some(path) = paths.into_iter().next() else {
                 return;
@@ -443,14 +390,12 @@ impl Workbench {
         .detach();
     }
 
-    /// Load the saved layout from `path` and save every later change there.
     pub fn set_layout_path(&mut self, path: PathBuf) {
         self.model.layout = Layout::load(&path);
         self.layout_saved = self.model.layout.clone();
         self.layout_path = Some(path);
     }
 
-    /// Write the layout now if it changed (called from `pump`, and by tests).
     pub fn save_layout_now(&mut self) {
         let Some(path) = self.layout_path.clone() else {
             return;
@@ -461,34 +406,30 @@ impl Workbench {
         match self.model.layout.save(&path) {
             Ok(()) => self.layout_saved = self.model.layout.clone(),
             Err(e) => {
-                self.layout_saved = self.model.layout.clone(); // do not retry every tick
+                self.layout_saved = self.model.layout.clone();  // do not retry every tick
                 self.model.message = Some(format!("Could not save layout: {e}"));
             }
         }
     }
 
-    /// Test hook: lay the (empty) right panel out so its splitter can be exercised.
     #[doc(hidden)]
     pub fn show_empty_right_panel_for_tests(&mut self) {
         self.force_right_panel = true;
     }
 
-    /// Show an extension webview in the right-hand panel.
     pub fn attach_panel(&mut self, panel: Panel) {
         self.panel = Some(panel);
     }
 
-    /// Called when the window is asked to close. True = let it close.
     pub fn allow_window_close(&mut self) -> bool {
         let ok = self.quitting || self.model.request_quit();
         if ok {
-            self.kill_all_terminals(); // never leave shells running behind a closed window
-            self.lsp.shutdown_all(); // nor rust-analyzer / gopls
+            self.kill_all_terminals();  // never leave shells running behind a closed window
+            self.lsp.shutdown_all();
         }
         ok
     }
 
-    /// Apply pending extension-host events. Returns true if the UI needs a redraw.
     pub fn pump(&mut self) -> bool {
         if self.drag.is_none() {
             self.save_layout_now();
@@ -717,8 +658,6 @@ impl Workbench {
 
     fn reveal_cursor(&self) {
         if let Some(TabContent::Text(e)) = self.model.active().map(|t| &t.content) {
-            // Rows are virtualized (spacers stand in for off-screen lines), so child indices no
-            // longer match line numbers; scroll the minimal amount to show the cursor line instead.
             let viewport = f32::from(self.scroll.bounds().size.height);
             if viewport <= 0.0 {
                 return;
@@ -746,8 +685,6 @@ impl Workbench {
         window.remove_window();
         cx.quit();
     }
-
-    // ---- input ---------------------------------------------------------------------------
 
     fn target(&self) -> Target {
         if self.model.palette.is_some() {
@@ -786,7 +723,6 @@ impl Workbench {
         Target::Editor
     }
 
-    /// The single-line input that currently owns the keyboard, if it is not the editor.
     fn field(&self) -> Option<&TextField> {
         match self.target() {
             Target::Palette => self.model.palette.as_ref().map(|p| &p.field),
@@ -819,7 +755,6 @@ impl Workbench {
         }
     }
 
-    /// A field's text changed (typing, IME, delete): keep derived state in step.
     fn on_field_edited(&mut self) {
         match self.target() {
             Target::Palette => {
@@ -832,7 +767,6 @@ impl Workbench {
         }
     }
 
-    /// Give the keyboard to `target` (model state and GPUI focus together, so they never disagree).
     fn focus_target(&mut self, target: Target, window: &mut Window) {
         match target {
             Target::FindQuery | Target::FindReplace => {
@@ -866,7 +800,6 @@ impl Workbench {
         self.sync_focus(window);
     }
 
-    /// (view height, scrollable range, offset) of the editor's scroll area, in pixels.
     pub fn editor_scroll_metrics(&self) -> (f32, f32, f32) {
         (
             f32::from(self.scroll.bounds().size.height),
@@ -875,14 +808,12 @@ impl Workbench {
         )
     }
 
-    /// Run task `index` of the Run view in the integrated terminal (same as clicking it).
     pub fn run_task(&mut self, index: usize, window: &mut Window) {
         self.model.run_task(index);
         self.process_terminal_request();
         self.focus_target(Target::Terminal, window);
     }
 
-    /// Put the caret in the Source Control commit message (same as clicking it).
     pub fn focus_commit_message(&mut self, window: &mut Window) {
         self.focus_target(Target::Commit, window);
     }
@@ -901,7 +832,6 @@ impl Workbench {
             Target::Commit => window.focus(&self.commit_focus),
             Target::Terminal => window.focus(&self.terminal_focus),
             Target::ExtSearch => window.focus(&self.ext_search_focus),
-            // With the editor hidden (maximized panel) park the focus on the root so shortcuts work.
             Target::Editor if self.model.layout.panel && self.model.layout.panel_maximized => {
                 window.focus(&self.root_focus)
             }
@@ -909,7 +839,6 @@ impl Workbench {
         }
     }
 
-    /// Do what a command asked of the UI layer: clipboard, quit.
     fn drain_requests(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = self.model.clipboard_request.take() {
             cx.write_to_clipboard(ClipboardItem::new_string(text));
@@ -978,14 +907,12 @@ impl Workbench {
                         p.refilter();
                     }
                     _ if m.control && !m.alt => {
-                        // Switching between the two palettes is allowed; other shortcuts are swallowed.
                         if let Some(c @ (Command::CommandPalette | Command::QuickOpen)) =
                             Command::from_ctrl_key(key, m.shift)
                         {
                             return self.run_and_stop(c, window, cx);
                         }
                     }
-                    // Typed text is NOT handled here: GPUI delivers it to the InputHandler.
                     _ => return,
                 }
             }
@@ -994,7 +921,6 @@ impl Workbench {
         cx.notify();
     }
 
-    /// Ctrl shortcuts that stay available while a single-line input has focus.
     fn field_shortcut(key: &str, shift: bool) -> Option<Command> {
         match Command::from_ctrl_key(key, shift) {
             Some(
@@ -1009,7 +935,6 @@ impl Workbench {
         }
     }
 
-    /// Keys while a find or replace input has focus. Typed text goes to the InputHandler.
     fn on_find_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let m = ev.keystroke.modifiers;
         let key = ev.keystroke.key.as_str();
@@ -1072,12 +997,11 @@ impl Workbench {
                 }
                 self.on_field_edited();
             }
-            _ => return, // typed text -> InputHandler
+            _ => return,
         }
         self.after_field_key(window, cx);
     }
 
-    /// Keys while the workspace-search input has focus.
     fn on_search_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let m = ev.keystroke.modifiers;
         let key = ev.keystroke.key.as_str();
@@ -1116,8 +1040,6 @@ impl Workbench {
         self.after_field_key(window, cx);
     }
 
-    /// Keys while the commit message input has focus. Ctrl+Enter commits; plain Enter does nothing,
-    /// so a commit is never one stray key away.
     fn on_commit_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let m = ev.keystroke.modifiers;
         let key = ev.keystroke.key.as_str();
@@ -1159,7 +1081,6 @@ impl Workbench {
         self.after_field_key(window, cx);
     }
 
-    /// Keys while the extension search input has focus.
     fn on_ext_search_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let m = ev.keystroke.modifiers;
         let key = ev.keystroke.key.as_str();
@@ -1216,7 +1137,6 @@ impl Workbench {
         let key = k.key.as_str();
 
         // An external URL request is never approved by a keyboard shortcut.
-        // Escape explicitly denies it; all other keys are blocked while consent is pending.
         if self.external_prompt.is_some() {
             if key == "escape" {
                 self.resolve_external_prompt(false, cx);
@@ -1276,7 +1196,6 @@ impl Workbench {
             return cx.notify();
         }
 
-        // AltGr arrives as ctrl+alt on Windows: that is text, not a shortcut.
         let ctrl = m.control && !m.alt;
         if ctrl {
             if let Some(command) = Command::from_ctrl_key(key, m.shift) {
@@ -1347,7 +1266,6 @@ impl Workbench {
             "tab" if s => e.outdent_lines(model::INDENT_UNIT),
             "tab" if e.has_multiline_selection() => e.indent_lines(model::INDENT_UNIT),
             "tab" => e.insert(model::INDENT_UNIT),
-            // Everything else, including typed characters, goes to the InputHandler below.
             _ => return,
         }
         self.reveal_cursor();
@@ -1355,7 +1273,6 @@ impl Workbench {
         cx.notify();
     }
 
-    /// Char index in the active editor under window position `p`.
     fn position_at(&self, p: Point<Pixels>, window: &Window) -> Option<usize> {
         let Some(TabContent::Text(e)) = self.model.active().map(|t| &t.content) else {
             return None;
@@ -1388,7 +1305,6 @@ impl Workbench {
                 n if n >= 3 => e.select_line_at(pos),
                 _ => e.set_cursor(pos, ev.modifiers.shift),
             }
-            // a drag extends by characters, so only a single click starts one
             self.dragging = ev.click_count < 2;
         }
         cx.notify();
@@ -1414,8 +1330,6 @@ impl Workbench {
     fn on_editor_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
         self.dragging = false;
     }
-
-    // ---- layout dragging -------------------------------------------------------------------
 
     fn on_root_mouse_move(
         &mut self,
@@ -1489,7 +1403,6 @@ impl Workbench {
         }
     }
 
-    /// A draggable divider. Dragging resizes the neighbouring region; double-click resets it.
     fn splitter(
         &self,
         id: &'static str,
@@ -1532,8 +1445,6 @@ impl Workbench {
                 }),
             )
     }
-
-    // ---- rendering -----------------------------------------------------------------------
 
     fn activity_bar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         div()
@@ -1597,7 +1508,6 @@ impl Workbench {
             }))
     }
 
-    /// The explorer listing, from cache while the tree and the expansion state are unchanged.
     fn explorer_entries(&self) -> Rc<Vec<model::Entry>> {
         let sig = self.model.explorer_signature();
         if let Some((at, s, list)) = &*self.explorer_cache.borrow()
@@ -1615,8 +1525,6 @@ impl Workbench {
         let body: AnyElement =
             if self.model.activity == Activity::Explorer {
                 let active_path = self.model.active().map(|t| t.path.clone());
-                // Virtualized like the editor: only rows near the viewport become elements and
-                // spacers keep the scroll extent, so a folder with thousands of files stays cheap.
                 let entries = self.explorer_entries();
                 let total = entries.len();
                 let viewport = f32::from(self.scrolls.explorer.bounds().size.height);
@@ -1779,7 +1687,6 @@ impl Workbench {
             .flex()
             .flex_none()
             .h(px(35.))
-            // with no tabs the bar melts into the editor instead of showing an empty strip
             .bg(rgb(if self.model.tabs.is_empty() && self.model.ext_detail.is_none() {
                 theme::EDITOR
             } else {
@@ -1789,7 +1696,6 @@ impl Workbench {
                 !self.model.tabs.is_empty() || self.model.ext_detail.is_some(),
                 |d| d.border_b_1().border_color(rgb(theme::BORDER)),
             )
-            // the extension detail page is a tab of its own, first and active while it is shown
             .children(self.model.ext_detail.as_ref().map(|d| {
                 div()
                     .id("tab-ext-detail")
@@ -1882,7 +1788,6 @@ impl Workbench {
             }))
     }
 
-    /// Yellow bar asking the user to decide; nothing is saved, discarded or overwritten silently.
     fn prompt_bar(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
         let prompt = self.model.prompt.clone()?;
         let (text, primary, secondary) = match &prompt {
@@ -1982,7 +1887,6 @@ impl Workbench {
         )
     }
 
-    /// Browser links from extensions must be explicitly approved by the user.
     fn external_prompt_bar(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
         let (_, url) = self.external_prompt.as_ref()?;
         Some(
@@ -2091,8 +1995,6 @@ impl Workbench {
                 let buf = editor.buffer();
                 let total = buf.len_lines();
                 let shown = total.min(EDITOR_MAX_LINES);
-                // Virtualization: only rows in (or near) the viewport become elements; spacers keep
-                // the scroll extent and scrollbar identical to a fully built list.
                 let viewport = f32::from(self.scroll.bounds().size.height);
                 let viewport = if viewport > 0.0 { viewport } else { 1600.0 };
                 let scrolled = (-f32::from(self.scroll.offset().y) - EDITOR_PAD_Y).max(0.0);
@@ -2244,7 +2146,6 @@ impl Workbench {
                     .children(note)
             }
         };
-        // Registers the platform input handler (typing + IME) while the editor has focus.
         let focus = self.focus.clone();
         let entity = cx.entity();
         let input = has_text.then(|| {
@@ -2366,7 +2267,6 @@ impl Workbench {
             .child(body)
     }
 
-    /// Icon-only button of the bottom panel's toolbar.
     fn panel_button(id: &'static str, icon_name: &'static str) -> gpui::Stateful<gpui::Div> {
         div()
             .id(id)
@@ -2413,7 +2313,6 @@ impl Workbench {
             )
     }
 
-    /// A small status-bar button that toggles a region; lit while the region is shown.
     fn layout_button(
         id: &'static str,
         icon_name: &'static str,
@@ -2435,7 +2334,6 @@ impl Workbench {
                 this.apply_command(command, window, cx);
             }))
             .child(assets::icon(
-                // the "-on" variant has the toggled region filled in
                 if on {
                     match icon_name {
                         "layout-sidebar" => "layout-sidebar-on",
@@ -2591,7 +2489,6 @@ impl Workbench {
 }
 
 impl Workbench {
-    /// Syntax highlight spans of the active file (None for plain text, unknown languages, huge files).
     pub fn active_highlights(&self) -> Option<Rc<Vec<Vec<LineSpan>>>> {
         let tab = self.model.active()?;
         match &tab.content {
@@ -2600,7 +2497,6 @@ impl Workbench {
         }
     }
 
-    /// Syntax highlights for `editor`'s current text, cached per file and text version.
     fn highlights(&self, editor: &Editor, path: &Path) -> Option<Rc<Vec<Vec<LineSpan>>>> {
         let version = editor.version();
         if let Some((p, v, spans)) = &*self.hl_cache.borrow()
@@ -2611,7 +2507,6 @@ impl Workbench {
         }
         let lang = Language::from_path(path)?;
         let text = editor.text();
-        // Our lines are split on \n only; skip files where the buffer would disagree.
         let spans = if text.split('\n').count() == editor.buffer().len_lines() {
             self.highlighter
                 .borrow_mut()
@@ -2624,7 +2519,6 @@ impl Workbench {
         spans
     }
 
-    /// A single-line text input (find, replace, search) wired to the platform InputHandler.
     #[allow(clippy::too_many_arguments)]
     fn field_widget(
         &self,
@@ -2724,7 +2618,6 @@ impl Workbench {
             .child(label)
     }
 
-    /// Find / replace bar above the editor (Ctrl+F, Ctrl+H).
     fn find_bar(
         &self,
         window: &Window,
@@ -2868,7 +2761,6 @@ impl Workbench {
         )
     }
 
-    /// Search sidebar: query input, options, results grouped by file.
     fn search_panel(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let s = &self.model.search;
         let field = self.field_widget(
@@ -3035,7 +2927,6 @@ impl Workbench {
             .into_any_element()
     }
 
-    /// Small flat button used in the Source Control view.
     fn scm_button(
         id: &'static str,
         label: &'static str,
@@ -3065,7 +2956,6 @@ impl Workbench {
             .child(label)
     }
 
-    /// Source Control sidebar: commit message, Staged / Changes / Merge Conflicts groups (GT-01).
     fn scm_panel(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let s = &self.model.scm;
         let Some(status) = &s.status else {
@@ -3371,7 +3261,6 @@ impl Workbench {
             .into_any_element()
     }
 
-    /// Read-only diff tab (GT-02): old/new line numbers, +/- coloring, hunk headers.
     fn diff_rows(view: &scm::DiffView) -> Vec<AnyElement> {
         let note = |text: String, color: u32| {
             div()
@@ -3662,7 +3551,6 @@ impl Workbench {
         )
     }
 
-    /// Chars range -> window-space bounds of that text in the editor (for IME candidate windows).
     fn editor_bounds_for(&self, chars: Range<usize>, window: &Window) -> Option<Bounds<Pixels>> {
         let TabContent::Text(e) = &self.model.active()?.content else {
             return None;
@@ -3690,7 +3578,6 @@ impl Workbench {
     }
 }
 
-/// Number of chars covered by the first `utf16` UTF-16 code units of `text`.
 fn chars_in_utf16_prefix(text: &str, utf16: usize) -> usize {
     let mut units = 0;
     for (i, c) in text.chars().enumerate() {
@@ -3702,8 +3589,6 @@ fn chars_in_utf16_prefix(text: &str, utf16: usize) -> usize {
     text.chars().count()
 }
 
-/// Platform text input (typing, IME composition, reconversion). The target is the palette, the find
-/// or search inputs, or the active editor, in that order of precedence. Ranges are UTF-16 code units.
 impl EntityInputHandler for Workbench {
     fn text_for_range(
         &mut self,
@@ -3797,7 +3682,7 @@ impl EntityInputHandler for Workbench {
             return cx.notify();
         }
         if self.target() == Target::Editor && self.model.prompt.is_some() {
-            return; // a confirmation is pending: the editor must not change underneath it
+            return;  // a confirmation is pending: the editor must not change underneath it
         }
         if let Some(f) = self.field_mut() {
             let chars = range.map(|r| f.utf16_to_char(r.start)..f.utf16_to_char(r.end));
@@ -3813,7 +3698,6 @@ impl EntityInputHandler for Workbench {
                 let chars = range.map(|r| e.utf16_range_to_chars(r));
                 e.commit_text(chars, text);
             } else {
-                // Plain typing: keeps typing runs merged into one undo step.
                 e.insert(text);
             }
             self.reveal_cursor();
@@ -3901,8 +3785,6 @@ impl EntityInputHandler for Workbench {
 
 impl Render for Workbench {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // The WebView2 child is a native surface on top of the GPUI window: keep it glued to the
-        // right-hand panel area on every layout pass (covers window resize and dragging).
         let vp = window.viewport_size();
         let (vw, vh) = (f32::from(vp.width), f32::from(vp.height));
         let status_h = if self.model.layout.status_bar {
@@ -3943,7 +3825,6 @@ impl Render for Workbench {
         let split_sidebar = layout
             .sidebar
             .then(|| self.splitter("split-sidebar", Drag::Sidebar, cx).into_any_element());
-        // No extension fills the right panel: show nothing (the saved `layout.right` is kept).
         let right_open = layout.right && (self.panel.is_some() || self.force_right_panel);
         let split_right = right_open.then(|| self.splitter("split-right", Drag::Right, cx));
         let panel_drag = if layout.panel_pos.is_side() { Drag::PanelSide } else { Drag::Panel };
@@ -3953,7 +3834,6 @@ impl Render for Workbench {
         let tab_bar = (!maximized).then(|| self.tab_bar(cx).into_any_element());
         let prompt_bar = self.prompt_bar(cx).map(IntoElement::into_any_element);
         let external_prompt_bar = self.external_prompt_bar(cx).map(IntoElement::into_any_element);
-        // The extension detail page takes the place of the editor until a file or tab is chosen.
         let editor: Option<AnyElement> = (!maximized).then(|| match &self.model.ext_detail {
             Some(detail) => self.ext_detail_page(detail, cx),
             None => self.editor(window, cx).into_any_element(),
@@ -4048,7 +3928,6 @@ impl Render for Workbench {
     }
 }
 
-/// Convenience for callers/tests: did a save attempt succeed.
 pub fn saved(outcome: &SaveOutcome) -> bool {
     matches!(outcome, SaveOutcome::Saved)
 }

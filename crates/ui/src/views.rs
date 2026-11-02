@@ -1,6 +1,3 @@
-//! Views added around the editor: menu bar and menus, explorer toolbar and outline, Run and
-//! Extensions sidebars, Problems and Output panels, welcome screen. Every control calls a real
-//! command or model operation; nothing here is decorative.
 
 use gpui::{
     AnyElement, Bounds, ClickEvent, Context, FontWeight, IntoElement, MouseButton, MouseDownEvent, Pixels,
@@ -14,8 +11,6 @@ use crate::model::PanelTab;
 use crate::palette::Command;
 use crate::{MENU_BAR_HEIGHT, Target, Workbench, theme};
 
-
-/// 1234 -> "1K", 1_500_000 -> "1.5M".
 fn short_count(n: u64) -> String {
     if n >= 1_000_000 {
         format!("{:.1}M", n as f64 / 1_000_000.0)
@@ -26,7 +21,6 @@ fn short_count(n: u64) -> String {
     }
 }
 
-/// Index just after the `)` that completes a Markdown link starting at `open` (a `[`).
 fn parse_link(b: &[char], open: usize) -> Option<(String, usize)> {
     let mut depth = 0usize;
     let mut close = None;
@@ -52,7 +46,6 @@ fn parse_link(b: &[char], open: usize) -> Option<(String, usize)> {
     Some((text, end))
 }
 
-/// Plain text of one README line: HTML tags, images and emphasis marks removed, links kept as text.
 fn strip_markup(s: &str) -> String {
     let b: Vec<char> = s.chars().collect();
     let mut out = String::new();
@@ -89,7 +82,6 @@ fn strip_markup(s: &str) -> String {
     out
 }
 
-/// A README as readable blocks: headings, bullets, code and paragraphs (no full Markdown).
 fn readme_blocks(text: &str) -> Vec<AnyElement> {
     let mut out: Vec<AnyElement> = Vec::new();
     let (mut in_code, mut in_comment) = (false, false);
@@ -174,7 +166,7 @@ fn readme_blocks(text: &str) -> Vec<AnyElement> {
     out
 }
 
-const BRAND_W: f32 = 38.0; // left padding (12) + logo (14) + gap (12)
+const BRAND_W: f32 = 38.0;
 const MENU_W: f32 = 260.0;
 
 fn button_w(kind: MenuKind) -> f32 {
@@ -190,11 +182,9 @@ fn menu_left(kind: MenuKind) -> f32 {
             .sum::<f32>()
 }
 
-/// Width of the scrollbar track.
 const SCROLLBAR_W: f32 = 12.0;
 const SCROLLBAR_MIN_THUMB: f32 = 30.0;
 
-/// Top and height of the thumb inside `track`, or `None` when everything fits.
 fn thumb_geometry(handle: &ScrollHandle, track: Bounds<Pixels>) -> Option<(f32, f32)> {
     let view = f32::from(handle.bounds().size.height);
     let max = f32::from(handle.max_offset().height);
@@ -207,7 +197,6 @@ fn thumb_geometry(handle: &ScrollHandle, track: Bounds<Pixels>) -> Option<(f32, 
     Some((f32::from(track.origin.y) + (track_h - thumb) * frac, thumb))
 }
 
-/// Scroll `handle` so the thumb is centred on window y position `y` (click and drag on the track).
 pub(crate) fn scroll_to_pointer(handle: &ScrollHandle, y: Pixels) {
     let b = handle.bounds();
     let (view, max) = (
@@ -225,10 +214,6 @@ pub(crate) fn scroll_to_pointer(handle: &ScrollHandle, y: Pixels) {
 }
 
 impl Workbench {
-    // ---- scrollbars ------------------------------------------------------------------------------
-
-    /// A visible scrollbar for `handle`: a dark track and a light grey thumb, drawn only when the
-    /// content is larger than the view. Click or drag on it to scroll.
     pub(crate) fn scrollbar(
         &self,
         id: &str,
@@ -276,7 +261,6 @@ impl Workbench {
             .into_any_element()
     }
 
-    /// Put a scroll area (already tracking `handle`) in a box that fills its parent, with its scrollbar.
     pub(crate) fn scroll_box(
         &self,
         id: &str,
@@ -293,8 +277,6 @@ impl Workbench {
             .into_any_element()
     }
 
-    /// A vertically scrolling list of `rows` with a visible scrollbar. `max_h` caps its height
-    /// (otherwise it fills the space it is given).
     pub(crate) fn scroll_list(
         &self,
         id: &'static str,
@@ -318,10 +300,6 @@ impl Workbench {
         }
     }
 
-    // ---- menu bar -------------------------------------------------------------------------------
-
-    /// One Windows-style caption button (minimize / maximize / close). The click itself is done by
-    /// the platform: `window_control_area` makes the hit test report the matching caption button.
     fn caption_button(
         id: &'static str,
         area: WindowControlArea,
@@ -331,7 +309,6 @@ impl Workbench {
         div()
             .id(id)
             .window_control_area(area)
-            // the focus-tracking root would prevent_default() this press and the platform would skip the button
             .occlude()
             .flex()
             .flex_none()
@@ -363,7 +340,6 @@ impl Workbench {
                     .h_full()
                     .pl_3()
                     .window_control_area(WindowControlArea::Drag)
-                    // logo only, white (the name is in the window title)
                     .child(assets::logo_mark(14., 0xffffff)),
             )
             .children(MenuKind::ALL.into_iter().enumerate().map(|(i, k)| {
@@ -392,7 +368,6 @@ impl Workbench {
                         }
                         cx.notify();
                     }))
-                    // with a menu open, moving over another title switches to it (like desktop menus)
                     .on_hover(cx.listener(move |this, hovered: &bool, _w, cx| {
                         if *hovered
                             && this.model.menu_open.is_some()
@@ -404,7 +379,6 @@ impl Workbench {
                     }))
                     .child(k.title())
             }))
-            // the free stretch of the bar moves the window (one bar instead of title bar + menu bar)
             .child(
                 div()
                     .flex_1()
@@ -506,7 +480,6 @@ impl Workbench {
             .collect()
     }
 
-    /// Dropdown of the open menu or the explorer context menu, with a click-away backdrop.
     pub(crate) fn menus_overlay(
         &self,
         window: &Window,
@@ -579,8 +552,6 @@ impl Workbench {
         )
     }
 
-    // ---- explorer extras ---------------------------------------------------------------------------
-
     fn flat_button(
         id: impl Into<gpui::ElementId>,
         label: &'static str,
@@ -597,7 +568,6 @@ impl Workbench {
             .child(label)
     }
 
-    /// Square icon-only toolbar button.
     fn icon_button(id: &'static str, icon_name: &'static str) -> gpui::Stateful<gpui::Div> {
         div()
             .id(id)
@@ -658,7 +628,6 @@ impl Workbench {
             .into_any_element()
     }
 
-    /// Collapsible symbol list of the active file under the explorer tree.
     pub(crate) fn outline_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let symbols = self.model.outline();
         let open = self.outline_open;
@@ -745,8 +714,6 @@ impl Workbench {
             .into_any_element()
     }
 
-    // ---- Run view ------------------------------------------------------------------------------------
-
     pub(crate) fn run_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         let tasks = &self.model.tasks;
         let rows: Vec<AnyElement> = tasks
@@ -824,8 +791,6 @@ impl Workbench {
             .into_any_element()
     }
 
-
-    /// An extension's icon at `size` px: its image when known, else a tile with its initial.
     fn ext_icon(&self, id: &str, own: Option<&std::path::PathBuf>, label: &str, size: f32) -> AnyElement {
         let path = own.cloned().or_else(|| self.model.ext_icons.get(id).cloned());
         match path {
@@ -856,7 +821,6 @@ impl Workbench {
         }
     }
 
-    /// The page shown in the editor area for one extension: icon, name, Install, README, facts.
     pub(crate) fn ext_detail_page(
         &self,
         d: &crate::extensions::ExtDetail,
@@ -1051,7 +1015,6 @@ impl Workbench {
                             .child(div().pt_2().flex().child(action)),
                     ),
             )
-            // a quiet section label with the one underline, like a tab strip
             .child(
                 div()
                     .flex()
@@ -1099,8 +1062,6 @@ impl Workbench {
             ))
             .into_any_element()
     }
-
-    // ---- Extensions view -----------------------------------------------------------------------------
 
     pub(crate) fn extensions_panel(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let installed_root = self
@@ -1462,8 +1423,6 @@ impl Workbench {
             .into_any_element()
     }
 
-    // ---- bottom panel: Problems and Output -----------------------------------------------------------
-
     pub(crate) fn problems_view(&self, cx: &mut Context<Self>) -> AnyElement {
         let files = &self.model.problems.files;
         if files.is_empty() {
@@ -1534,7 +1493,7 @@ impl Workbench {
             .lines()
             .collect::<Vec<_>>()
             .into_iter()
-            .rev() // newest first: no scrolling to the bottom needed
+            .rev()
             .map(|l| {
                 div()
                     .flex()
@@ -1607,8 +1566,6 @@ impl Workbench {
             PanelTab::Output => self.output_view(cx),
         }
     }
-
-    // ---- welcome ----------------------------------------------------------------------------------------
 
     pub(crate) fn welcome(&self, cx: &mut Context<Self>) -> AnyElement {
         let entries: [(&'static str, Command); 8] = [

@@ -1,5 +1,3 @@
-//! Menus, explorer file operations, go to line, Run tasks, extensions, Problems, Output and outline.
-//! Model-level flows on real temporary folders, then the workbench through GPUI's headless platform.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -36,8 +34,6 @@ fn submit(m: &mut Model, text: &str) {
     p.field.insert(text);
     m.accept_palette();
 }
-
-// ---- explorer file operations ----------------------------------------------------------------------
 
 #[test]
 fn new_file_prompt_creates_opens_and_selects_the_file() {
@@ -210,8 +206,6 @@ fn context_menu_selects_the_entry_and_commands_act_on_it() {
     assert!(m.menu_open.is_none());
 }
 
-// ---- tabs, go to line, about ---------------------------------------------------------------------------
-
 #[test]
 fn go_to_line_accepts_line_and_column_and_clamps() {
     let t = ws("goto");
@@ -284,8 +278,6 @@ fn about_opens_once_and_mentions_credits() {
     );
 }
 
-// ---- Run view -------------------------------------------------------------------------------------------
-
 #[test]
 fn run_view_lists_tasks_and_a_click_queues_the_command_for_the_terminal() {
     let t = ws("run");
@@ -307,16 +299,13 @@ fn run_view_lists_tasks_and_a_click_queues_the_command_for_the_terminal() {
             .lines()
             .any(|l| l.channel == "Run" && l.text == "$ cargo check")
     );
-    m.run_task(999); // out of range: ignored
+    m.run_task(999);
 }
-
-// ---- Extensions view ------------------------------------------------------------------------------------
 
 #[test]
 fn extensions_install_list_use_in_panel_and_remove() {
     let t = ws("ext");
     let cfg = t.0.join("cfg");
-    // build a tiny .vsix with the system tar
     let src = t.0.join("pkg");
     std::fs::create_dir_all(src.join("extension")).unwrap();
     std::fs::write(
@@ -361,7 +350,6 @@ fn extensions_install_list_use_in_panel_and_remove() {
         ),
         ("acme.chat", Some("chat.view"))
     );
-    // installing the same package again is refused, with the reason
     m.run_command(Command::InstallVsix);
     submit(&mut m, &vsix.display().to_string());
     assert!(
@@ -395,15 +383,13 @@ fn extensions_install_list_use_in_panel_and_remove() {
     assert!(t.0.exists());
 }
 
-// ---- Problems, Output, Outline ------------------------------------------------------------------------
-
 #[test]
 fn problems_report_syntax_errors_of_open_files_after_a_pause_and_clear_when_fixed() {
     let t = ws("problems");
     std::fs::write(t.0.join("bad.rs"), "fn ok() {}\nfn broken( {\n").unwrap();
     let mut m = Model::new(t.0.clone());
     m.open_file(&t.0.join("bad.rs"));
-    m.open_file(&t.0.join("a.txt")); // plain text: never checked
+    m.open_file(&t.0.join("a.txt"));  // plain text: never checked
     assert!(
         m.pump_problems(),
         "a file that was just opened is checked at once"
@@ -411,11 +397,9 @@ fn problems_report_syntax_errors_of_open_files_after_a_pause_and_clear_when_fixe
     assert!(m.problems.total() >= 1);
     assert_eq!(m.problems.files.len(), 1);
     assert_eq!(m.problems.files[0].title, "bad.rs");
-    // jump to the first problem
     let d = m.problems.files[0].items[0].clone();
     m.open_at(&t.0.join("bad.rs"), d.line, d.col, d.len);
     assert_eq!(m.active().unwrap().path, t.0.join("bad.rs"));
-    // fix the file: select everything and replace it
     {
         let e = m.active_editor_mut().unwrap();
         e.select_all();
@@ -429,7 +413,6 @@ fn problems_report_syntax_errors_of_open_files_after_a_pause_and_clear_when_fixe
     std::thread::sleep(Duration::from_millis(350));
     assert!(m.pump_problems());
     assert_eq!(m.problems.total(), 0);
-    // closing a tab drops its problems
     m.run_command(Command::ShowProblems);
     assert_eq!(m.panel_tab, PanelTab::Problems);
 }
@@ -479,8 +462,6 @@ fn outline_lists_symbols_of_the_active_file_and_follows_edits() {
     m.go_to_line(1, 1).unwrap();
 }
 
-// ---- menus ------------------------------------------------------------------------------------------------
-
 #[test]
 fn every_menu_command_runs_without_panicking() {
     let t = ws("menus");
@@ -490,7 +471,7 @@ fn every_menu_command_runs_without_panicking() {
         for it in items(kind) {
             if let ui::menu::MenuItem::Command(c) = it {
                 if matches!(c, Command::Exit | Command::RevealInOs | Command::OpenFile | Command::OpenFolder) {
-                    continue; // quits / opens the OS file manager
+                    continue;
                 }
                 m.close_palette();
                 m.prompt = None;
@@ -500,8 +481,6 @@ fn every_menu_command_runs_without_panicking() {
     }
     m.close_palette();
 }
-
-// ---- through the workbench (headless GPUI) -------------------------------------------------------------
 
 fn open<'a>(
     cx: &'a mut TestAppContext,
@@ -582,7 +561,6 @@ fn every_menu_context_menu_view_and_panel_renders(cx: &mut TestAppContext) {
             .unwrap();
         draw(cx);
     }
-    // welcome screen (no tab) and the input prompt in every mode
     window
         .update(cx, |wb, _, cx| {
             wb.model_mut().tabs.clear();
@@ -615,7 +593,6 @@ fn keyboard_new_file_and_go_to_line_flow(cx: &mut TestAppContext) {
         .update(cx, |wb, _, _| wb.open_path(&t.0.join("a.txt")))
         .unwrap();
     cx.run_until_parked();
-    // Ctrl+G, type "3", Enter
     cx.simulate_keystrokes("ctrl-g");
     assert!(
         window
@@ -630,7 +607,6 @@ fn keyboard_new_file_and_go_to_line_flow(cx: &mut TestAppContext) {
         })
         .unwrap();
     assert_eq!(line, 2);
-    // F2 renames the active file when nothing is selected in the explorer
     cx.simulate_keystrokes("f2");
     assert!(
         window
@@ -638,7 +614,6 @@ fn keyboard_new_file_and_go_to_line_flow(cx: &mut TestAppContext) {
             .unwrap()
     );
     cx.simulate_keystrokes("escape");
-    // Escape closes an open menu
     window
         .update(cx, |wb, _, cx| {
             wb.model_mut().open_menu(MenuKind::Edit);
@@ -710,7 +685,7 @@ fn a_long_file_gives_the_editor_a_scrollable_range(cx: &mut TestAppContext) {
             cx.notify();
         })
         .unwrap();
-    cx.simulate_keystrokes("ctrl-home"); // input events draw a frame
+    cx.simulate_keystrokes("ctrl-home");
     cx.run_until_parked();
     let (view, max, off) = window
         .read_with(cx, |wb, _| wb.editor_scroll_metrics())
@@ -760,7 +735,6 @@ fn editing_shortcuts_comment_move_duplicate_delete_indent_and_words(cx: &mut Tes
     cx.simulate_keystrokes("ctrl-shift-k");
     assert_eq!(editor_text(window, cx), "fn a() {\n    one\n    two\n}\n");
 
-    // Enter after an opening brace indents the next line; Tab / Shift+Tab indent and outdent
     cx.simulate_keystrokes("ctrl-home end enter");
     assert_eq!(
         editor_text(window, cx),
@@ -774,7 +748,6 @@ fn editing_shortcuts_comment_move_duplicate_delete_indent_and_words(cx: &mut Tes
         "fn a() {\n    \n    one\n    two\n}\n"
     );
 
-    // word-wise keys
     cx.simulate_keystrokes("ctrl-home ctrl-right ctrl-right");
     let col = window
         .update(cx, |wb, _, _| {
@@ -793,7 +766,6 @@ fn editing_shortcuts_comment_move_duplicate_delete_indent_and_words(cx: &mut Tes
         "fn a() {\n    \n    one\n    two\n}\n"
     );
 
-    // Ctrl+Enter opens a line below with the current indentation
     cx.simulate_keystrokes("ctrl-home down down ctrl-enter");
     assert_eq!(
         editor_text(window, cx),

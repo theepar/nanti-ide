@@ -1,15 +1,4 @@
-// Webview views/panels (VH-06). The host only models the extension-facing API and forwards state
-// to the IDE as notifications; the IDE owns the real WebView2 surface and the resource protocol.
-//
-// host -> IDE notifications:
-//   webview.viewProviderRegistered {viewType} / webview.viewProviderUnregistered {viewType}
-//   webview.panelCreated {handle, viewType, title, showOptions, options}
-//   webview.setHtml {handle, html} / webview.setOptions {handle, options} / webview.postMessage {handle, message}
-//   webview.setTitle {handle, title} / webview.reveal {handle} / webview.disposed {handle}
-// IDE -> host requests: webview.resolveView {viewType}, webview.message {handle, message},
-//   webview.dispose {handle}, webview.visibility {handle, visible}
 
-/** Origin the IDE serves webview content and resources from (wry custom protocol, https scheme). */
 export const WEBVIEW_ORIGIN = "https://nanti-resource.localhost";
 
 export function createWebviewHub({ notify, Disposable, EventEmitter, Uri, workspaceFolders }) {
@@ -48,7 +37,6 @@ export function createWebviewHub({ notify, Disposable, EventEmitter, Uri, worksp
         notify("webview.setOptions", { handle, options: wireOptions() });
       },
       onDidReceiveMessage: onMessage.event,
-      // Resolves true once handed to the IDE; delivery to a hidden webview is the IDE's concern.
       postMessage(message) {
         notify("webview.postMessage", { handle, message });
         return Promise.resolve(true);
@@ -139,7 +127,6 @@ export function createWebviewHub({ notify, Disposable, EventEmitter, Uri, worksp
   }
 
   const handlers = {
-    /** IDE asks the host to create the view for a registered viewType and call the provider. */
     async "webview.resolveView"({ viewType }) {
       const entry = viewProviders.get(viewType);
       if (!entry) throw Object.assign(new Error(`no view provider for ${viewType}`), { code: "UnknownView" });

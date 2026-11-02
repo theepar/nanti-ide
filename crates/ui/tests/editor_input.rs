@@ -1,5 +1,3 @@
-//! Keyboard/mouse input through GPUI's real event dispatch (headless test platform).
-//! Nothing here touches the desktop or sends OS-level input.
 
 use std::path::{Path, PathBuf};
 
@@ -153,9 +151,9 @@ fn dirty_tab_close_asks_then_save_closes(cx: &mut TestAppContext) {
         window.read_with(cx, |wb, _| wb.model().tabs.len()).unwrap(),
         1
     );
-    cx.simulate_keystrokes("escape"); // cancel
+    cx.simulate_keystrokes("escape");
     assert_eq!(prompt_of(window, cx), None);
-    cx.simulate_keystrokes("ctrl-w enter"); // Enter = primary = Save
+    cx.simulate_keystrokes("ctrl-w enter");
     assert_eq!(
         window.read_with(cx, |wb, _| wb.model().tabs.len()).unwrap(),
         0
@@ -179,7 +177,6 @@ fn external_change_raises_conflict_and_does_not_overwrite(cx: &mut TestAppContex
         Some(Prompt::SaveConflict { .. })
     ));
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "theirs");
-    // keys other than Escape/Enter are ignored while a prompt is up
     cx.simulate_input("zzz");
     assert_eq!(text_of(window, cx), "!mine");
     cx.simulate_keystrokes("escape");

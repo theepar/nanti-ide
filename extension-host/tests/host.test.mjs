@@ -185,7 +185,6 @@ test("host dispatches env.openExternal consent replies while caller awaits", asy
   await host.handle(req(0, "initialize"));
   const unknown = await host.handle(req(1, "env.openExternal.resolve", { id: "missing", approved: true }));
   assert.equal(unknown.result.resolved, false);
-  // A direct host request tests the response contract; the actual extension uses its own API instance.
   assert.equal(api.resolveExternal(notes[0].params.id, false), true);
   assert.equal(await waiting, false);
 });
@@ -430,7 +429,6 @@ test("environmentVariableCollection records mutations (not applied to terminals 
 
 });
 
-
 test("window.createTerminal and terminal operations (TR-04 / VH-10)", async () => {
   const { createVscode } = await import("../src/vscode-api.mjs");
   const notes = [];
@@ -474,7 +472,6 @@ test("live editor buffer sync between IDE and host (AI-04 / AI-05 / VH-04)", asy
   const { host } = await setup();
   const fileUri = "file:///C:/workspace/test.rs";
 
-  // IDE opens document with unsaved live content
   await host.handle(req(1, "workspace.didOpenTextDocument", {
     uri: fileUri,
     languageId: "rust",
@@ -482,7 +479,6 @@ test("live editor buffer sync between IDE and host (AI-04 / AI-05 / VH-04)", asy
     text: 'fn main() { println!("live"); }',
   }));
 
-  // Direct host handles
   const { createVscode } = await import("../src/vscode-api.mjs");
   const api = createVscode({ notify() {} });
   api.syncOpenDocument({

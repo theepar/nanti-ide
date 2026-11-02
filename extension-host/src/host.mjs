@@ -1,7 +1,3 @@
-// Node extension host. Newline-delimited JSON over stdio.
-// Requests (IDE -> host): {protocolVersion, requestId, method, params}
-// Responses: {requestId, result|error}. Notifications (host -> IDE): {method, params}, no requestId.
-// Unsupported methods return an explicit UnsupportedCapability error (PRD 5.4).
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -13,8 +9,6 @@ import { createContext } from "./context.mjs";
 
 export const PROTOCOL_VERSION = 1;
 
-// One process-wide hook; `currentVscode` points at the most recently initialized host's API.
-// (A real host process has exactly one; tests create several in one process.)
 let currentVscode = null;
 const origLoad = Module._load;
 Module._load = function (request, parent, isMain) {
@@ -26,7 +20,6 @@ export function createHost({ notify = () => {} } = {}) {
   let vscodeApi = null;
   let workspaceFolders = [];
   let storageRoot = path.join(os.tmpdir(), "nanti-ext-storage");
-  /** id -> {dir, manifest, main, state: installed|activated|failed, module, context} */
   const extensions = new Map();
 
   function ext(id) {
@@ -108,10 +101,6 @@ export function createHost({ notify = () => {} } = {}) {
       return (await vscodeApi.vscode.commands.executeCommand(command, ...args)) ?? null;
     },
 
-    /**
-     * IDE delivers a URI callback (OAuth login, VH-07). The authority must be the target extension id;
-     * a mismatch is rejected instead of being broadcast to other extensions.
-     */
     "workspace.didOpenTextDocument": (params) => vscodeApi?.syncOpenDocument(params) ?? null,
     "workspace.didChangeTextDocument": (params) => vscodeApi?.syncChangeDocument(params) ?? null,
     "workspace.didSaveTextDocument": (params) => vscodeApi?.syncSaveDocument(params) ?? null,
@@ -157,7 +146,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const send = (obj) => process.stdout.write(JSON.stringify(obj) + "\n");
   const host = createHost({ notify: (method, params) => send({ method, params }) });
   const rl = readline.createInterface({ input: process.stdin });
-  // Serialize: one request at a time keeps response order deterministic for the IDE.
   let chain = Promise.resolve();
   rl.on("line", (line) => {
     let msg;
@@ -167,8 +155,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       console.error("[host] dropped malformed line");
       return;
     }
-    // Consent responses must bypass the serialized queue: an extension command may be
-    // awaiting openExternal while its original request is still in that queue.
     if (msg.method === "env.openExternal.resolve") {
       void host.handle(msg).then(send);
       return;

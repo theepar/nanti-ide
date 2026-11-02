@@ -1,6 +1,3 @@
-//! IME composition (driven through the platform InputHandler methods exactly as Windows TSF/IMM
-//! does) and the command palette / quick open, via GPUI's headless test platform.
-//! These do NOT prove behaviour with a physical IME: see docs/m0-status.md.
 
 use std::path::{Path, PathBuf};
 
@@ -76,13 +73,11 @@ fn ime<R>(
     out
 }
 
-// ---------------------------------------------------------------- IME in the editor
-
 #[gpui::test]
 fn ime_composition_updates_then_commits_as_one_undo_step(cx: &mut TestAppContext) {
     let ws = workspace("ime1", &[("a.txt", "ab")]);
     let (window, cx) = open(cx, &ws.0, "a.txt");
-    cx.simulate_keystrokes("right"); // a|b
+    cx.simulate_keystrokes("right");
     ime(window, cx, |wb, w, cx| {
         wb.replace_and_mark_text_in_range(None, "n", Some(1..1), w, cx)
     });
@@ -122,7 +117,7 @@ fn ime_commit_with_astral_chars_reports_utf16_selection(cx: &mut TestAppContext)
     });
     assert_eq!(text(window, cx), "a🌍");
     let sel = ime(window, cx, |wb, w, cx| wb.selected_text_range(false, w, cx)).unwrap();
-    assert_eq!((sel.range, sel.reversed), (3..3, false)); // 1 + 2 UTF-16 units
+    assert_eq!((sel.range, sel.reversed), (3..3, false));
     let mut adjusted = None;
     let got = ime(window, cx, |wb, w, cx| {
         wb.text_for_range(1..3, &mut adjusted, w, cx)
@@ -172,8 +167,6 @@ fn typing_is_not_applied_twice_with_the_input_handler_active(cx: &mut TestAppCon
     assert_eq!(text(window, cx), "héllo");
 }
 
-// ---------------------------------------------------------------- command palette
-
 #[gpui::test]
 fn command_palette_filters_runs_a_command_and_returns_focus_to_the_editor(cx: &mut TestAppContext) {
     let ws = workspace("pal1", &[("a.txt", "x")]);
@@ -199,7 +192,7 @@ fn command_palette_filters_runs_a_command_and_returns_focus_to_the_editor(cx: &m
             .read_with(cx, |wb, _| wb.model().layout.sidebar)
             .unwrap()
     );
-    cx.simulate_input("y"); // focus is back in the editor
+    cx.simulate_input("y");
     assert_eq!(text(window, cx), "yx");
 }
 
@@ -253,7 +246,6 @@ fn palette_runs_save_and_tab_switch_commands(cx: &mut TestAppContext) {
     cx.simulate_input("file: save");
     cx.simulate_keystrokes("enter");
     assert_eq!(std::fs::read_to_string(ws.0.join("a.txt")).unwrap(), "1A");
-    // two tabs, then Ctrl+Tab / Ctrl+Shift+Tab
     cx.simulate_keystrokes("ctrl-p");
     cx.simulate_input("b.txt");
     cx.simulate_keystrokes("enter");
@@ -291,7 +283,7 @@ fn ctrl_p_switches_between_the_two_palettes_and_ignores_other_shortcuts(cx: &mut
     let ws = workspace("pal6", &[("a.txt", "x")]);
     let (window, cx) = open(cx, &ws.0, "a.txt");
     cx.simulate_keystrokes("ctrl-shift-p");
-    cx.simulate_keystrokes("ctrl-s ctrl-a"); // must not leak to the editor / save
+    cx.simulate_keystrokes("ctrl-s ctrl-a");  // must not leak to the editor / save
     assert_eq!(text(window, cx), "x");
     cx.simulate_keystrokes("ctrl-p");
     let mode = window

@@ -1,8 +1,3 @@
-//! Gate A spike: WebView2 as a child surface of a GPUI window, with a two-way message bridge.
-//! Scope is extension panels only (e.g. Claude/Codex chat UI), never the main editor.
-//!
-//! Self-verifying: JS posts `hello-from-js`, Rust replies via `evaluate_script`, JS acks,
-//! Rust logs PASS and exits. Log path: env `NANTI_SPIKE_LOG` (default `webview-spike.log`).
 
 use std::cell::RefCell;
 use std::io::Write;

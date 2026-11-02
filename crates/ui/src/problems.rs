@@ -1,6 +1,3 @@
-//! Problems panel data: syntax errors of the open files, computed with tree-sitter (ED-10 is
-//! syntax only: no type errors, no lints, no language server). Files are re-checked shortly after
-//! the user stops typing, never on every keystroke.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -10,7 +7,6 @@ use syntax::{Diagnostic, Language};
 
 use crate::model::{Tab, TabContent};
 
-/// A file is re-checked once its text has been unchanged for this long.
 pub const DEBOUNCE: Duration = Duration::from_millis(300);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,7 +18,6 @@ pub struct ProblemFile {
 
 struct Entry {
     version: u64,
-    /// Version last seen (changes while the user types) and when it changed.
     seen: u64,
     seen_at: Instant,
     items: Vec<Diagnostic>,
@@ -31,7 +26,6 @@ struct Entry {
 #[derive(Default)]
 pub struct Problems {
     cache: HashMap<PathBuf, Entry>,
-    /// Files that have at least one problem, in tab order.
     pub files: Vec<ProblemFile>,
 }
 
@@ -40,7 +34,6 @@ impl Problems {
         self.files.iter().map(|f| f.items.len()).sum()
     }
 
-    /// Bring the problem list in step with `tabs`. Returns true if the list changed.
     pub fn refresh(&mut self, tabs: &[Tab], now: Instant, debounce: Duration) -> bool {
         let mut files = Vec::new();
         let mut live: Vec<&PathBuf> = Vec::new();
@@ -81,7 +74,6 @@ impl Problems {
         changed
     }
 
-    /// Update diagnostics from a real Language Server (rust-analyzer, gopls, etc).
     pub fn update_lsp_diagnostics(&mut self, path: PathBuf, title: String, items: Vec<Diagnostic>) -> bool {
         let entry = self.cache.entry(path.clone()).or_insert_with(|| Entry {
             version: 0,

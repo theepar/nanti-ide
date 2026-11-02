@@ -1,12 +1,9 @@
-//! In-file find (ED-07): literal / regex search with case and whole-word options. Matches are
-//! reported as `char` ranges (the unit the rest of the editor uses), never bytes.
 
 use std::fmt;
 use std::ops::Range;
 
 use regex::{Regex, RegexBuilder};
 
-/// Search never returns more than this many matches (the UI says so when it is hit).
 pub const MAX_MATCHES: usize = 10_000;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -31,7 +28,6 @@ fn is_word(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
-/// A compiled query. Build once, then `find_all` on any text.
 #[derive(Debug, Clone)]
 pub struct Finder {
     re: Regex,
@@ -39,7 +35,6 @@ pub struct Finder {
 }
 
 impl Finder {
-    /// `Ok(None)` for an empty query (nothing to search for), `Err` for an invalid regex.
     pub fn new(query: &str, opts: FindOptions) -> Result<Option<Self>, FindError> {
         if query.is_empty() {
             return Ok(None);
@@ -53,7 +48,6 @@ impl Finder {
             if opts.regex {
                 pattern = format!(r"\b(?:{pattern})\b");
             } else {
-                // Only demand a boundary where the query itself starts/ends with a word character.
                 if query.chars().next().is_some_and(is_word) {
                     pattern = format!(r"\b{pattern}");
                 }
@@ -74,7 +68,6 @@ impl Finder {
         }))
     }
 
-    /// Non-overlapping, non-empty matches in order, as char ranges. Capped at `MAX_MATCHES`.
     pub fn find_all(&self, text: &str) -> Vec<Range<usize>> {
         let mut out = Vec::new();
         let mut chars_before = 0usize;
@@ -95,8 +88,6 @@ impl Finder {
         out
     }
 
-    /// The text that replaces the match starting at byte `byte_start` of `text`. In regex mode
-    /// `$1`, `${name}` and `$0` expand to capture groups; otherwise `replacement` is literal.
     pub fn replacement(&self, text: &str, byte_start: usize, replacement: &str) -> String {
         if !self.regex_mode {
             return replacement.to_owned();
@@ -121,7 +112,6 @@ fn first_line(s: &str) -> String {
         .to_owned()
 }
 
-/// Index of the first match starting at or after `pos`, wrapping to the first one.
 pub fn next_index(matches: &[Range<usize>], pos: usize) -> Option<usize> {
     if matches.is_empty() {
         return None;
@@ -129,7 +119,6 @@ pub fn next_index(matches: &[Range<usize>], pos: usize) -> Option<usize> {
     Some(matches.iter().position(|m| m.start >= pos).unwrap_or(0))
 }
 
-/// Index of the last match starting before `pos`, wrapping to the last one.
 pub fn prev_index(matches: &[Range<usize>], pos: usize) -> Option<usize> {
     if matches.is_empty() {
         return None;
@@ -142,13 +131,12 @@ pub fn prev_index(matches: &[Range<usize>], pos: usize) -> Option<usize> {
     )
 }
 
-/// Index of the match exactly equal to `selection`, if any.
 pub fn index_of_selection(matches: &[Range<usize>], selection: &Range<usize>) -> Option<usize> {
     matches.iter().position(|m| m == selection)
 }
 
 #[cfg(test)]
-#[allow(clippy::single_range_in_vec_init)] // expected match lists legitimately have one range
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use super::*;
 
@@ -218,7 +206,6 @@ mod tests {
 
     #[test]
     fn offsets_are_chars_not_bytes() {
-        // 'é' is 2 bytes, '🌍' is 4 bytes and 1 char
         assert_eq!(all("x", CI, "é🌍x日x"), [2..3, 4..5]);
         assert_eq!(all("🌍", CI, "a🌍b🌍"), [1..2, 3..4]);
     }

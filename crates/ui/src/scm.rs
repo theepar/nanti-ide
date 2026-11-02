@@ -1,8 +1,3 @@
-//! Source control state (GT-01, GT-02) without GUI types, so it is unit-testable.
-//!
-//! Git runs on one background thread at a time; jobs queue up in order, so a click is never lost and
-//! the UI never waits for a subprocess. Every job that changes the repository ends with a fresh
-//! `status`, so what the panel shows is what git reports, not what we assume happened.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -13,21 +8,17 @@ use git::{Change, Diff, GitError, Repo, Status};
 
 use crate::palette::TextField;
 
-/// How often the status is refreshed while nothing else happens (catches edits made in a terminal).
 pub const REFRESH_INTERVAL: Duration = Duration::from_secs(8);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DiffKey {
-    /// Path relative to the repository root, `/` separated.
     pub rel: String,
-    /// true = index vs HEAD ("Index"), false = working tree vs index ("Working Tree").
     pub staged: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiffReq {
     pub key: DiffKey,
-    /// Previous name of a renamed file (the diff needs both paths to show a rename).
     pub orig: Option<String>,
     pub untracked: bool,
 }
@@ -50,7 +41,6 @@ pub enum DiffState {
     Failed(String),
 }
 
-/// Content of a diff tab.
 #[derive(Debug, Clone)]
 pub struct DiffView {
     pub req: DiffReq,
@@ -74,7 +64,6 @@ impl GroupKind {
     }
 }
 
-/// Color family of a change badge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tone {
     Modified,
@@ -105,7 +94,6 @@ pub struct Row {
 }
 
 impl Row {
-    /// File name and its directory, for display.
     pub fn name_and_dir(&self) -> (&str, &str) {
         let trimmed = self.rel.trim_end_matches('/');
         match trimmed.rfind('/') {
@@ -130,7 +118,6 @@ struct Done {
     committed: bool,
 }
 
-/// What `poll` found out; the model applies the parts that touch tabs.
 #[derive(Default)]
 pub struct Polled {
     pub changed: bool,
@@ -153,12 +140,9 @@ pub struct ScmState {
     enabled: bool,
     repo: Option<Repo>,
     pub status: Option<Status>,
-    /// Why there is no status ("not a repository", "git not found", ...).
     pub error: Option<String>,
-    /// Single-line commit message (a multi-line message is written in the terminal for now).
     pub message: TextField,
     pub focused: bool,
-    /// Result of the last action: (is_error, text). Hook output arrives here in full.
     pub notice: Option<(bool, String)>,
     pub collapsed: HashSet<GroupKind>,
     queue: VecDeque<Job>,
@@ -190,7 +174,6 @@ impl ScmState {
         }
     }
 
-    /// Start talking to git (the app does this at startup; unit tests of other features do not).
     pub fn enable(&mut self) {
         self.enabled = true;
         self.request(Job::Refresh);
@@ -208,7 +191,6 @@ impl ScmState {
         self.repo.as_ref().map(|r| r.root.as_path())
     }
 
-    /// Queue a job. Duplicate refreshes and re-requests of the same diff collapse into one.
     pub fn request(&mut self, job: Job) {
         if !self.enabled {
             return;
@@ -246,7 +228,6 @@ impl ScmState {
         self.running = Some(rx);
     }
 
-    /// Collect finished work and start the next job. Call it often (it is cheap).
     pub fn poll(&mut self) -> Polled {
         let mut out = Polled::default();
         if let Some(rx) = &self.running {
@@ -258,7 +239,6 @@ impl ScmState {
                 }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
-                    // The worker died without answering: say so instead of spinning forever.
                     self.running = None;
                     self.notice = Some((true, "git worker stopped unexpectedly".into()));
                     out.changed = true;
@@ -277,7 +257,6 @@ impl ScmState {
         out
     }
 
-    /// Block until every queued job finished (tests and shutdown paths only).
     pub fn wait_idle(&mut self) -> Polled {
         let mut all = Polled::default();
         let start = Instant::now();
@@ -340,8 +319,6 @@ impl ScmState {
         p
     }
 
-    // ---- user actions -----------------------------------------------------------------------
-
     pub fn refresh(&mut self) {
         self.request(Job::Refresh);
     }
@@ -354,12 +331,10 @@ impl ScmState {
         self.request(Job::UnstageAll);
     }
 
-    /// Stage a file (or an untracked directory) shown in the CHANGES / conflicts groups.
     pub fn stage(&mut self, rel: &str) {
         self.request(Job::Stage(vec![rel.to_owned()]));
     }
 
-    /// Unstage a file; a rename needs both of its paths.
     pub fn unstage(&mut self, rel: &str) {
         let mut paths = vec![rel.to_owned()];
         if let Some(orig) = self
@@ -373,7 +348,6 @@ impl ScmState {
         self.request(Job::Unstage(paths));
     }
 
-    /// Commit what is staged with the message field. `Err` = refused before running git.
     pub fn commit(&mut self) -> Result<(), String> {
         let msg = self.message.text().trim().to_owned();
         let refusal = if self.status.is_none() {
@@ -398,8 +372,6 @@ impl ScmState {
             self.collapsed.insert(g);
         }
     }
-
-    // ---- views --------------------------------------------------------------------------------
 
     pub fn staged_count(&self) -> usize {
         self.status.as_ref().map_or(0, |s| s.staged().count())
@@ -441,7 +413,6 @@ impl ScmState {
             .collect()
     }
 
-    /// `ahead`/`behind` and branch for the status bar: `main* ↑1 ↓2`.
     pub fn branch_label(&self) -> Option<String> {
         let st = self.status.as_ref()?;
         let mut s = match (&st.branch, &st.oid) {
@@ -461,7 +432,6 @@ impl ScmState {
         Some(s)
     }
 
-    /// Request for a diff of `rel` as shown in group `staged`, built from the current status.
     pub fn diff_req(&self, rel: &str, staged: bool) -> DiffReq {
         let entry = self.status.as_ref().and_then(|s| s.entry_for(rel));
         DiffReq {
@@ -477,8 +447,6 @@ impl ScmState {
             untracked: !staged && entry.is_some_and(|e| e.unstaged == Some(Change::Untracked)),
         }
     }
-
-    // ---- explorer decoration ---------------------------------------------------------------
 
     fn rebuild_decor(&mut self) {
         self.files.clear();
@@ -509,7 +477,6 @@ impl ScmState {
         }
     }
 
-    /// Repository-relative `/` path of `abs`, if it is inside the repository.
     pub fn rel_of(&self, abs: &Path) -> Option<String> {
         let root = self.repo_root()?;
         let norm = |p: &Path| {
@@ -518,7 +485,6 @@ impl ScmState {
         };
         let (r, a) = (norm(root), norm(abs));
         let r = r.trim_end_matches('/');
-        // Windows paths are case-insensitive; compare the root part that way, keep the rest as is.
         let head = a.get(..r.len())?;
         if !head.eq_ignore_ascii_case(r) {
             return None;
@@ -527,7 +493,6 @@ impl ScmState {
         Some(rest.to_owned())
     }
 
-    /// Badge for an explorer entry: a letter for files, a dot for folders containing changes.
     pub fn decor_for(&self, abs: &Path, is_dir: bool) -> Option<Decor> {
         let rel = self.rel_of(abs)?;
         if is_dir {
@@ -549,7 +514,6 @@ impl ScmState {
         if let Some(d) = self.files.get(&rel) {
             return Some(*d);
         }
-        // a file inside an untracked directory
         self.untracked_dirs
             .iter()
             .any(|d| rel.starts_with(d.as_str()))
@@ -603,7 +567,7 @@ fn execute(root: &Path, repo: Option<Repo>, job: Job) -> Done {
                 repo.diff(&paths, req.key.staged)
             };
             done.diff = Some((req.key, result.map_err(|e| e.to_string())));
-            return done; // a diff changes nothing: no need for a new status
+            return done;
         }
     }
     done.status = Some(repo.status());
@@ -648,7 +612,6 @@ mod tests {
         assert_eq!(r("dir/").name_and_dir(), ("dir", ""));
     }
 
-    // groups/decor/labels need a status but no real repository root: build them without discovery.
     fn bare(entries: Vec<git::Entry>) -> ScmState {
         let mut s = ScmState::new(PathBuf::from("D:/ws"));
         s.status = Some(Status {

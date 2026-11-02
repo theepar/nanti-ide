@@ -1,5 +1,3 @@
-//! `Model` operations behind the menus, the explorer toolbar and the side views: file operations,
-//! go to line, run tasks, extensions, output and problems. GUI-free; the UI only calls these.
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -12,13 +10,9 @@ use crate::problems::DEBOUNCE;
 use crate::tasks;
 use crate::workspace_ops as ops;
 
-/// Marker path of the About tab (never a real file).
 const ABOUT_PATH: &str = "nanti://about";
 
 impl Model {
-    // ---- messages and the Output panel -----------------------------------------------------------
-
-    /// Show `text` in the status bar and record it in the Output panel.
     pub fn say(&mut self, channel: &str, text: &str) {
         self.output.push(channel, text);
         self.message = Some(text.lines().next().unwrap_or_default().to_owned());
@@ -30,13 +24,10 @@ impl Model {
         self.terminal_focused = false;
     }
 
-    // ---- explorer selection and menus ------------------------------------------------------------
-
     pub fn select_entry(&mut self, path: &Path) {
         self.explorer_sel = Some(path.to_path_buf());
     }
 
-    /// Folder new items go into: the selected folder, the folder of the selected file, or the root.
     pub fn selected_dir(&self) -> PathBuf {
         match &self.explorer_sel {
             Some(p) if p.is_dir() => p.clone(),
@@ -47,7 +38,6 @@ impl Model {
         }
     }
 
-    /// What Rename / Delete / Copy Path act on: the selected explorer entry, else the active file.
     pub fn target_path(&self) -> Option<PathBuf> {
         if let Some(p) = &self.explorer_sel
             && p.exists()
@@ -88,7 +78,6 @@ impl Model {
         self.expanded.insert(self.root.clone());
     }
 
-    /// Expand every folder above `path` so the file is visible in the explorer.
     pub fn reveal_in_explorer(&mut self, path: &Path) {
         let mut cur = path.parent();
         while let Some(dir) = cur {
@@ -99,8 +88,6 @@ impl Model {
             cur = dir.parent();
         }
     }
-
-    // ---- prompts (palette input mode) ------------------------------------------------------------
 
     pub fn open_input(&mut self, kind: InputKind, initial: &str) {
         self.context_menu = None;
@@ -200,7 +187,6 @@ impl Model {
         }
     }
 
-    /// The user chose `path` in the native dialog shown for `req`.
     pub fn apply_picked(&mut self, req: crate::model::PickRequest, path: PathBuf) {
         use crate::model::PickRequest;
         match req {
@@ -234,7 +220,6 @@ impl Model {
         }
     }
 
-    /// Carry out what a prompt asked. `Err` keeps the prompt open and is shown under its field.
     pub fn submit_input(&mut self, kind: InputKind, text: &str) -> Result<(), String> {
         match kind {
             InputKind::GoToLine => {
@@ -337,7 +322,6 @@ impl Model {
         self.say("Explorer", &format!("Renamed to {name}"));
     }
 
-    /// Move `path` to the Recycle Bin and close the tabs showing it.
     pub fn delete_item(&mut self, path: &Path) {
         match ops::send_to_recycle_bin(&self.root, path) {
             Ok(()) => {
@@ -373,7 +357,6 @@ impl Model {
         }
     }
 
-    /// Move the caret of the active editor to 1-based (line, col); out-of-range values are clamped.
     pub fn go_to_line(&mut self, line: usize, col: usize) -> Result<(), String> {
         let e = self.active_editor_mut().ok_or("open a text file first")?;
         let last = e.buffer().len_lines().saturating_sub(1);
@@ -383,8 +366,6 @@ impl Model {
         e.set_cursor((start + col - 1).min(end), false);
         Ok(())
     }
-
-    // ---- tabs --------------------------------------------------------------------------------------
 
     pub(crate) fn save_all(&mut self) {
         let (mut saved, mut skipped) = (0, 0);
@@ -405,7 +386,6 @@ impl Model {
         self.say("Files", &text);
     }
 
-    /// Close every tab without unsaved changes; tabs with changes stay open and are reported.
     pub(crate) fn close_all_tabs(&mut self) {
         let before = self.tabs.len();
         self.tabs.retain(Tab::is_dirty);
@@ -421,8 +401,6 @@ impl Model {
             );
         }
     }
-
-    // ---- About -------------------------------------------------------------------------------------
 
     pub(crate) fn open_about(&mut self) {
         let path = PathBuf::from(ABOUT_PATH);
@@ -448,13 +426,10 @@ impl Model {
         self.active_tab = Some(self.tabs.len() - 1);
     }
 
-    // ---- Run view ----------------------------------------------------------------------------------
-
     pub fn refresh_tasks(&mut self) {
         self.tasks = tasks::detect(&self.root);
     }
 
-    /// Run task `index` in the integrated terminal (the UI layer types it).
     pub fn run_task(&mut self, index: usize) {
         let Some(task) = self.tasks.get(index) else {
             return;
@@ -466,14 +441,11 @@ impl Model {
         self.terminal_run = Some(command);
     }
 
-    // ---- Extensions view -----------------------------------------------------------------------------
-
     pub fn refresh_extensions(&mut self) {
         self.extensions = match &self.config_dir {
             Some(dir) => extensions::list_installed(dir, self.panel_extension.as_deref()),
             None => Vec::new(),
         };
-        // Refresh also retries recommendations that failed (e.g. no connection earlier).
         if self.marketplace_results.is_empty() && self.marketplace_query.is_none() {
             self.recommend_tried = false;
         }
@@ -496,7 +468,6 @@ impl Model {
         }
     }
 
-    /// Make `dir` fill the right-hand panel from the next start.
     pub fn use_as_panel_extension(&mut self, dir: &Path, view: &str) {
         let Some(cfg) = self.config_dir.clone() else {
             return;
@@ -510,7 +481,6 @@ impl Model {
         }
     }
 
-    /// Search Open VSX in the background; the answer is applied by `pump_marketplace`.
     pub fn search_marketplace(&mut self, query: &str) {
         let q = query.trim().to_owned();
         self.marketplace_results.clear();
@@ -519,8 +489,8 @@ impl Model {
         if q.is_empty() {
             self.marketplace_searching = false;
             self.marketplace_query = None;
-            self.marketplace_rx = None; // an answer still in flight is dropped
-            self.recommend_tried = false; // an empty search brings the recommendations back
+            self.marketplace_rx = None;
+            self.recommend_tried = false;
             return;
         }
         let (tx, rx) = std::sync::mpsc::channel();
@@ -528,12 +498,11 @@ impl Model {
         std::thread::spawn(move || {
             let _ = tx.send(extensions::search_marketplace(&asked));
         });
-        self.marketplace_rx = Some(rx); // replacing it drops any older, now stale, search
+        self.marketplace_rx = Some(rx);
         self.marketplace_query = Some(q);
         self.marketplace_searching = true;
     }
 
-    /// Publisher and name of the marketplace entry behind `download_url`.
     fn market_ident(&self, download_url: &str) -> Option<(String, String)> {
         if let Some(m) = self.marketplace_results.iter().find(|m| m.download_url == download_url) {
             return Some((m.publisher.clone(), m.name.clone()));
@@ -546,7 +515,6 @@ impl Model {
         Some((d.publisher.clone(), name.to_owned()))
     }
 
-    /// Download and install in the background (one at a time); `pump_marketplace` reports.
     pub fn install_from_marketplace(&mut self, download_url: &str) {
         if self.installing.is_some() {
             return;
@@ -569,7 +537,6 @@ impl Model {
         self.progress_seen = 0;
     }
 
-    /// "Installing 42%" / "Installing..." for the extension being installed.
     pub fn install_label(&self) -> String {
         use std::sync::atomic::Ordering;
         let (done, total) = (
@@ -587,7 +554,6 @@ impl Model {
         }
     }
 
-    /// Fetch the icons of the listed marketplace extensions in the background (cached on disk).
     fn request_icons(&mut self) {
         let Some(cfg) = self.config_dir.clone() else {
             return;
@@ -623,7 +589,6 @@ impl Model {
         }
     }
 
-    /// Show the detail page of the `index`-th marketplace result.
     pub fn open_market_detail(&mut self, index: usize) {
         use crate::extensions::Readme;
         let Some(m) = self.marketplace_results.get(index).cloned() else {
@@ -631,7 +596,6 @@ impl Model {
         };
         self.readme_rx = None;
         {
-            // search results carry no README: the detail endpoint does (with license/categories)
             let (tx, rx) = std::sync::mpsc::channel();
             let (id, publisher, name) = (m.id.clone(), m.publisher.clone(), m.name.clone());
             std::thread::spawn(move || {
@@ -657,7 +621,6 @@ impl Model {
         });
     }
 
-    /// Show the detail page of the `index`-th installed extension.
     pub fn open_installed_detail(&mut self, index: usize) {
         use crate::extensions::Readme;
         let Some(x) = self.extensions.get(index).cloned() else {
@@ -690,8 +653,6 @@ impl Model {
         self.readme_rx = None;
     }
 
-    /// Fill an empty Extensions view with recommendations so there is something to install
-    /// before the first search. True if a request was started.
     fn recommend_if_idle(&mut self) -> bool {
         if !self.marketplace_enabled
             || self.activity != crate::model::Activity::Extensions
@@ -713,12 +674,10 @@ impl Model {
         true
     }
 
-    /// Apply finished marketplace work. True if something on screen changed.
     pub fn pump_marketplace(&mut self) -> bool {
         use std::sync::mpsc::TryRecvError;
         let mut changed = self.recommend_if_idle();
         if self.installing.is_some() {
-            // repaint while the download advances
             let now = self.install_progress.done.load(std::sync::atomic::Ordering::Relaxed);
             if now != self.progress_seen {
                 self.progress_seen = now;
@@ -799,14 +758,10 @@ impl Model {
         changed
     }
 
-    // ---- analysis ----------------------------------------------------------------------------------
-
-    /// Re-check the open files for syntax problems (debounced). True if the list changed.
     pub fn pump_problems(&mut self) -> bool {
         self.problems.refresh(&self.tabs, Instant::now(), DEBOUNCE)
     }
 
-    /// Symbols of the active file (cached per text version).
     pub fn outline(&self) -> Vec<syntax::Symbol> {
         let Some(tab) = self.active() else {
             return Vec::new();
@@ -829,7 +784,6 @@ impl Model {
         symbols
     }
 
-    /// Open the input prompt for the palette's `PaletteMode` (re-exported for completeness).
     pub fn palette_is_input(&self) -> bool {
         self.palette
             .as_ref()

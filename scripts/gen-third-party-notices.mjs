@@ -1,7 +1,3 @@
-// Generates THIRD_PARTY_NOTICES.md from `cargo metadata` (name, version, license, source repository)
-// and from extension-host/package-lock.json when present. Run from the repo root:
-//   node scripts/gen-third-party-notices.mjs
-// Re-run it whenever dependencies change, and ship the result next to the binary.
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
@@ -19,13 +15,11 @@ const rows = meta.packages
   }))
   .sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
 
-// ---- license allowlist: only free, permissive licenses may enter the build ---------------------
 const ALLOWED = new Set([
   "MIT", "MIT-0", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "Unicode-3.0",
   "Unicode-DFS-2016", "Unlicense", "CC0-1.0", "0BSD", "BSL-1.0", "NCSA", "MPL-2.0",
 ]);
 
-// Evaluates an SPDX expression: `OR` = any option is allowed, `AND` = all parts must be allowed.
 function permitted(expr) {
   const tokens = expr.replace(/\//g, " OR ").replace(/([()])/g, " $1 ").split(/\s+/).filter(Boolean);
   let i = 0;
@@ -87,8 +81,6 @@ if (existsSync(lock)) {
 }
 writeFileSync("THIRD_PARTY_NOTICES.md", out);
 
-// `--full`: copy every dependency's license/notice files VERBATIM into THIRD_PARTY_LICENSES.txt.
-// Ship that file with a release build (Apache-2.0 / MIT require the text to travel with the binary).
 // Never edit the copied texts; this script only reads the crates' own files.
 if (process.argv.includes("--full")) {
   const { readdirSync } = await import("node:fs");

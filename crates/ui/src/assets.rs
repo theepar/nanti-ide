@@ -1,5 +1,3 @@
-//! Embedded SVG assets (icons and the brand mark). GPUI renders SVGs as a mask tinted with the
-//! element's text color, so every icon here is drawn on a transparent background.
 
 use std::borrow::Cow;
 
@@ -38,7 +36,6 @@ const ASSETS: &[(&str, &str)] = &[
     ("icons/close.svg", include_str!("../assets/icons/close.svg")),
 ];
 
-/// Pass to `Application::with_assets` so `svg().path(..)` can find the embedded files.
 pub struct Assets;
 
 impl AssetSource for Assets {
@@ -58,7 +55,6 @@ impl AssetSource for Assets {
     }
 }
 
-/// A square icon from `assets/icons/<name>.svg`, tinted with `color` (0xRRGGBB).
 pub fn icon(name: &str, size: impl Into<Pixels>, color: u32) -> Svg {
     let size = size.into();
     svg()
@@ -68,9 +64,7 @@ pub fn icon(name: &str, size: impl Into<Pixels>, color: u32) -> Svg {
         .text_color(rgb(color))
 }
 
-/// The Inward Wings brand mark (transparent background), `width` px wide.
 pub fn logo_mark(width: f32, color: u32) -> Svg {
-    // viewBox is 252x220, so keep that aspect ratio.
     svg()
         .path("logo-mark.svg")
         .w(px(width))
@@ -79,7 +73,6 @@ pub fn logo_mark(width: f32, color: u32) -> Svg {
         .text_color(rgb(color))
 }
 
-/// Icon tint for a file name, by extension. Unknown types get a neutral grey.
 pub fn file_color(name: &str) -> u32 {
     let ext = name.rsplit_once('.').map_or("", |(_, e)| e);
     match ext.to_ascii_lowercase().as_str() {

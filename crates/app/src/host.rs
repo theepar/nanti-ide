@@ -1,12 +1,3 @@
-//! Rust side of the Node extension host IPC.
-//!
-//! Protocol: newline-delimited JSON, one object per line over the child's stdio.
-//! Requests carry `protocolVersion`, `requestId`, `method`, `params`; responses carry
-//! `requestId` plus either `result` or `error`. Lines without `requestId` are host -> IDE
-//! notifications (webview HTML/messages, status bar, output channels, ...).
-//!
-//! A reader thread demultiplexes the child's stdout so notifications are never blocked behind a
-//! pending request and a dead host fails requests instead of hanging them.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -63,7 +54,6 @@ struct RemoteError {
     message: String,
 }
 
-/// Host -> IDE message without a `requestId` (e.g. `window.showInformationMessage`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Notification {
     pub method: String,
@@ -72,7 +62,6 @@ pub struct Notification {
 
 type Pending = Arc<Mutex<HashMap<u64, Sender<Response>>>>;
 
-/// A host request whose result can be polled without blocking notification processing.
 pub struct DeferredResponse {
     id: u64,
     receiver: Receiver<Response>,
@@ -131,12 +120,10 @@ pub struct ExtensionHost {
 }
 
 impl ExtensionHost {
-    /// Spawn `node <entry>` and complete the handshake with no workspace folders.
     pub fn spawn(node: &str, entry: &Path) -> Result<Self, HostError> {
         Self::spawn_with_workspace(node, entry, &[])
     }
 
-    /// Spawn `node <entry>` and complete the handshake.
     pub fn spawn_with_workspace(
         node: &str,
         entry: &Path,
@@ -161,7 +148,7 @@ impl ExtensionHost {
                 for line in BufReader::new(stdout).lines() {
                     let Ok(line) = line else { break };
                     let Ok(raw) = serde_json::from_str::<Value>(&line) else {
-                        continue; // not protocol output; the host logs to stderr
+                        continue;
                     };
                     if raw.get("requestId").is_none() {
                         let _ = note_tx.send(Notification {
@@ -176,7 +163,6 @@ impl ExtensionHost {
                         }
                     }
                 }
-                // Order matters: flag first, then drop waiters so none can register unnoticed.
                 closed.store(true, Ordering::SeqCst);
                 pending.lock().unwrap().clear();
             })
@@ -255,7 +241,6 @@ impl ExtensionHost {
         self.dispatch(method, params, self.timeout)?.wait()
     }
 
-    /// Keep pumping host notifications while the webview handler awaits user consent.
     pub fn send_webview_message_deferred(
         &mut self,
         handle: &str,
@@ -268,13 +253,11 @@ impl ExtensionHost {
         )
     }
 
-    /// Register a Node extension directory; returns its id (`publisher.name`).
     pub fn load_extension(&mut self, dir: &Path) -> Result<String, HostError> {
         let v = self.request("extension.load", json!({ "path": dir.to_string_lossy() }))?;
         Ok(v["id"].as_str().unwrap_or_default().to_owned())
     }
 
-    /// Load the entry point and call `activate`. Returns the resulting state.
     pub fn activate_extension(&mut self, id: &str) -> Result<String, HostError> {
         let v = self.request("extension.activate", json!({ "id": id }))?;
         Ok(v["state"].as_str().unwrap_or_default().to_owned())
@@ -292,13 +275,11 @@ impl ExtensionHost {
         )
     }
 
-    /// Ask the host to create the view for a registered `viewType`; returns its webview handle.
     pub fn resolve_view(&mut self, view_type: &str) -> Result<String, HostError> {
         let v = self.request("webview.resolveView", json!({ "viewType": view_type }))?;
         Ok(v["handle"].as_str().unwrap_or_default().to_owned())
     }
 
-    /// Deliver a message the webview posted (`acquireVsCodeApi().postMessage`) to the extension.
     pub fn send_webview_message(&mut self, handle: &str, message: Value) -> Result<(), HostError> {
         self.request(
             "webview.message",
@@ -312,23 +293,19 @@ impl ExtensionHost {
             .map(|_| ())
     }
 
-    /// Deliver an OAuth/URI callback; the URI authority must be the target extension id.
     pub fn handle_uri(&mut self, uri: &str) -> Result<(), HostError> {
         self.request("uri.handle", json!({ "uri": uri }))
             .map(|_| ())
     }
 
-    /// Drain notifications received so far.
     pub fn take_notifications(&mut self) -> Vec<Notification> {
         self.notifications.try_iter().collect()
     }
 
-    /// Wait up to `timeout` for the next notification.
     pub fn recv_notification(&mut self, timeout: Duration) -> Option<Notification> {
         self.notifications.recv_timeout(timeout).ok()
     }
 
-    /// Ask the host to exit and reap the process.
     pub fn shutdown(mut self) -> Result<(), HostError> {
         let _ = self.request("shutdown", Value::Null);
         self.child.wait()?;

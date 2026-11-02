@@ -1,7 +1,3 @@
-// Compatibility probe: load + activate a real extracted extension in the host (in-process).
-// Usage: node scripts/probe-extension.mjs <extracted-extension-dir> [--discover] [--timeout=ms]
-//   default    strict mode: reports the first unsupported API (what a user would hit)
-//   --discover collect every unsupported API reached during activation (inventory only)
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -17,8 +13,6 @@ if (!dir) {
   process.exit(2);
 }
 
-// Isolate the vendor code from the real user profile: extensions write to ~/.claude, %APPDATA% etc.
-// (Claude Code, for one, drops an IDE lock file under ~/.claude/ide that other CLI sessions may pick up).
 const sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), "nanti-probe-home-"));
 for (const [k, sub] of [["USERPROFILE", ""], ["HOME", ""], ["APPDATA", "AppData/Roaming"], ["LOCALAPPDATA", "AppData/Local"]]) {
   const p = path.join(sandboxHome, sub);
@@ -47,7 +41,6 @@ const timer = new Promise((r) => setTimeout(() => r({ error: { code: "Timeout", 
 const activated = await Promise.race([host.handle(req(3, "extension.activate", { id: loaded.result.id })), timer]);
 const state = await host.handle(req(4, "extension.state", { id: loaded.result.id }));
 
-// Optional: resolve a webview view (AI-08) and summarise what the extension rendered.
 let view = null;
 const resolveArg = args.find((a) => a.startsWith("--resolve="))?.split("=")[1];
 if (resolveArg && state.result?.state === "activated") {

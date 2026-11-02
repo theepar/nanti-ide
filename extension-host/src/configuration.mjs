@@ -1,6 +1,3 @@
-// workspace.getConfiguration backing store (VH-09).
-// Precedence: workspace value > global value > manifest default. Persistence belongs to the IDE:
-// every `update` is forwarded as a `workspace.configuration.update` notification.
 
 export const CONFIGURATION_TARGET = Object.freeze({ Global: 1, Workspace: 2, WorkspaceFolder: 3 });
 
@@ -11,7 +8,6 @@ export class ConfigStore {
   #notify;
   #onChange;
 
-  /** @param {{settings?: {global?: object, workspace?: object}, notify: Function, onChange: (e: object) => void}} o */
   constructor({ settings = {}, notify, onChange }) {
     this.#notify = notify;
     this.#onChange = onChange;
@@ -19,7 +15,6 @@ export class ConfigStore {
     for (const [k, v] of Object.entries(settings.workspace ?? {})) this.#workspace.set(k, v);
   }
 
-  /** `contributes.configuration` is an object or an array of objects with `properties`. */
   registerDefaults(configuration) {
     const sections = Array.isArray(configuration) ? configuration : configuration ? [configuration] : [];
     for (const section of sections) {

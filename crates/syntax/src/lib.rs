@@ -1,10 +1,3 @@
-//! Syntax highlighting with tree-sitter (ED-06): Rust, JavaScript/JSX, TypeScript/TSX, Go, JSON,
-//! Dart and Markdown (block level). Output is per-line spans with byte ranges relative to the line
-//! start, never crossing a line break, so the editor can style each line independently.
-//!
-//! Limits: highlighting is purely syntactic (tree-sitter highlight queries, no semantic info);
-//! Markdown has no inline styling (emphasis, links inside paragraphs); JSON does not distinguish
-//! keys from string values; files above `MAX_BYTES` are not highlighted.
 
 use std::collections::HashMap;
 use std::ops::Range;
@@ -15,7 +8,6 @@ use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter}
 mod analysis;
 pub use analysis::{diagnostics, outline, Diagnostic, Symbol};
 
-/// Files larger than this are shown unhighlighted (re-parsing on every edit would lag).
 pub const MAX_BYTES: usize = 1_500_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -47,7 +39,6 @@ impl Language {
     }
 }
 
-/// What a span is, coarse enough to map to a theme color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Token {
     Attribute,
@@ -68,12 +59,10 @@ pub enum Token {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LineSpan {
-    /// Byte range within the line text (line terminator excluded).
     pub range: Range<usize>,
     pub token: Token,
 }
 
-/// Capture names we ask tree-sitter to report, in this order (index = `Highlight.0`).
 const NAMES: &[&str] = &[
     "attribute",
     "comment",
@@ -159,7 +148,6 @@ fn config_for(lang: Language) -> Option<HighlightConfiguration> {
             "",
             tree_sitter_javascript::LOCALS_QUERY,
         ),
-        // The TypeScript query only adds TS-specific rules; JS rules must come first.
         Language::TypeScript => build(
             tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
             "typescript",
@@ -222,7 +210,6 @@ fn config_for(lang: Language) -> Option<HighlightConfiguration> {
     }
 }
 
-/// Reusable highlighter: grammar configurations are built lazily and kept.
 #[derive(Default)]
 pub struct SyntaxHighlighter {
     configs: HashMap<Language, Option<HighlightConfiguration>>,
@@ -234,8 +221,6 @@ impl SyntaxHighlighter {
         Self::default()
     }
 
-    /// Highlight `source`. Returns one `Vec<LineSpan>` per line (split on `\n`), or `None` if the
-    /// grammar failed to load, the parse failed, or the file is above `MAX_BYTES`.
     pub fn highlight(&mut self, lang: Language, source: &str) -> Option<Vec<Vec<LineSpan>>> {
         if source.len() > MAX_BYTES {
             return None;
@@ -278,7 +263,6 @@ impl SyntaxHighlighter {
     }
 }
 
-/// Add `token` over `range` (absolute bytes), split per line and clipped before `\n` / `\r\n`.
 fn push_split(
     source: &str,
     line_starts: &[usize],
@@ -292,7 +276,7 @@ fn push_split(
         let start = line_starts[line];
         let mut text_end = line_starts.get(line + 1).map_or(source.len(), |&n| n - 1);
         if text_end > start && source.as_bytes()[text_end - 1] == b'\r' && text_end < source.len() {
-            text_end -= 1; // exclude the CR of a CRLF terminator
+            text_end -= 1;
         }
         let seg_end = range.end.min(text_end);
         if seg_end > pos {
@@ -301,7 +285,6 @@ fn push_split(
                 token,
             });
         }
-        // continue on the next line
         pos = line_starts.get(line + 1).copied().unwrap_or(range.end);
         line += 1;
     }

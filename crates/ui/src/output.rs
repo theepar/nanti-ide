@@ -1,15 +1,11 @@
-//! The Output panel: a bounded log of what the IDE itself did (saves, git, file operations, tasks,
-//! extension installs). It records real events only.
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-/// Oldest lines are dropped beyond this many.
 pub const MAX_LINES: usize = 2_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutputLine {
-    /// Time since the IDE started.
     pub at: Duration,
     pub channel: String,
     pub text: String,
@@ -34,7 +30,6 @@ impl OutputLog {
         }
     }
 
-    /// Append `text` (one line per line of text) to `channel`.
     pub fn push(&mut self, channel: &str, text: &str) {
         let at = self.start.elapsed();
         for line in text.lines().filter(|l| !l.trim().is_empty()) {
@@ -65,7 +60,6 @@ impl OutputLog {
         self.lines.iter()
     }
 
-    /// `[12.3s]` style stamp for display.
     pub fn stamp(line: &OutputLine) -> String {
         format!("{:>7.1}s", line.at.as_secs_f32())
     }

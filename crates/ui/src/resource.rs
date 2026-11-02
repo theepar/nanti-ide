@@ -1,10 +1,3 @@
-//! Resource protocol for extension webviews (PRD 7.2 #5).
-//!
-//! Content is served from `https://nanti-resource.localhost` (wry custom protocol `nanti-resource`):
-//!   `/html`              the HTML the extension assigned to `webview.html`
-//!   `/file/<enc path>`   a local file, ONLY if it resolves inside a `localResourceRoot`
-//! Deny by default: with no roots configured nothing under `/file/` is served. Paths are
-//! canonicalized before the check, so `..` and symlinks cannot escape a root.
 
 use std::path::{Path, PathBuf};
 
@@ -73,7 +66,6 @@ pub fn mime_for(path: &Path) -> &'static str {
     }
 }
 
-/// `path` is the request path only (no query), e.g. `/file/C%3A%5Cx%5Cmain.js`.
 pub fn serve(state: &ResourceState, path: &str) -> Served {
     if path == "/html" {
         return Served {

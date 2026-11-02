@@ -1,4 +1,3 @@
-//! Workbench state without any GUI types, so behaviour is unit-testable (CT-001, ED-01..03).
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -17,11 +16,8 @@ use crate::scm::{DiffState, DiffView, Job, ScmState};
 use crate::search::SearchState;
 use crate::tasks::Task;
 
-/// Directories never listed in the explorer (heavy or tool-owned).
 const HIDDEN_DIRS: [&str; 3] = [".git", "node_modules", "target"];
-/// One indentation level (Tab, auto-indent).
 pub const INDENT_UNIT: &str = "    ";
-/// Files above this size are not loaded into the editor (viewer limit for now).
 pub const MAX_OPEN_BYTES: u64 = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,13 +79,10 @@ impl PanelTab {
 
 pub enum TabContent {
     Text(Editor),
-    /// File could not be shown (binary, too large, unreadable); the reason is displayed.
     Unavailable(String),
-    /// Read-only git diff of one file (index or working tree).
     Diff(DiffView),
 }
 
-/// What the file looked like on disk when we last read or wrote it (external-change detection).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DiskStamp {
     pub modified: Option<SystemTime>,
@@ -119,26 +112,19 @@ impl Tab {
     }
 }
 
-/// A question the user must answer before the workbench continues (never a silent discard/overwrite).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Prompt {
-    /// Closing a tab that has unsaved changes.
     CloseDirty(usize),
-    /// The file changed on disk since it was opened; saving would overwrite those changes.
     SaveConflict {
         index: usize,
         reason: String,
         then_close: bool,
     },
-    /// Closing the window with unsaved tabs.
     QuitDirty,
-    /// Move a file or folder to the Recycle Bin.
     DeleteItem(PathBuf),
-    /// Remove an installed extension.
     RemoveExtension(PathBuf),
 }
 
-/// Right-click menu on an explorer entry, anchored at a window position.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContextMenu {
     pub path: PathBuf,
@@ -155,8 +141,6 @@ pub enum SaveOutcome {
     Failed(String),
 }
 
-/// A native file/folder dialog the UI layer must show. The model only records the request so it
-/// stays free of windowing code (and tests never open a dialog).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PickRequest {
     File,
@@ -183,14 +167,11 @@ pub enum DocSyncEvent {
     Close {
         uri: String,
     },
-    /// The workspace folder changed: language servers started for the old folder must be stopped.
     Reset,
 }
 
-/// Something only the UI layer can do (it owns the PTYs); raised by commands, consumed by the UI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminalRequest {
-    /// Make sure at least one terminal exists.
     Ensure,
     New,
     KillActive,
@@ -207,15 +188,11 @@ pub struct Model {
     pub palette: Option<Palette>,
     pub find: Option<FindState>,
     pub layout: Layout,
-    /// The terminal view owns the keyboard.
     pub terminal_focused: bool,
     pub terminal_request: Option<TerminalRequest>,
     pub search: SearchState,
     pub scm: ScmState,
-    /// Explorer entry the file commands act on.
     pub explorer_sel: Option<PathBuf>,
-    /// Bumped whenever the IDE itself changes the file tree (create, rename, delete, refresh) so
-    /// the UI's cached listing is rebuilt at once instead of waiting for its time limit.
     pub explorer_gen: u64,
     pub menu_open: Option<MenuKind>,
     pub context_menu: Option<ContextMenu>,
@@ -223,20 +200,12 @@ pub struct Model {
     pub problems: Problems,
     pub tasks: Vec<Task>,
     pub extensions: Vec<Extension>,
-    /// Where extensions and the panel choice are stored (`None` in unit tests).
     pub config_dir: Option<PathBuf>,
-    /// Extension folder running in the right-hand panel in this session.
     pub panel_extension: Option<PathBuf>,
-    /// Text the UI layer must put on the clipboard.
     pub clipboard_request: Option<String>,
-    /// A command asked the application to quit.
     pub quit_request: bool,
-    /// A native dialog the UI layer must show (see [`PickRequest`]).
     pub pick_request: Option<PickRequest>,
-    /// The app serves `pick_request`s with native dialogs. Off (the default) in tests, where
-    /// "Install from VSIX" falls back to a text prompt and Open File/Folder do nothing.
     pub native_dialogs: bool,
-    /// Command line the UI layer must type into the terminal.
     pub terminal_run: Option<String>,
     pub doc_sync_events: Vec<DocSyncEvent>,
     pub ext_query: TextField,
@@ -244,35 +213,25 @@ pub struct Model {
     pub marketplace_results: Vec<MarketplaceExtension>,
     pub marketplace_searching: bool,
     pub marketplace_message: Option<String>,
-    /// The query whose answer is shown, so "no results" differs from "never searched".
     pub marketplace_query: Option<String>,
-    /// The listed extensions are the recommendations, not the answer to a search.
     pub marketplace_recommended: bool,
-    /// The recommendations were requested once already (a failure is retried by Refresh).
     pub(crate) recommend_tried: bool,
-    /// The app (not a test) may use the network for the marketplace.
     pub marketplace_enabled: bool,
-    /// Download URL of the extension being installed (one at a time).
     pub installing: Option<String>,
-    /// How much of that download has arrived (updated by the worker thread).
     pub install_progress: std::sync::Arc<crate::extensions::Progress>,
     pub(crate) progress_seen: u64,
-    /// Local icon files of marketplace extensions (downloaded in the background), by id.
     pub ext_icons: std::collections::HashMap<String, PathBuf>,
     pub(crate) icons_requested: std::collections::HashSet<String>,
     pub(crate) icon_tx: std::sync::mpsc::Sender<(String, PathBuf)>,
     pub(crate) icon_rx: std::sync::mpsc::Receiver<(String, PathBuf)>,
-    /// The extension whose detail page is shown in the editor area.
     pub ext_detail: Option<ExtDetail>,
     pub(crate) readme_rx: Option<
         std::sync::mpsc::Receiver<(String, Result<crate::extensions::ExtExtra, String>)>,
     >,
-    // Search and install run on worker threads; their answers arrive here (`pump_marketplace`).
     pub(crate) marketplace_rx:
         Option<std::sync::mpsc::Receiver<Result<Vec<MarketplaceExtension>, String>>>,
     pub(crate) install_rx: Option<std::sync::mpsc::Receiver<Result<Extension, String>>>,
     pub(crate) outline_cache: std::cell::RefCell<Option<(PathBuf, u64, Vec<syntax::Symbol>)>>,
-    /// Last user-visible status ("Saved x", "Save failed: ...").
     pub message: Option<String>,
 }
 
@@ -337,12 +296,10 @@ impl Model {
         }
     }
 
-    /// The file tree changed on disk through us: drop any cached listing.
     pub fn invalidate_explorer(&mut self) {
         self.explorer_gen = self.explorer_gen.wrapping_add(1);
     }
 
-    /// Cheap fingerprint of everything `visible_entries` depends on besides the disk itself.
     pub fn explorer_signature(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -354,7 +311,6 @@ impl Model {
         h.finish()
     }
 
-    /// Flattened, ordered list of what the explorer shows (directories first, then by name).
     pub fn visible_entries(&self) -> Vec<Entry> {
         let mut out = Vec::new();
         let root_name = self.root.file_name().map_or_else(
@@ -414,7 +370,6 @@ impl Model {
         }
     }
 
-    /// Open a new workspace root directory.
     pub fn open_folder(&mut self, folder: PathBuf) {
         if !folder.is_dir() {
             return;
@@ -425,9 +380,7 @@ impl Model {
         self.scm = ScmState::new(folder.clone());
         self.scm.enable();
         self.outline_cache = std::cell::RefCell::new(None);
-        // Tell the language servers / extension host about every document that goes away, then
-        // restart the servers for the new root. Otherwise they keep the old folder's files (and
-        // memory) alive and diagnose against the wrong project.
+        // Otherwise they keep the old folder's files (and memory) alive and diagnose against the wrong project.
         for t in self.tabs.iter().filter(|t| !t.is_dirty()) {
             let uri = format!("file:///{}", t.path.to_string_lossy().replace('\\', "/"));
             self.doc_sync_events.push(DocSyncEvent::Close { uri });
@@ -438,7 +391,6 @@ impl Model {
         self.message = Some(format!("Opened folder {}", self.root.display()));
     }
 
-    /// Open `path` in a tab (or focus the existing tab). Never loads huge/binary files.
     pub fn open_file(&mut self, path: &Path) {
         self.ext_detail = None;
         if let Some(i) = self
@@ -490,8 +442,6 @@ impl Model {
         }
     }
 
-    /// Close a tab. A tab with unsaved changes is NOT closed: a prompt is raised instead (CT-001).
-    /// Returns true if the tab was closed now.
     pub fn close_tab(&mut self, index: usize) -> bool {
         if index >= self.tabs.len() {
             return false;
@@ -524,16 +474,10 @@ impl Model {
         }
     }
 
-    // ---- source control ----
-
-    /// Start talking to git: first status now, then periodically (see `ScmState::enable`).
     pub fn enable_source_control(&mut self) {
         self.scm.enable();
     }
 
-    /// Open (or refresh) the diff of `rel` (repository-relative) for the Index or the Working Tree.
-    /// A conflicted file has no meaningful two-way diff: it opens in the editor so the markers can
-    /// be resolved.
     pub fn open_diff(&mut self, rel: &str, staged: bool) {
         self.ext_detail = None;
         let conflicted = self
@@ -590,7 +534,6 @@ impl Model {
         self.tabs.get_mut(i).map(|t| &mut t.content)
     }
 
-    /// Ask git again for every open diff tab (the repository changed under them).
     pub fn reload_diff_tabs(&mut self) {
         let keys: Vec<(String, bool)> = self
             .tabs
@@ -613,7 +556,6 @@ impl Model {
         }
     }
 
-    /// Apply finished git work. Returns true if the UI needs a redraw.
     pub fn pump_scm(&mut self) -> bool {
         let polled = self.scm.poll();
         for (key, result) in polled.diffs {
@@ -640,7 +582,6 @@ impl Model {
         polled.changed
     }
 
-    /// Status bar text for the branch: from `git status` when known, else from `.git/HEAD`.
     pub fn branch_label(&self) -> String {
         if let Some(l) = self.scm.branch_label() {
             return format!("⎇ {l}");
@@ -655,14 +596,12 @@ impl Model {
             .map_or_else(|| "no repository".to_owned(), |b| format!("⎇ {b}"))
     }
 
-    /// Run an editing command on the active text editor, if there is one.
     fn edit_active(&mut self, f: impl FnOnce(&mut Editor)) {
         if let Some(e) = self.active_editor_mut() {
             f(e);
         }
     }
 
-    /// Comment or uncomment the selected lines using the file type's line comment marker.
     pub fn toggle_comment(&mut self) {
         let Some(path) = self.active().map(|t| t.path.clone()) else {
             return;
@@ -679,8 +618,6 @@ impl Model {
         self.tabs.iter().filter(|t| t.is_dirty()).count()
     }
 
-    /// Save tab `index`. Unless `force`, refuses (Conflict) when the file changed on disk since it
-    /// was opened or last saved, so external edits are never silently overwritten (ED-05).
     pub fn save_tab(&mut self, index: usize, force: bool) -> SaveOutcome {
         let Some(tab) = self.tabs.get_mut(index) else {
             return SaveOutcome::NothingToSave;
@@ -740,7 +677,6 @@ impl Model {
         }
     }
 
-    /// Discard in-memory edits and reload the tab from disk.
     pub fn reload_tab(&mut self, index: usize) {
         if let Some(tab) = self.tabs.get_mut(index) {
             tab.content = load(&tab.path);
@@ -748,7 +684,6 @@ impl Model {
         }
     }
 
-    /// The window wants to close. True means "go ahead"; false means a prompt was raised.
     pub fn request_quit(&mut self) -> bool {
         if self.dirty_count() == 0 {
             return true;
@@ -757,8 +692,6 @@ impl Model {
         false
     }
 
-    /// Primary button of the current prompt (Save / Overwrite / Save all). Returns true when the
-    /// window should now close.
     pub fn resolve_save(&mut self) -> bool {
         match self.prompt.take() {
             Some(Prompt::CloseDirty(i)) => {
@@ -812,7 +745,6 @@ impl Model {
         }
     }
 
-    /// Secondary button (Don't save / Reload from disk / Discard and quit). True = close window.
     pub fn resolve_discard(&mut self) -> bool {
         match self.prompt.take() {
             Some(Prompt::CloseDirty(i)) => {
@@ -850,12 +782,9 @@ impl Model {
         self.palette = None;
     }
 
-    /// Run the selected palette entry and close the palette. Returns the command that was run, if
-    /// the entry was a command (opening a file needs no further UI work).
     pub fn accept_palette(&mut self) -> Option<Command> {
         let action = self.palette.as_ref()?.selected_action();
         if let Some(PaletteAction::Submit(kind, text)) = &action {
-            // A refused prompt stays open and says why; it closes only on success.
             match self.submit_input(kind.clone(), text) {
                 Ok(()) => self.palette = None,
                 Err(e) => {
@@ -880,7 +809,6 @@ impl Model {
         }
     }
 
-    /// Execute a command's state change. (Clipboard and focus are the UI layer's business.)
     pub fn run_command(&mut self, command: Command) {
         match command {
             Command::CommandPalette => self.open_palette(PaletteMode::Commands),
@@ -950,7 +878,6 @@ impl Model {
             Command::GitStageAll => self.scm.stage_all(),
             Command::GitUnstageAll => self.scm.unstage_all(),
             Command::GitCommit => {
-                // The message is typed in the Source Control view: bring the user there.
                 self.show_activity(Activity::SourceControl);
                 if self.scm.commit().is_err() && self.scm.message.text().trim().is_empty() {
                     self.focus_editor_inputs();
@@ -1045,9 +972,6 @@ impl Model {
         }
     }
 
-    // ---- find / replace / search ----
-
-    /// Open the find bar (with the replace row if `show_replace`), prefilled from a one-line selection.
     pub fn open_find(&mut self, show_replace: bool) {
         let selected = match self.active().map(|t| &t.content) {
             Some(TabContent::Text(e)) if e.has_selection() => Some(e.selected_text()),
@@ -1077,7 +1001,6 @@ impl Model {
         self.find.as_ref().map_or(FindFocus::Editor, |f| f.focus)
     }
 
-    /// Recompute matches for the active file (cheap if nothing changed).
     pub fn refresh_find(&mut self) {
         let (Some(find), Some(i)) = (self.find.as_mut(), self.active_tab) else {
             return;
@@ -1092,7 +1015,6 @@ impl Model {
         }
     }
 
-    /// Make the editor the owner of keyboard input again (closes neither find nor search).
     pub fn focus_editor_inputs(&mut self) {
         if let Some(f) = self.find.as_mut() {
             f.focus = FindFocus::Editor;
@@ -1103,7 +1025,6 @@ impl Model {
         self.ext_query_focused = false;
     }
 
-    /// After the find query or its options changed: refresh and jump to the nearest match.
     pub fn find_select_nearest(&mut self) {
         self.refresh_find();
         let (Some(find), Some(i)) = (self.find.as_mut(), self.active_tab) else {
@@ -1180,13 +1101,11 @@ impl Model {
         ));
     }
 
-    /// Run the workspace search with the sidebar's current query and options.
     pub fn run_search(&mut self) {
         let root = self.root.clone();
         self.search.run(&root);
     }
 
-    /// Open `path` and select the match at (line, col, len) — a search result click.
     pub fn open_at(&mut self, path: &Path, line: usize, col: usize, len: usize) {
         self.open_file(path);
         if let Some(e) = self.active_editor_mut() {
@@ -1222,7 +1141,6 @@ impl Model {
         self.prompt = None;
     }
 
-    /// Clicking the active activity icon hides the sidebar; clicking another shows it.
     pub fn select_activity(&mut self, activity: Activity) {
         if self.activity == activity {
             self.layout.sidebar = !self.layout.sidebar;
@@ -1235,7 +1153,6 @@ impl Model {
         self.active_tab.and_then(|i| self.tabs.get(i))
     }
 
-    /// Current git branch read from `.git/HEAD` (no git subprocess); `None` outside a repo.
     pub fn git_branch(&self) -> Option<String> {
         let head = std::fs::read_to_string(self.root.join(".git").join("HEAD")).ok()?;
         let head = head.trim();
@@ -1246,8 +1163,6 @@ impl Model {
     }
 }
 
-/// Write via a temp file in the same directory and rename over the target, so a crash mid-write
-/// leaves either the old or the new file, never a truncated one.
 fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
     let name = path
         .file_name()
@@ -1280,7 +1195,6 @@ fn load(path: &Path) -> TabContent {
     }
 }
 
-/// Line comment marker of a file type (`None` where there is none, such as JSON or Markdown).
 pub fn comment_prefix(path: &Path) -> Option<&'static str> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
     Some(match ext.as_str() {
@@ -1377,7 +1291,6 @@ mod tests {
         assert!(!m.pump_marketplace(), "nothing to fetch outside the Extensions view");
         assert!(m.marketplace_rx.is_none());
 
-        // Once recommended (or failed), it is not requested again until Refresh clears the flag.
         m.activity = Activity::Extensions;
         m.recommend_tried = true;
         assert!(!m.pump_marketplace());
@@ -1431,7 +1344,6 @@ mod tests {
         assert!(!m.marketplace_searching);
         assert!(m.marketplace_message.as_deref().is_some_and(|t| t.contains("unexpectedly")));
 
-        // an empty query clears everything and forgets the old answer
         m.search_marketplace("   ");
         assert!(m.marketplace_results.is_empty() && m.marketplace_query.is_none());
         assert!(m.marketplace_message.is_none());
@@ -1471,7 +1383,7 @@ mod tests {
         let b = workspace("switch-b");
         let mut m = Model::new(a.0.clone());
         m.open_file(&a.0.join("b.txt"));
-        m.doc_sync_events.clear(); // ignore the Open event
+        m.doc_sync_events.clear();
         m.open_folder(b.0.clone());
         let uri = format!(
             "file:///{}",
@@ -1493,7 +1405,7 @@ mod tests {
         assert!(names(&m).contains(&"    main.rs".to_string()));
         m.toggle_dir(&ws.0.join("src"));
         assert!(!names(&m).contains(&"    main.rs".to_string()));
-        m.toggle_dir(&ws.0); // collapse root
+        m.toggle_dir(&ws.0);
         assert_eq!(names(&m).len(), 1);
     }
 
@@ -1537,13 +1449,13 @@ mod tests {
             m.open_file(&ws.0.join(f));
         }
         m.activate_tab(1);
-        m.close_tab(0); // active moves left with the list
+        m.close_tab(0);
         assert_eq!(m.active().unwrap().title, "b.txt");
-        m.close_tab(0); // closing the active one selects its neighbour
+        m.close_tab(0);
         assert_eq!(m.active().unwrap().title, "blob.bin");
         m.close_tab(0);
         assert!(m.active().is_none());
-        m.close_tab(5); // out of range is a no-op
+        m.close_tab(5);
     }
 
     #[test]
@@ -1570,8 +1482,6 @@ mod tests {
         assert_eq!(language_of(Path::new("a.rs")), "Rust");
         assert_eq!(language_of(Path::new("README")), "Plain Text");
     }
-
-    // ---- editing, saving, prompts ----
 
     fn type_into_active(m: &mut Model, text: &str) {
         let e = m.active_editor_mut().expect("text tab");
@@ -1664,7 +1574,7 @@ mod tests {
         ));
         assert_eq!(disk(&f), b"theirs\n", "nothing was overwritten");
         assert!(m.tabs[0].is_dirty(), "my edits are still there");
-        assert!(!m.resolve_save()); // overwrite
+        assert!(!m.resolve_save());
         assert_eq!(disk(&f), b"bee\nmine");
         assert!(!m.tabs[0].is_dirty());
     }
@@ -1679,7 +1589,7 @@ mod tests {
         std::fs::write(&f, "theirs\n").unwrap();
         touch_future(&f);
         m.save_active();
-        m.resolve_discard(); // reload from disk
+        m.resolve_discard();
         match &m.tabs[0].content {
             TabContent::Text(e) => assert_eq!(e.text(), "theirs\n"),
             TabContent::Unavailable(r) => panic!("{r}"),
@@ -1772,8 +1682,6 @@ mod tests {
         assert!(m.close_tab(0), "nothing to lose");
     }
 
-    // ---- palette and commands ----
-
     #[test]
     fn quick_open_accept_opens_the_chosen_file() {
         let ws = workspace("qo");
@@ -1827,7 +1735,7 @@ mod tests {
         let mut m = Model::new(ws.0.clone());
         m.open_at(&ws.0.join("t.txt"), 1, 4, 6);
         assert_eq!(m.active_editor_mut().unwrap().selected_text(), "needle");
-        m.open_at(&ws.0.join("t.txt"), 99, 0, 3); // far beyond the file
+        m.open_at(&ws.0.join("t.txt"), 99, 0, 3);
         let e = m.active_editor_mut().unwrap();
         assert!(e.selection().end <= e.buffer().len_chars());
     }
@@ -1856,7 +1764,7 @@ mod tests {
         m.close_find();
         assert!(m.find.is_none());
         assert_eq!(m.find_focus(), FindFocus::Editor);
-        m.run_command(Command::FindNext); // with the bar closed it just opens it
+        m.run_command(Command::FindNext);
         assert!(m.find.is_some());
     }
 
@@ -1908,7 +1816,7 @@ mod tests {
             (true, true, PanelTab::Terminal)
         );
         assert_eq!(m.terminal_request.take(), Some(TerminalRequest::Ensure));
-        m.run_command(Command::ToggleTerminal); // focused + visible -> hide
+        m.run_command(Command::ToggleTerminal);
         assert_eq!((m.layout.panel, m.terminal_focused), (false, false));
         m.run_command(Command::NewTerminal);
         assert_eq!((m.layout.panel, m.terminal_focused), (true, true));
@@ -1949,9 +1857,9 @@ mod tests {
         m.run_command(Command::MaximizePanel);
         assert!(!m.layout.panel_maximized, "second press restores");
         m.run_command(Command::MaximizePanel);
-        m.run_command(Command::TogglePanel); // hiding also drops maximize, or the editor would stay hidden
+        m.run_command(Command::TogglePanel);
         assert!(!m.layout.panel && !m.layout.panel_maximized);
-        m.run_command(Command::MaximizePanel); // from hidden: shows it maximized
+        m.run_command(Command::MaximizePanel);
         assert!(m.layout.panel && m.layout.panel_maximized);
         m.layout.sidebar_width = 480.0;
         m.run_command(Command::ResetLayout);
