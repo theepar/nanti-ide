@@ -350,6 +350,8 @@ pub struct Workbench {
     commit_card: Option<views::commit_tip::CardAnchor>,
     commit_tip: Option<gpui::Entity<views::commit_tip::CommitTip>>,
     card_gen: u64,
+    hovered_commit: Option<String>,
+    card_hovered: bool,
     card_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     terminals: Vec<TerminalSession>,
     active_terminal: usize,
@@ -402,6 +404,8 @@ impl Workbench {
             commit_card: None,
             commit_tip: None,
             card_gen: 0,
+            hovered_commit: None,
+            card_hovered: false,
             card_bounds: Rc::new(Cell::new(None)),
             terminals: Vec::new(),
             active_terminal: 0,
@@ -4225,7 +4229,7 @@ impl Workbench {
                             if *hovered {
                                 wb.hover_commit(&hover_hash, at, cx);
                             } else {
-                                wb.leave_commit(cx);
+                                wb.leave_commit(&hover_hash, cx);
                             }
                         });
                     })

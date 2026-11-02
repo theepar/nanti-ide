@@ -23,6 +23,8 @@ pub(crate) struct CardAnchor {
 
 impl Workbench {
     pub(crate) fn hover_commit(&mut self, hash: &str, at: Point<Pixels>, cx: &mut Context<Self>) {
+        // GPUI runs the handler of the row that gained the pointer before the one that lost it, so who holds the pointer is tracked by name.
+        self.hovered_commit = Some(hash.to_owned());
         self.card_gen += 1;
         let gen_ = self.card_gen;
         let s = &mut self.model.scm;
@@ -72,13 +74,21 @@ impl Workbench {
         cx.notify();
     }
 
-    pub(crate) fn leave_commit(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn leave_commit(&mut self, hash: &str, cx: &mut Context<Self>) {
+        if self.hovered_commit.as_deref() == Some(hash) {
+            self.hovered_commit = None;
+            self.schedule_card_hide(cx);
+        }
+    }
+
+    fn schedule_card_hide(&mut self, cx: &mut Context<Self>) {
         self.card_gen += 1;
         let gen_ = self.card_gen;
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(HIDE_DELAY).await;
             let _ = this.update(cx, |wb, cx| {
-                if wb.card_gen == gen_ && wb.commit_card.take().is_some() {
+                let idle = wb.hovered_commit.is_none() && !wb.card_hovered;
+                if wb.card_gen == gen_ && idle && wb.commit_card.take().is_some() {
                     cx.notify();
                 }
             });
@@ -86,8 +96,13 @@ impl Workbench {
         .detach();
     }
 
-    pub(crate) fn keep_commit_card(&mut self) {
-        self.card_gen += 1;
+    pub(crate) fn hover_card(&mut self, hovered: bool, cx: &mut Context<Self>) {
+        self.card_hovered = hovered;
+        if hovered {
+            self.card_gen += 1;
+        } else if self.hovered_commit.is_none() {
+            self.schedule_card_hide(cx);
+        }
     }
 
     pub(crate) fn commit_card_overlay(
@@ -114,11 +129,7 @@ impl Workbench {
             .absolute()
             .left(px(left))
             .on_hover(cx.listener(|this, hovered: &bool, _w, cx| {
-                if *hovered {
-                    this.keep_commit_card();
-                } else {
-                    this.leave_commit(cx);
-                }
+                this.hover_card(*hovered, cx);
             }))
             .child(tip)
             .child(
