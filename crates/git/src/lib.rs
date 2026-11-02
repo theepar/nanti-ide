@@ -8,6 +8,7 @@ pub const STATUS_TIMEOUT: Duration = Duration::from_secs(20);
 pub const DIFF_TIMEOUT: Duration = Duration::from_secs(10);
 pub const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 pub const COMMIT_TIMEOUT: Duration = Duration::from_secs(120);
+pub const NETWORK_TIMEOUT: Duration = Duration::from_secs(180);
 pub const MAX_STATUS_ENTRIES: usize = 5_000;
 pub const MAX_DIFF_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_DIFF_LINES: usize = 20_000;
@@ -392,6 +393,92 @@ pub struct DiffLine {
 pub struct Hunk {
     pub header: String,
     pub lines: Vec<DiffLine>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Commit {
+    pub hash: String,
+    pub author: String,
+    pub time: i64,
+    pub refs: Vec<String>,
+    pub parents: usize,
+    pub subject: String,
+}
+
+impl Commit {
+    pub fn short(&self) -> &str {
+        &self.hash[..self.hash.len().min(7)]
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitFile {
+    pub letter: char,
+    pub path: String,
+    pub old: Option<String>,
+}
+
+fn check_hash(hash: &str) -> Result<(), GitError> {
+    if (7..=64).contains(&hash.len()) && hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+        Ok(())
+    } else {
+        Err(GitError::Rejected(format!("{hash:?} is not a commit id")))
+    }
+}
+
+pub fn parse_log(text: &str) -> Vec<Commit> {
+    text.split('\x1e')
+        .filter_map(|rec| {
+            let rec = rec.trim_matches(['\n', '\r']);
+            let mut f = rec.splitn(6, '\x1f');
+            let hash = f.next()?.trim().to_owned();
+            if hash.is_empty() {
+                return None;
+            }
+            let author = f.next()?.to_owned();
+            let time = f.next()?.trim().parse().unwrap_or(0);
+            let refs = f
+                .next()?
+                .split(", ")
+                .map(str::trim)
+                .filter(|r| !r.is_empty())
+                .map(str::to_owned)
+                .collect();
+            let parents = f.next()?.split_whitespace().count();
+            let subject = f.next().unwrap_or("").to_owned();
+            Some(Commit {
+                hash,
+                author,
+                time,
+                refs,
+                parents,
+                subject,
+            })
+        })
+        .collect()
+}
+
+pub fn parse_name_status(text: &str) -> Vec<CommitFile> {
+    text.lines()
+        .filter_map(|line| {
+            let mut cols = line.split('\t');
+            let status = cols.next()?.trim();
+            let letter = status.chars().next()?;
+            let first = cols.next()?.to_owned();
+            match (letter, cols.next()) {
+                ('R' | 'C', Some(new)) => Some(CommitFile {
+                    letter,
+                    path: new.to_owned(),
+                    old: Some(first),
+                }),
+                _ => Some(CommitFile {
+                    letter,
+                    path: first,
+                    old: None,
+                }),
+            }
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -844,6 +931,222 @@ impl Repo {
         self.ok(&["switch", "-c", name], WRITE_TIMEOUT).map(|_| ())
     }
 
+    fn upstream(&self) -> Option<String> {
+        let out = self
+            .exec(
+                &[
+                    "rev-parse",
+                    "--abbrev-ref",
+                    "--symbolic-full-name",
+                    "@{upstream}",
+                ],
+                None,
+                STATUS_TIMEOUT,
+                4096,
+                true,
+            )
+            .ok()?;
+        (out.code == Some(0)).then(|| String::from_utf8_lossy(&out.stdout).trim().to_owned())
+    }
+
+    fn remotes(&self) -> Result<Vec<String>, GitError> {
+        let out = self.ok(&["remote"], STATUS_TIMEOUT)?;
+        Ok(String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(|l| l.trim().to_owned())
+            .filter(|l| !l.is_empty())
+            .collect())
+    }
+
+    fn network_summary(out: &Output, fallback: &str) -> String {
+        let text = format!(
+            "{}\n{}",
+            out.stderr.trim(),
+            String::from_utf8_lossy(&out.stdout).trim()
+        );
+        text.lines()
+            .map(str::trim)
+            .rev()
+            .find(|l| !l.is_empty() && !l.starts_with("remote:"))
+            .unwrap_or(fallback)
+            .to_owned()
+    }
+
+    /// Pushes the current branch; a branch without an upstream is published to the only remote, or to origin.
+    pub fn push(&self) -> Result<String, GitError> {
+        let args: Vec<String> = if self.upstream().is_some() {
+            vec!["push".into()]
+        } else {
+            let remotes = self.remotes()?;
+            let remote = match remotes.as_slice() {
+                [] => {
+                    return Err(GitError::Rejected(
+                        "this repository has no remote to push to".into(),
+                    ));
+                }
+                [only] => only.clone(),
+                many if many.iter().any(|r| r == "origin") => "origin".to_owned(),
+                _ => {
+                    return Err(GitError::Rejected(
+                        "several remotes and none is called origin".into(),
+                    ));
+                }
+            };
+            vec![
+                "push".into(),
+                "--set-upstream".into(),
+                remote,
+                "HEAD".into(),
+            ]
+        };
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        let out = self.exec(&refs, None, NETWORK_TIMEOUT, 1024 * 1024, false)?;
+        if out.code == Some(0) {
+            Ok(Self::network_summary(&out, "Pushed"))
+        } else {
+            Err(GitError::Failed {
+                command: "push".into(),
+                code: out.code,
+                stderr: out.stderr,
+            })
+        }
+    }
+
+    /// Fast-forward only, so a pull never creates a merge commit or rewrites history behind the user's back.
+    pub fn pull(&self) -> Result<String, GitError> {
+        if self.upstream().is_none() {
+            return Err(GitError::Rejected(
+                "this branch has no upstream to pull from".into(),
+            ));
+        }
+        let out = self.exec(
+            &["pull", "--ff-only"],
+            None,
+            NETWORK_TIMEOUT,
+            1024 * 1024,
+            false,
+        )?;
+        if out.code == Some(0) {
+            Ok(Self::network_summary(&out, "Up to date"))
+        } else {
+            Err(GitError::Failed {
+                command: "pull".into(),
+                code: out.code,
+                stderr: out.stderr,
+            })
+        }
+    }
+
+    pub fn fetch(&self) -> Result<String, GitError> {
+        let out = self.exec(
+            &["fetch", "--prune"],
+            None,
+            NETWORK_TIMEOUT,
+            1024 * 1024,
+            false,
+        )?;
+        if out.code == Some(0) {
+            Ok("Fetched".to_owned())
+        } else {
+            Err(GitError::Failed {
+                command: "fetch".into(),
+                code: out.code,
+                stderr: out.stderr,
+            })
+        }
+    }
+
+    pub fn log(&self, skip: usize, limit: usize) -> Result<Vec<Commit>, GitError> {
+        if !self.has_head() {
+            return Ok(Vec::new());
+        }
+        let skip = skip.to_string();
+        let max = limit.to_string();
+        let out = self.exec(
+            &[
+                "log",
+                "--decorate=short",
+                "--skip",
+                &skip,
+                "--max-count",
+                &max,
+                "--date-order",
+                "--format=%H%x1f%an%x1f%at%x1f%D%x1f%P%x1f%s%x1e",
+            ],
+            None,
+            STATUS_TIMEOUT,
+            4 * 1024 * 1024,
+            true,
+        )?;
+        if out.code != Some(0) {
+            return Err(GitError::Failed {
+                command: "log".into(),
+                code: out.code,
+                stderr: out.stderr,
+            });
+        }
+        Ok(parse_log(&String::from_utf8_lossy(&out.stdout)))
+    }
+
+    pub fn commit_files(&self, hash: &str) -> Result<Vec<CommitFile>, GitError> {
+        check_hash(hash)?;
+        let out = self.exec(
+            &[
+                "show",
+                "--format=",
+                "--name-status",
+                "-M",
+                "--first-parent",
+                "-m",
+                hash,
+            ],
+            None,
+            DIFF_TIMEOUT,
+            1024 * 1024,
+            true,
+        )?;
+        if out.code != Some(0) {
+            return Err(GitError::Failed {
+                command: "show".into(),
+                code: out.code,
+                stderr: out.stderr,
+            });
+        }
+        Ok(parse_name_status(&String::from_utf8_lossy(&out.stdout)))
+    }
+
+    pub fn commit_diff(&self, hash: &str, path: &str, old: Option<&str>) -> Result<Diff, GitError> {
+        check_hash(hash)?;
+        let mut args = vec![
+            "show",
+            "--format=",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            "-U3",
+            "-M",
+            "--first-parent",
+            "-m",
+            hash,
+            "--",
+            path,
+        ];
+        if let Some(o) = old {
+            args.push(o);
+        }
+        let out = self.exec(&args, None, DIFF_TIMEOUT, MAX_DIFF_BYTES, true)?;
+        if out.code != Some(0) {
+            return Err(GitError::Failed {
+                command: "show".into(),
+                code: out.code,
+                stderr: out.stderr,
+            });
+        }
+        let mut d = parse_diff(&String::from_utf8_lossy(&out.stdout));
+        d.truncated |= out.truncated;
+        Ok(d)
+    }
+
     pub fn discard(&self, paths: &[String]) -> Result<(), GitError> {
         if paths.is_empty() {
             return Ok(());
@@ -993,6 +1296,45 @@ u UU N... 100644 100644 100644 100644 aaaa bbbb cccc conflict.txt\0\
         let st = parse_status(&raw);
         assert_eq!(st.entries.len(), MAX_STATUS_ENTRIES);
         assert!(st.truncated);
+    }
+
+    #[test]
+    fn parse_log_reads_records_refs_and_parent_counts() {
+        let text = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u{1f}Ann\u{1f}1700000000\u{1f}HEAD -> main, origin/main\u{1f}bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\u{1f}fix: a | b\u{1e}\ncccccccccccccccccccccccccccccccccccccccc\u{1f}Bob\u{1f}1690000000\u{1f}\u{1f}\u{1f}root\u{1e}\n";
+        let log = parse_log(text);
+        assert_eq!(log.len(), 2);
+        assert_eq!(log[0].short(), "aaaaaaa");
+        assert_eq!(log[0].refs, ["HEAD -> main", "origin/main"]);
+        assert_eq!((log[0].parents, log[0].subject.as_str()), (1, "fix: a | b"));
+        assert_eq!(
+            (log[1].parents, log[1].refs.len(), log[1].time),
+            (0, 0, 1_690_000_000)
+        );
+    }
+
+    #[test]
+    fn parse_name_status_handles_renames_and_plain_changes() {
+        let files = parse_name_status(
+            "M\tsrc/a.rs\nA\tnew.txt\nR100\told.txt\tnew name.txt\nD\tgone.txt\n",
+        );
+        assert_eq!(files.len(), 4);
+        assert_eq!((files[0].letter, files[0].path.as_str()), ('M', "src/a.rs"));
+        assert_eq!(
+            (
+                files[2].letter,
+                files[2].path.as_str(),
+                files[2].old.as_deref()
+            ),
+            ('R', "new name.txt", Some("old.txt"))
+        );
+    }
+
+    #[test]
+    fn only_hex_ids_reach_git() {
+        assert!(check_hash("abcdef1").is_ok());
+        for bad in ["", "abc", "--output=x", "HEAD", "abcdefg"] {
+            assert!(check_hash(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

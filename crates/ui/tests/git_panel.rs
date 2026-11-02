@@ -742,3 +742,79 @@ fn discarding_a_new_file_moves_it_to_the_recycle_bin() {
         assert!(rels(&m, GroupKind::Changes).is_empty());
     }
 }
+
+#[test]
+fn history_push_pull_and_commit_diffs_work_end_to_end() {
+    let t = repo("hist");
+    let base =
+        std::env::temp_dir().join(format!("nanti-ui-git-hist-remote-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(&base).unwrap();
+    let remote = base.join("remote.git");
+    std::fs::create_dir_all(&remote).unwrap();
+    git(&remote, &["init", "-q", "--bare", "-b", "main"]);
+    git(&t.0, &["remote", "add", "origin", remote.to_str().unwrap()]);
+
+    let mut m = model(&t.0);
+    settle(&mut m);
+    assert_eq!(m.scm.history.len(), 1);
+    assert_eq!(m.scm.history[0].subject, "base");
+    assert!(
+        m.scm.can_push(),
+        "a branch without an upstream can be published"
+    );
+    assert!(!m.scm.can_pull());
+
+    m.scm.push();
+    settle(&mut m);
+    assert_eq!(git(&remote, &["rev-list", "--count", "main"]).trim(), "1");
+    assert!(!m.scm.can_push(), "nothing left to push");
+    assert!(m.scm.can_pull());
+
+    let hash = m.scm.history[0].hash.clone();
+    m.scm.toggle_commit(&hash);
+    settle(&mut m);
+    let files = match m.scm.commit_files.get(&hash) {
+        Some(ui::scm::CommitFiles::Ready(list)) => {
+            list.iter().map(|f| f.path.clone()).collect::<Vec<_>>()
+        }
+        other => panic!("files not loaded: {other:?}"),
+    };
+    assert_eq!(files, ["a.txt", "dir/b.txt"]);
+    let first = match m.scm.commit_files.get(&hash) {
+        Some(ui::scm::CommitFiles::Ready(list)) => list[0].clone(),
+        _ => unreachable!(),
+    };
+    m.open_commit_diff(&hash, &first);
+    let start = Instant::now();
+    loop {
+        m.pump_scm();
+        let ready = m.tabs.iter().any(|t| {
+            matches!(&t.content, TabContent::Diff(v) if v.req.key.rev.is_some() && matches!(&v.state, DiffState::Ready(d) if d.added() > 0))
+        });
+        if ready {
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(30),
+            "the commit diff never arrived"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(m.tabs.iter().any(|t| t.title.contains(&hash[..7])));
+
+    git(&base, &["clone", "-q", remote.to_str().unwrap(), "other"]);
+    let other = base.join("other");
+    std::fs::write(other.join("n.txt"), "n\n").unwrap();
+    git(&other, &["add", "-A"]);
+    git(&other, &["commit", "-q", "-m", "from other"]);
+    git(&other, &["push", "-q"]);
+    m.scm.fetch();
+    settle(&mut m);
+    assert_eq!(m.scm.status.as_ref().unwrap().behind, 1);
+    m.scm.pull();
+    settle(&mut m);
+    assert_eq!(m.scm.history[0].subject, "from other");
+    assert!(t.0.join("n.txt").exists());
+    let _ = std::fs::remove_dir_all(&base);
+}

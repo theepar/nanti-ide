@@ -2167,6 +2167,24 @@ impl Workbench {
                     "Keep",
                     true,
                 ),
+                Prompt::Push {
+                    target,
+                    ahead,
+                    publish,
+                } => (
+                    "Push",
+                    if *publish {
+                        "Publish this branch to the remote and set it as the upstream?".to_owned()
+                    } else {
+                        format!(
+                            "Push {ahead} commit{} to {target}?",
+                            if *ahead == 1 { "" } else { "s" }
+                        )
+                    },
+                    "Push",
+                    "Cancel",
+                    false,
+                ),
                 Prompt::RemoveExtension(p) => (
                     "Uninstall Extension",
                     format!(
@@ -3571,7 +3589,7 @@ impl Workbench {
 
     fn scm_button(
         id: &'static str,
-        label: &'static str,
+        label: impl Into<SharedString>,
         enabled: bool,
     ) -> gpui::Stateful<gpui::Div> {
         div()
@@ -3598,7 +3616,7 @@ impl Workbench {
                     .text_color(rgb(0x5e5e5e))
                     .font_weight(FontWeight::NORMAL)
             })
-            .child(label)
+            .child(label.into())
     }
 
     fn scm_panel(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
@@ -3858,6 +3876,7 @@ impl Workbench {
                     .into_any_element(),
             );
         }
+        self.scm_history_rows(&mut body, cx);
         let notice = s.notice.as_ref().map(|(is_err, text)| {
             let shown: Vec<&str> = text.lines().take(12).collect();
             div()
@@ -3928,11 +3947,309 @@ impl Workbench {
                             .text_color(rgb(theme::TEXT_DIM))
                             .child(assets::icon("git", 13., theme::TEXT_DIM))
                             .child(SharedString::from(branch_line)),
-                    ),
+                    )
+                    .child(self.scm_sync_row(cx)),
             )
             .children(notice)
             .child(self.scroll_list("scm-list", &self.scrolls.scm, body, None, cx))
             .into_any_element()
+    }
+
+    fn scm_sync_row(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let s = &self.model.scm;
+        let (ahead, behind) = s.status.as_ref().map_or((0, 0), |st| (st.ahead, st.behind));
+        let busy = s.activity.is_some();
+        let label = |base: &str, n: u32, arrow: &str| {
+            if n > 0 {
+                format!("{base} {arrow}{n}")
+            } else {
+                base.to_owned()
+            }
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .flex()
+                    .gap_1()
+                    .child(
+                        Self::scm_button(
+                            "scm-pull",
+                            label("Pull", behind, "\u{2193}"),
+                            s.can_pull() && !busy,
+                        )
+                        .flex_1()
+                        .on_click(cx.listener(
+                            |this, _: &ClickEvent, window, cx| {
+                                this.apply_command(Command::GitPull, window, cx);
+                            },
+                        )),
+                    )
+                    .child(
+                        Self::scm_button(
+                            "scm-push",
+                            label("Push", ahead, "\u{2191}"),
+                            s.can_push() && !busy,
+                        )
+                        .flex_1()
+                        .on_click(cx.listener(
+                            |this, _: &ClickEvent, window, cx| {
+                                this.apply_command(Command::GitPush, window, cx);
+                            },
+                        )),
+                    )
+                    .child(
+                        Self::scm_button("scm-fetch", "Fetch", !busy)
+                            .flex_1()
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.apply_command(Command::GitFetch, window, cx);
+                            })),
+                    ),
+            )
+            .children(s.activity.map(|text| {
+                div()
+                    .text_size(px(11.))
+                    .text_color(rgb(theme::TEXT_DIM))
+                    .child(text)
+            }))
+    }
+
+    fn scm_history_rows(&self, body: &mut Vec<AnyElement>, cx: &mut Context<Self>) {
+        let s = &self.model.scm;
+        if s.history.is_empty() && s.history_error.is_none() {
+            return;
+        }
+        let open = s.history_open;
+        body.push(
+            div()
+                .id("scm-history-header")
+                .flex()
+                .items_center()
+                .gap_1()
+                .px_2()
+                .h(px(24.))
+                .mt_1()
+                .text_size(px(11.))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(rgb(theme::ICON))
+                .cursor_pointer()
+                .hover(|s| s.bg(rgb(theme::HOVER)))
+                .on_click(cx.listener(|this, _: &ClickEvent, _w, cx| {
+                    this.model.scm.history_open = !this.model.scm.history_open;
+                    cx.notify();
+                }))
+                .child(assets::icon(
+                    if open {
+                        "chevron-down"
+                    } else {
+                        "chevron-right"
+                    },
+                    14.,
+                    theme::TEXT_DIM,
+                ))
+                .child("COMMITS")
+                .into_any_element(),
+        );
+        if !open {
+            return;
+        }
+        if let Some(e) = &s.history_error {
+            body.push(
+                div()
+                    .px_3()
+                    .py_1()
+                    .text_size(px(11.))
+                    .text_color(rgb(0xe5534b))
+                    .child(SharedString::from(e.clone()))
+                    .into_any_element(),
+            );
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() as i64);
+        for (i, c) in s.history.iter().enumerate() {
+            let hash = c.hash.clone();
+            let expanded = s.expanded_commits.contains(&c.hash);
+            let refs: Vec<AnyElement> = c
+                .refs
+                .iter()
+                .take(3)
+                .map(|r| {
+                    let head = r.starts_with("HEAD");
+                    let name = r.strip_prefix("HEAD -> ").unwrap_or(r).to_owned();
+                    div()
+                        .flex_none()
+                        .px_1()
+                        .rounded_sm()
+                        .text_size(px(10.))
+                        .bg(rgb(if head { 0x264f78 } else { 0x2f2f2f }))
+                        .text_color(rgb(if head { 0xffffff } else { theme::TEXT_DIM }))
+                        .child(SharedString::from(name))
+                        .into_any_element()
+                })
+                .collect();
+            body.push(
+                div()
+                    .id(("scm-commit-row", i))
+                    .flex()
+                    .flex_col()
+                    .gap(px(1.))
+                    .px_2()
+                    .py(px(4.))
+                    .cursor_pointer()
+                    .when(expanded, |d| d.bg(rgb(theme::HOVER)))
+                    .hover(|s| s.bg(rgb(theme::HOVER)))
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
+                        this.model.scm.toggle_commit(&hash);
+                        cx.notify();
+                    }))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .min_w_0()
+                            .child(assets::icon(
+                                if expanded {
+                                    "chevron-down"
+                                } else {
+                                    "chevron-right"
+                                },
+                                12.,
+                                theme::TEXT_DIM,
+                            ))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .flex_1()
+                                    .whitespace_nowrap()
+                                    .overflow_hidden()
+                                    .text_size(px(13.))
+                                    .child(SharedString::from(c.subject.clone())),
+                            )
+                            .children(refs),
+                    )
+                    .child(
+                        div()
+                            .pl(px(16.))
+                            .whitespace_nowrap()
+                            .overflow_hidden()
+                            .text_size(px(11.))
+                            .text_color(rgb(theme::TEXT_DIM))
+                            .child(SharedString::from(format!(
+                                "{} \u{b7} {} \u{b7} {}",
+                                c.short(),
+                                c.author,
+                                scm::relative_time(now, c.time)
+                            ))),
+                    )
+                    .into_any_element(),
+            );
+            if !expanded {
+                continue;
+            }
+            match s.commit_files.get(&c.hash) {
+                None | Some(scm::CommitFiles::Loading) => body.push(
+                    div()
+                        .pl_6()
+                        .py_1()
+                        .text_size(px(11.))
+                        .text_color(rgb(theme::TEXT_DIM))
+                        .child("Loading files...")
+                        .into_any_element(),
+                ),
+                Some(scm::CommitFiles::Failed(e)) => body.push(
+                    div()
+                        .pl_6()
+                        .py_1()
+                        .text_size(px(11.))
+                        .text_color(rgb(0xe5534b))
+                        .child(SharedString::from(e.clone()))
+                        .into_any_element(),
+                ),
+                Some(scm::CommitFiles::Ready(files)) => {
+                    for (j, file) in files.iter().enumerate() {
+                        let name = file
+                            .path
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(&file.path)
+                            .to_owned();
+                        let dir = file
+                            .path
+                            .rfind('/')
+                            .map_or(String::new(), |k| file.path[..k].to_owned());
+                        let color = match file.letter {
+                            'A' | 'C' | 'R' => 0x81b88b,
+                            'D' => 0xc74e39,
+                            _ => 0xe2c08d,
+                        };
+                        let letter = file.letter.to_string();
+                        let (hash, file) = (c.hash.clone(), file.clone());
+                        body.push(
+                            div()
+                                .id(("scm-commit-file", i * 1000 + j))
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .pl_6()
+                                .pr_2()
+                                .py(px(2.))
+                                .text_size(px(12.))
+                                .cursor_pointer()
+                                .hover(|s| s.bg(rgb(theme::HOVER)))
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    this.model.open_commit_diff(&hash, &file);
+                                    this.focus_editor(window);
+                                    cx.notify();
+                                }))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .gap_2()
+                                        .min_w_0()
+                                        .overflow_hidden()
+                                        .child(
+                                            div()
+                                                .flex_none()
+                                                .text_color(rgb(color))
+                                                .child(SharedString::from(name)),
+                                        )
+                                        .child(
+                                            div()
+                                                .whitespace_nowrap()
+                                                .text_size(px(11.))
+                                                .text_color(rgb(theme::TEXT_DIM))
+                                                .child(SharedString::from(dir)),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .w(px(12.))
+                                        .text_size(px(11.))
+                                        .text_color(rgb(color))
+                                        .child(SharedString::from(letter)),
+                                )
+                                .into_any_element(),
+                        );
+                    }
+                }
+            }
+        }
+        if s.history_more {
+            body.push(
+                Self::scm_button("scm-history-more", "Load more commits", true)
+                    .mx_2()
+                    .my_1()
+                    .on_click(cx.listener(|this, _: &ClickEvent, _w, cx| {
+                        this.model.scm.load_more_history();
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+            );
+        }
     }
 
     fn diff_rows(view: &scm::DiffView) -> Vec<AnyElement> {

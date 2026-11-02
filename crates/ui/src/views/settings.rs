@@ -1,4 +1,3 @@
-adong
 use gpui::{
     AnyElement, ClickEvent, Context, FontWeight, IntoElement, SharedString, div, prelude::*, px,
     rgb,

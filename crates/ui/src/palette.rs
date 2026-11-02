@@ -83,10 +83,13 @@ pub enum Command {
     ToggleDiscordFile,
     ToggleDiscordWorkspace,
     ToggleDiscordTime,
+    GitPush,
+    GitPull,
+    GitFetch,
 }
 
 impl Command {
-    pub const ALL: [Command; 76] = [
+    pub const ALL: [Command; 79] = [
         Command::CommandPalette,
         Command::QuickOpen,
         Command::Save,
@@ -153,6 +156,9 @@ impl Command {
         Command::ToggleDiscordFile,
         Command::ToggleDiscordWorkspace,
         Command::ToggleDiscordTime,
+        Command::GitPush,
+        Command::GitPull,
+        Command::GitFetch,
         Command::ToggleComment,
         Command::MoveLineUp,
         Command::MoveLineDown,
@@ -233,6 +239,9 @@ impl Command {
             Command::ToggleDiscordFile => "Discord: Toggle Showing the File Name",
             Command::ToggleDiscordWorkspace => "Discord: Toggle Showing the Workspace",
             Command::ToggleDiscordTime => "Discord: Toggle Showing Elapsed Time",
+            Command::GitPush => "Git: Push",
+            Command::GitPull => "Git: Pull (fast-forward only)",
+            Command::GitFetch => "Git: Fetch",
             Command::ToggleComment => "Edit: Toggle Line Comment",
             Command::MoveLineUp => "Edit: Move Line Up",
             Command::MoveLineDown => "Edit: Move Line Down",

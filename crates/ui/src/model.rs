@@ -130,6 +130,11 @@ pub enum Prompt {
         rel: String,
         untracked: bool,
     },
+    Push {
+        target: String,
+        ahead: u32,
+        publish: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -642,12 +647,46 @@ impl Model {
         self.tabs.get_mut(i).map(|t| &mut t.content)
     }
 
+    pub fn open_commit_diff(&mut self, hash: &str, file: &git::CommitFile) {
+        self.ext_detail = None;
+        self.settings_open = false;
+        let req = self.scm.commit_diff_req(hash, file);
+        let existing = self
+            .tabs
+            .iter()
+            .position(|t| matches!(&t.content, TabContent::Diff(v) if v.req.key == req.key));
+        if let Some(i) = existing {
+            self.active_tab = Some(i);
+            return;
+        }
+        let name = file.path.rsplit('/').next().unwrap_or(&file.path);
+        let short: String = hash.chars().take(7).collect();
+        let abs = self
+            .scm
+            .repo_root()
+            .map_or_else(|| self.root.join(&file.path), |r| r.join(&file.path));
+        self.tabs.push(Tab {
+            path: abs,
+            title: format!("{name} ({short})"),
+            content: TabContent::Diff(DiffView {
+                req: req.clone(),
+                state: DiffState::Loading,
+            }),
+            stamp: None,
+            language_override: None,
+        });
+        self.active_tab = Some(self.tabs.len() - 1);
+        self.scm.request(Job::Diff(req));
+    }
+
     pub fn reload_diff_tabs(&mut self) {
         let keys: Vec<(String, bool)> = self
             .tabs
             .iter()
             .filter_map(|t| match &t.content {
-                TabContent::Diff(v) => Some((v.req.key.rel.clone(), v.req.key.staged)),
+                TabContent::Diff(v) if v.req.key.rev.is_none() => {
+                    Some((v.req.key.rel.clone(), v.req.key.staged))
+                }
                 _ => None,
             })
             .collect();
@@ -838,6 +877,10 @@ impl Model {
                 self.remove_extension(&dir);
                 false
             }
+            Some(Prompt::Push { .. }) => {
+                self.scm.push();
+                false
+            }
             Some(Prompt::QuitDirty) => {
                 for i in 0..self.tabs.len() {
                     match self.save_tab(i, false) {
@@ -881,7 +924,10 @@ impl Model {
             }
             Some(Prompt::QuitDirty) => true,
             Some(
-                Prompt::DeleteItem(_) | Prompt::RemoveExtension(_) | Prompt::DiscardChanges { .. },
+                Prompt::DeleteItem(_)
+                | Prompt::RemoveExtension(_)
+                | Prompt::DiscardChanges { .. }
+                | Prompt::Push { .. },
             )
             | None => false,
         }
@@ -1023,6 +1069,35 @@ impl Model {
             Command::GitStageAll => self.scm.stage_all(),
             Command::GitUnstageAll => self.scm.unstage_all(),
             Command::SwitchBranch => self.open_branch_picker(),
+            Command::GitPush => {
+                self.show_activity(Activity::SourceControl);
+                if let Some(st) = self.scm.status.as_ref()
+                    && self.scm.can_push()
+                {
+                    self.prompt = Some(Prompt::Push {
+                        target: st
+                            .upstream
+                            .clone()
+                            .unwrap_or_else(|| "a new remote branch".to_owned()),
+                        ahead: st.ahead,
+                        publish: st.upstream.is_none(),
+                    });
+                } else {
+                    self.say("Git", "There is nothing to push");
+                }
+            }
+            Command::GitPull => {
+                self.show_activity(Activity::SourceControl);
+                if self.scm.can_pull() {
+                    self.scm.pull();
+                } else {
+                    self.say("Git", "This branch has no upstream to pull from");
+                }
+            }
+            Command::GitFetch => {
+                self.show_activity(Activity::SourceControl);
+                self.scm.fetch();
+            }
             Command::GitCommit => {
                 self.show_activity(Activity::SourceControl);
                 if self.scm.commit().is_err() && self.scm.message.text().trim().is_empty() {

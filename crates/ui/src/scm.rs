@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::time::{Duration, Instant};
 
-use git::{Change, Diff, GitError, Repo, Status};
+use git::{Change, Commit, CommitFile, Diff, GitError, Repo, Status};
 
 use crate::palette::TextField;
 
@@ -13,6 +13,7 @@ pub const REFRESH_INTERVAL: Duration = Duration::from_secs(8);
 pub struct DiffKey {
     pub rel: String,
     pub staged: bool,
+    pub rev: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +32,11 @@ pub enum Job {
     UnstageAll,
     Commit(String),
     CommitAll(String),
+    Push,
+    Pull,
+    Fetch,
+    History(usize),
+    CommitFiles(String),
     Checkout(String),
     NewBranch(String),
     Discard(Vec<String>),
@@ -121,6 +127,18 @@ struct Done {
     committed: bool,
     branches: Option<Vec<git::Branch>>,
     worktree_changed: bool,
+    history: Option<(usize, Result<Vec<Commit>, String>)>,
+    files: Option<(String, Result<Vec<CommitFile>, String>)>,
+    reload_history: bool,
+}
+
+pub const HISTORY_PAGE: usize = 40;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommitFiles {
+    Loading,
+    Ready(Vec<CommitFile>),
+    Failed(String),
 }
 
 #[derive(Default)]
@@ -152,6 +170,14 @@ pub struct ScmState {
     pub focused: bool,
     pub notice: Option<(bool, String)>,
     pub collapsed: HashSet<GroupKind>,
+    pub history: Vec<Commit>,
+    pub history_more: bool,
+    pub history_error: Option<String>,
+    pub history_open: bool,
+    pub expanded_commits: HashSet<String>,
+    pub commit_files: HashMap<String, CommitFiles>,
+    history_head: Option<String>,
+    pub activity: Option<&'static str>,
     queue: VecDeque<Job>,
     running: Option<Receiver<Done>>,
     last_refresh: Instant,
@@ -173,6 +199,14 @@ impl ScmState {
             focused: false,
             notice: None,
             collapsed: HashSet::new(),
+            history: Vec::new(),
+            history_more: false,
+            history_error: None,
+            history_open: true,
+            expanded_commits: HashSet::new(),
+            commit_files: HashMap::new(),
+            history_head: None,
+            activity: None,
             queue: VecDeque::new(),
             running: None,
             last_refresh: Instant::now(),
@@ -209,10 +243,16 @@ impl ScmState {
                 .queue
                 .iter()
                 .any(|j| matches!(j, Job::Diff(q) if q.key == r.key)),
+            Job::History(_) | Job::CommitFiles(_) | Job::Push | Job::Pull | Job::Fetch => {
+                self.queue.contains(&job)
+            }
             _ => false,
         };
         if !duplicate {
-            if !matches!(job, Job::Refresh | Job::Diff(_)) {
+            if !matches!(
+                job,
+                Job::Refresh | Job::Diff(_) | Job::History(_) | Job::CommitFiles(_)
+            ) {
                 self.notice = None;
             }
             self.queue.push_back(job);
@@ -226,6 +266,13 @@ impl ScmState {
         }
         let Some(job) = self.queue.pop_front() else {
             return;
+        };
+        self.activity = match &job {
+            Job::Push => Some("Pushing..."),
+            Job::Pull => Some("Pulling..."),
+            Job::Fetch => Some("Fetching..."),
+            Job::Commit(_) | Job::CommitAll(_) => Some("Committing..."),
+            _ => None,
         };
         let (tx, rx) = channel();
         let root = self.root.clone();
@@ -242,12 +289,14 @@ impl ScmState {
             match rx.try_recv() {
                 Ok(done) => {
                     self.running = None;
+                    self.activity = None;
                     out = self.apply(done);
                     self.start_next();
                 }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
                     self.running = None;
+                    self.activity = None;
                     self.notice = Some((true, "git worker stopped unexpectedly".into()));
                     out.changed = true;
                     self.start_next();
@@ -328,7 +377,81 @@ impl ScmState {
         if done.committed {
             self.message.clear();
         }
+        if let Some((skip, result)) = done.history {
+            match result {
+                Ok(list) => {
+                    self.history_error = None;
+                    self.history_more = list.len() >= HISTORY_PAGE;
+                    if skip == 0 {
+                        self.history = list;
+                    } else if skip == self.history.len() {
+                        self.history.extend(list);
+                    }
+                }
+                Err(e) => self.history_error = Some(e),
+            }
+        }
+        if let Some((hash, result)) = done.files {
+            self.commit_files.insert(
+                hash,
+                match result {
+                    Ok(list) => CommitFiles::Ready(list),
+                    Err(e) => CommitFiles::Failed(e),
+                },
+            );
+        }
+        let head = self.status.as_ref().and_then(|s| s.oid.clone());
+        if self.enabled
+            && (done.reload_history || head != self.history_head)
+            && !self.queue.contains(&Job::History(0))
+        {
+            self.history_head = head;
+            self.commit_files.clear();
+            self.expanded_commits.clear();
+            self.queue.push_back(Job::History(0));
+        }
         p
+    }
+
+    pub fn push(&mut self) {
+        self.request(Job::Push);
+    }
+
+    pub fn pull(&mut self) {
+        self.request(Job::Pull);
+    }
+
+    pub fn fetch(&mut self) {
+        self.request(Job::Fetch);
+    }
+
+    pub fn load_more_history(&mut self) {
+        if self.history_more {
+            self.request(Job::History(self.history.len()));
+        }
+    }
+
+    pub fn toggle_commit(&mut self, hash: &str) {
+        if !self.expanded_commits.remove(hash) {
+            self.expanded_commits.insert(hash.to_owned());
+            if !self.commit_files.contains_key(hash) {
+                self.commit_files
+                    .insert(hash.to_owned(), CommitFiles::Loading);
+                self.request(Job::CommitFiles(hash.to_owned()));
+            }
+        }
+    }
+
+    pub fn can_push(&self) -> bool {
+        self.status.as_ref().is_some_and(|s| {
+            s.branch.is_some() && s.oid.is_some() && (s.ahead > 0 || s.upstream.is_none())
+        })
+    }
+
+    pub fn can_pull(&self) -> bool {
+        self.status
+            .as_ref()
+            .is_some_and(|s| s.branch.is_some() && s.upstream.is_some())
     }
 
     pub fn refresh(&mut self) {
@@ -470,6 +593,7 @@ impl ScmState {
             key: DiffKey {
                 rel: rel.to_owned(),
                 staged,
+                rev: None,
             },
             orig: if staged {
                 entry.and_then(|e| e.orig_path.clone())
@@ -506,6 +630,18 @@ impl ScmState {
                     break;
                 }
             }
+        }
+    }
+
+    pub fn commit_diff_req(&self, hash: &str, file: &CommitFile) -> DiffReq {
+        DiffReq {
+            key: DiffKey {
+                rel: file.path.clone(),
+                staged: false,
+                rev: Some(hash.to_owned()),
+            },
+            orig: file.old.clone(),
+            untracked: false,
         }
     }
 
@@ -615,7 +751,40 @@ fn execute(root: &Path, repo: Option<Repo>, job: Job) -> Done {
             }
             Err(e) => done.notice = Some((true, e.to_string())),
         },
+        Job::Push => match repo.push() {
+            Ok(summary) => done.notice = Some((false, format!("Push: {summary}"))),
+            Err(e) => done.notice = Some((true, e.to_string())),
+        },
+        Job::Pull => match repo.pull() {
+            Ok(summary) => {
+                done.worktree_changed = true;
+                done.reload_history = true;
+                done.notice = Some((false, format!("Pull: {summary}")));
+            }
+            Err(e) => done.notice = Some((true, e.to_string())),
+        },
+        Job::Fetch => match repo.fetch() {
+            Ok(summary) => done.notice = Some((false, summary)),
+            Err(e) => done.notice = Some((true, e.to_string())),
+        },
+        Job::History(skip) => {
+            done.history = Some((
+                skip,
+                repo.log(skip, HISTORY_PAGE).map_err(|e| e.to_string()),
+            ));
+            return done;
+        }
+        Job::CommitFiles(hash) => {
+            let result = repo.commit_files(&hash).map_err(|e| e.to_string());
+            done.files = Some((hash, result));
+            return done;
+        }
         Job::Diff(req) => {
+            if let Some(rev) = &req.key.rev {
+                let result = repo.commit_diff(rev, &req.key.rel, req.orig.as_deref());
+                done.diff = Some((req.key.clone(), result.map_err(|e| e.to_string())));
+                return done;
+            }
             let result = if req.untracked {
                 repo.diff_untracked(&req.key.rel)
             } else {
@@ -635,9 +804,34 @@ fn execute(root: &Path, repo: Option<Repo>, job: Job) -> Done {
     done
 }
 
+pub fn relative_time(now: i64, then: i64) -> String {
+    let s = (now - then).max(0);
+    let (n, unit) = match s {
+        0..=44 => return "just now".to_owned(),
+        45..=3_599 => ((s + 30) / 60, "min"),
+        3_600..=86_399 => (s / 3_600, "h"),
+        86_400..=2_591_999 => (s / 86_400, "d"),
+        2_592_000..=31_535_999 => (s / 2_592_000, "mo"),
+        _ => (s / 31_536_000, "y"),
+    };
+    format!("{n} {unit} ago")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relative_time_picks_the_largest_sensible_unit() {
+        let now = 1_700_000_000;
+        assert_eq!(relative_time(now, now - 5), "just now");
+        assert_eq!(relative_time(now, now + 100), "just now");
+        assert_eq!(relative_time(now, now - 300), "5 min ago");
+        assert_eq!(relative_time(now, now - 7_200), "2 h ago");
+        assert_eq!(relative_time(now, now - 3 * 86_400), "3 d ago");
+        assert_eq!(relative_time(now, now - 70 * 86_400), "2 mo ago");
+        assert_eq!(relative_time(now, now - 800 * 86_400), "2 y ago");
+    }
 
     fn entry(path: &str, staged: Option<Change>, unstaged: Option<Change>) -> git::Entry {
         git::Entry {
