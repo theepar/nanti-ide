@@ -257,7 +257,48 @@ export function createVscode({ workspaceFolders = [], notify, settings = {}, get
   const hub = createWebviewHub({ notify, Disposable, EventEmitter, Uri, workspaceFolders });
   const uriHandlers = new Map(); // extension dir -> UriHandler
   const extensionDirs = new Set();
+  const externalRequests = new Map();
+  let externalSeq = 0;
   let statusSeq = 0;
+
+  function openExternal(uri) {
+    const value = uri instanceof Uri ? uri.toString() : String(uri ?? "");
+    if (/[\u0000-\u0020\u007f]/.test(value)) return Promise.resolve(false);
+    let parsed;
+    try {
+      parsed = new URL(value);
+    } catch {
+      return Promise.resolve(false);
+    }
+    if (!["http:", "https:"].includes(parsed.protocol) || !parsed.hostname || parsed.username || parsed.password) {
+      return Promise.resolve(false);
+    }
+    return new Promise((resolve) => {
+      const id = `external-${++externalSeq}`;
+      const timer = setTimeout(() => {
+        externalRequests.delete(id);
+        resolve(false);
+      }, 120_000);
+      timer.unref?.();
+      externalRequests.set(id, { resolve, timer });
+      try {
+        notify("env.openExternal", { id, url: value });
+      } catch {
+        clearTimeout(timer);
+        externalRequests.delete(id);
+        resolve(false);
+      }
+    });
+  }
+
+  function resolveExternal(id, approved) {
+    const request = externalRequests.get(id);
+    if (!request) return false;
+    externalRequests.delete(id);
+    clearTimeout(request.timer);
+    request.resolve(approved === true);
+    return true;
+  }
   const emitters = {};
   const emitter = (name) => (emitters[name] ??= new EventEmitter());
   const providers = { fileSystem: new Map(), textDocumentContent: new Map() };
@@ -486,9 +527,10 @@ export function createVscode({ workspaceFolders = [], notify, settings = {}, get
     },
   });
 
-  // Constants only; anything needing an IDE round-trip (openExternal, clipboard) stays unsupported.
+  // Browser opening requires an explicit decision from the native IDE; clipboard remains unsupported.
   // appName is honest: this is not VS Code (PRD 3 #6).
   const env = strict("vscode.env", {
+    openExternal,
     appName: "Nanti",
     appRoot: process.cwd(),
     language: "en",
@@ -591,5 +633,6 @@ export function createVscode({ workspaceFolders = [], notify, settings = {}, get
     hub,
     uriHandlers,
     contextKeys,
+    resolveExternal,
   };
 }

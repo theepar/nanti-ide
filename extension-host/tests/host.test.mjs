@@ -151,7 +151,41 @@ test("basic classes: EventEmitter, Uri, ExtensionMode, NotebookCellOutputItem, e
   assert.equal(item.mime, "application/vnd.code.notebook.error");
   assert.equal(vscode.env.appName, "Nanti");
   assert.equal(vscode.env.remoteName, undefined);
-  assert.throws(() => vscode.env.openExternal(), /UnsupportedCapability/);
+  assert.equal(await vscode.env.openExternal(), false);
+});
+
+test("env.openExternal requires consent and only accepts safe web URLs", async () => {
+  const { createVscode } = await import("../src/vscode-api.mjs");
+  const notes = [];
+  const api = createVscode({ notify: (method, params) => notes.push({ method, params }) });
+  const { vscode } = api;
+  for (const url of ["javascript:alert(1)", "file:///C:/secret", "https://user:pass@example.com/", "https://example.com/\nmalicious"]) {
+    assert.equal(await vscode.env.openExternal(url), false);
+  }
+  assert.equal(notes.length, 0);
+  const allowed = vscode.env.openExternal(vscode.Uri.parse("https://example.com/login?state=abc"));
+  assert.equal(notes[0].method, "env.openExternal");
+  assert.equal(notes[0].params.url, "https://example.com/login?state=abc");
+  assert.equal(api.resolveExternal(notes[0].params.id, true), true);
+  assert.equal(await allowed, true);
+  assert.equal(api.resolveExternal(notes[0].params.id, true), false);
+  const denied = vscode.env.openExternal("http://example.com/");
+  assert.equal(api.resolveExternal(notes[1].params.id, false), true);
+  assert.equal(await denied, false);
+});
+
+test("host dispatches env.openExternal consent replies while caller awaits", async () => {
+  const { createVscode } = await import("../src/vscode-api.mjs");
+  const notes = [];
+  const api = createVscode({ notify: (method, params) => notes.push({ method, params }) });
+  const waiting = api.vscode.env.openExternal("https://example.com/");
+  const host = createHost();
+  await host.handle(req(0, "initialize"));
+  const unknown = await host.handle(req(1, "env.openExternal.resolve", { id: "missing", approved: true }));
+  assert.equal(unknown.result.resolved, false);
+  // A direct host request tests the response contract; the actual extension uses its own API instance.
+  assert.equal(api.resolveExternal(notes[0].params.id, false), true);
+  assert.equal(await waiting, false);
 });
 
 test("createOutputChannel({log:true}) returns a LogOutputChannel", async () => {

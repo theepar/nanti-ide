@@ -49,6 +49,10 @@ export function createHost({ notify = () => {} } = {}) {
       return { protocolVersion: PROTOCOL_VERSION, hostVersion: HOST_VERSION };
     },
     ping: (params) => ({ echo: params }),
+    "env.openExternal.resolve"({ id, approved }) {
+      if (!vscodeApi) throw new Error("host not initialized");
+      return { resolved: vscodeApi.resolveExternal(id, approved) };
+    },
     shutdown: () => null,
 
     "extension.load"({ path: dir }) {
@@ -157,6 +161,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       msg = JSON.parse(line);
     } catch {
       console.error("[host] dropped malformed line");
+      return;
+    }
+    // Consent responses must bypass the serialized queue: an extension command may be
+    // awaiting openExternal while its original request is still in that queue.
+    if (msg.method === "env.openExternal.resolve") {
+      void host.handle(msg).then(send);
       return;
     }
     chain = chain.then(async () => {

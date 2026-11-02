@@ -13,10 +13,10 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -71,6 +71,53 @@ pub struct Notification {
 }
 
 type Pending = Arc<Mutex<HashMap<u64, Sender<Response>>>>;
+
+/// A host request whose result can be polled without blocking notification processing.
+pub struct DeferredResponse {
+    id: u64,
+    receiver: Receiver<Response>,
+    pending: Pending,
+    started: Instant,
+    timeout: Duration,
+}
+
+impl DeferredResponse {
+    fn decode(response: Response) -> Result<Value, HostError> {
+        match response.error {
+            Some(e) => Err(HostError::Remote {
+                code: e.code,
+                message: e.message,
+            }),
+            None => Ok(response.result.unwrap_or(Value::Null)),
+        }
+    }
+
+    pub fn try_complete(&self) -> Option<Result<Value, HostError>> {
+        match self.receiver.try_recv() {
+            Ok(response) => Some(Self::decode(response)),
+            Err(TryRecvError::Disconnected) => Some(Err(HostError::Closed)),
+            Err(TryRecvError::Empty) if self.started.elapsed() < self.timeout => None,
+            Err(TryRecvError::Empty) => {
+                self.pending.lock().unwrap().remove(&self.id);
+                Some(Err(HostError::Timeout(self.timeout)))
+            }
+        }
+    }
+
+    fn wait(self) -> Result<Value, HostError> {
+        match self.receiver.recv_timeout(self.timeout) {
+            Ok(response) => Self::decode(response),
+            Err(RecvTimeoutError::Timeout) => Err(HostError::Timeout(self.timeout)),
+            Err(RecvTimeoutError::Disconnected) => Err(HostError::Closed),
+        }
+    }
+}
+
+impl Drop for DeferredResponse {
+    fn drop(&mut self) {
+        self.pending.lock().unwrap().remove(&self.id);
+    }
+}
 
 pub struct ExtensionHost {
     child: Child,
@@ -168,45 +215,57 @@ impl ExtensionHost {
         self.timeout = timeout;
     }
 
-    pub fn request(&mut self, method: &str, params: Value) -> Result<Value, HostError> {
+    fn dispatch(
+        &mut self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<DeferredResponse, HostError> {
         let request_id = self.next_id;
         self.next_id += 1;
-        let (tx, rx) = mpsc::channel();
-        self.pending.lock().unwrap().insert(request_id, tx);
-        if self.closed.load(Ordering::SeqCst) {
-            self.pending.lock().unwrap().remove(&request_id);
-            return Err(HostError::Closed);
-        }
-        let req = Request {
+        let raw = serde_json::to_string(&Request {
             protocol_version: PROTOCOL_VERSION,
             request_id,
             method,
             params,
+        })?;
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(HostError::Closed);
+        }
+        let (tx, receiver) = mpsc::channel();
+        self.pending.lock().unwrap().insert(request_id, tx);
+        let deferred = DeferredResponse {
+            id: request_id,
+            receiver,
+            pending: self.pending.clone(),
+            started: Instant::now(),
+            timeout,
         };
-        let sent = writeln!(self.stdin, "{}", serde_json::to_string(&req)?)
-            .and_then(|()| self.stdin.flush());
-        if let Err(e) = sent {
-            self.pending.lock().unwrap().remove(&request_id);
+        if let Err(e) = writeln!(self.stdin, "{raw}").and_then(|()| self.stdin.flush()) {
             return Err(if self.closed.load(Ordering::SeqCst) {
                 HostError::Closed
             } else {
                 e.into()
             });
         }
-        match rx.recv_timeout(self.timeout) {
-            Ok(resp) => match resp.error {
-                Some(e) => Err(HostError::Remote {
-                    code: e.code,
-                    message: e.message,
-                }),
-                None => Ok(resp.result.unwrap_or(Value::Null)),
-            },
-            Err(RecvTimeoutError::Timeout) => {
-                self.pending.lock().unwrap().remove(&request_id);
-                Err(HostError::Timeout(self.timeout))
-            }
-            Err(RecvTimeoutError::Disconnected) => Err(HostError::Closed),
-        }
+        Ok(deferred)
+    }
+
+    pub fn request(&mut self, method: &str, params: Value) -> Result<Value, HostError> {
+        self.dispatch(method, params, self.timeout)?.wait()
+    }
+
+    /// Keep pumping host notifications while the webview handler awaits user consent.
+    pub fn send_webview_message_deferred(
+        &mut self,
+        handle: &str,
+        message: Value,
+    ) -> Result<DeferredResponse, HostError> {
+        self.dispatch(
+            "webview.message",
+            json!({ "handle": handle, "message": message }),
+            Duration::from_secs(130),
+        )
     }
 
     /// Register a Node extension directory; returns its id (`publisher.name`).
