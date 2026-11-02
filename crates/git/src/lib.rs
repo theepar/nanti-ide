@@ -418,6 +418,97 @@ pub struct CommitFile {
     pub old: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CommitDetail {
+    pub body: String,
+    pub offset_min: i32,
+    pub files: usize,
+    pub insertions: usize,
+    pub deletions: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebRemote {
+    pub host_label: &'static str,
+    pub base: String,
+    commit_path: &'static str,
+}
+
+impl WebRemote {
+    pub fn commit_url(&self, hash: &str) -> Option<String> {
+        check_hash(hash).ok()?;
+        Some(format!("{}{}{}", self.base, self.commit_path, hash))
+    }
+}
+
+/// Turns a clone address into the project page of the three well known hosts; anything else is not linked.
+pub fn parse_web_remote(remote: &str) -> Option<WebRemote> {
+    let remote = remote.trim();
+    let (host, path) = if let Some(rest) = remote.strip_prefix("git@") {
+        rest.split_once(':')?
+    } else if let Some(rest) = remote
+        .strip_prefix("https://")
+        .or_else(|| remote.strip_prefix("ssh://git@"))
+    {
+        let rest = rest.split_once('@').map_or(rest, |(_, r)| r);
+        rest.split_once('/')?
+    } else {
+        return None;
+    };
+    let path = path.trim_matches('/').trim_end_matches(".git");
+    let segments: Vec<&str> = path.split('/').collect();
+    let clean = |s: &&str| {
+        !s.is_empty()
+            && *s != "."
+            && *s != ".."
+            && s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+    };
+    if segments.len() < 2 || !segments.iter().all(clean) {
+        return None;
+    }
+    let (host_label, commit_path, host) = match host.to_ascii_lowercase().as_str() {
+        "github.com" => ("GitHub", "/commit/", "github.com"),
+        "gitlab.com" => ("GitLab", "/-/commit/", "gitlab.com"),
+        "bitbucket.org" => ("Bitbucket", "/commits/", "bitbucket.org"),
+        _ => return None,
+    };
+    Some(WebRemote {
+        host_label,
+        base: format!("https://{host}/{}", segments.join("/")),
+        commit_path,
+    })
+}
+
+pub fn parse_commit_detail(text: &str) -> CommitDetail {
+    let (head, tail) = text.split_once('\x1e').unwrap_or((text, ""));
+    let (body, date) = head.rsplit_once('\x1f').unwrap_or((head, ""));
+    let offset_min = date
+        .split_whitespace()
+        .nth(2)
+        .and_then(|z| {
+            let sign = if z.starts_with('-') { -1 } else { 1 };
+            let digits = z.trim_start_matches(['+', '-']);
+            let (h, m) = (digits.get(..2)?, digits.get(2..4)?);
+            Some(sign * (h.parse::<i32>().ok()? * 60 + m.parse::<i32>().ok()?))
+        })
+        .unwrap_or(0);
+    let number_before = |word: &str| -> usize {
+        tail.split(',')
+            .find(|part| part.contains(word))
+            .and_then(|part| part.split_whitespace().next())
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(0)
+    };
+    CommitDetail {
+        body: body.trim().to_owned(),
+        offset_min,
+        files: number_before("changed"),
+        insertions: number_before("insertion"),
+        deletions: number_before("deletion"),
+    }
+}
+
 fn check_hash(hash: &str) -> Result<(), GitError> {
     if (7..=64).contains(&hash.len()) && hash.bytes().all(|b| b.is_ascii_hexdigit()) {
         Ok(())
@@ -1088,6 +1179,54 @@ impl Repo {
         Ok(parse_log(&String::from_utf8_lossy(&out.stdout)))
     }
 
+    pub fn commit_detail(&self, hash: &str) -> Result<CommitDetail, GitError> {
+        check_hash(hash)?;
+        let out = self.exec(
+            &[
+                "show",
+                "--no-patch",
+                "--shortstat",
+                "--first-parent",
+                "-m",
+                "--format=%B%x1f%ai%x1e",
+                hash,
+            ],
+            None,
+            DIFF_TIMEOUT,
+            1024 * 1024,
+            true,
+        )?;
+        if out.code != Some(0) {
+            return Err(GitError::Failed {
+                command: "show".into(),
+                code: out.code,
+                stderr: out.stderr,
+            });
+        }
+        Ok(parse_commit_detail(&String::from_utf8_lossy(&out.stdout)))
+    }
+
+    /// The web page of the remote this branch tracks (or origin), when it is a known host.
+    pub fn web_remote(&self) -> Option<WebRemote> {
+        let name = self
+            .upstream()
+            .and_then(|u| u.split_once('/').map(|(r, _)| r.to_owned()))
+            .unwrap_or_else(|| "origin".to_owned());
+        let out = self
+            .exec(
+                &["remote", "get-url", &name],
+                None,
+                STATUS_TIMEOUT,
+                4096,
+                true,
+            )
+            .ok()?;
+        if out.code != Some(0) {
+            return None;
+        }
+        parse_web_remote(&String::from_utf8_lossy(&out.stdout))
+    }
+
     pub fn commit_files(&self, hash: &str) -> Result<Vec<CommitFile>, GitError> {
         check_hash(hash)?;
         let out = self.exec(
@@ -1327,6 +1466,71 @@ u UU N... 100644 100644 100644 100644 aaaa bbbb cccc conflict.txt\0\
             ),
             ('R', "new name.txt", Some("old.txt"))
         );
+    }
+
+    #[test]
+    fn web_remotes_cover_the_usual_address_shapes_and_nothing_else() {
+        let gh = |s: &str| parse_web_remote(s).map(|w| (w.host_label, w.base));
+        let want = Some(("GitHub", "https://github.com/theepar/nanti-ide".to_owned()));
+        for ok in [
+            "https://github.com/theepar/nanti-ide.git",
+            "https://github.com/theepar/nanti-ide",
+            "git@github.com:theepar/nanti-ide.git",
+            "ssh://git@github.com/theepar/nanti-ide.git",
+            "https://user:token@github.com/theepar/nanti-ide.git\n",
+        ] {
+            assert_eq!(gh(ok), want, "{ok}");
+        }
+        assert_eq!(gh("https://gitlab.com/g/s/p.git").unwrap().0, "GitLab");
+        for bad in [
+            "",
+            "https://example.com/a/b.git",
+            "https://github.com/onlyone",
+            "https://github.com/a/../b",
+            "https://github.com/a/b c",
+            "file:///C:/repo",
+            "C:\\repo",
+        ] {
+            assert_eq!(gh(bad), None, "{bad}");
+        }
+        let w = parse_web_remote("git@github.com:o/r.git").unwrap();
+        assert_eq!(
+            w.commit_url("abcdef1234").as_deref(),
+            Some("https://github.com/o/r/commit/abcdef1234")
+        );
+        assert_eq!(w.commit_url("--x"), None);
+        assert!(
+            parse_web_remote("https://gitlab.com/g/p.git")
+                .unwrap()
+                .commit_url("abcdef1")
+                .unwrap()
+                .contains("/-/commit/")
+        );
+    }
+
+    #[test]
+    fn commit_detail_reads_body_offset_and_stats() {
+        let text = "feat: x\n\nlong body line\n\u{1f}2026-11-03 03:00:45 +0700\u{1e}\n\n 3 files changed, 12 insertions(+), 7 deletions(-)\n";
+        let d = parse_commit_detail(text);
+        assert_eq!(d.body, "feat: x\n\nlong body line");
+        assert_eq!(
+            (d.offset_min, d.files, d.insertions, d.deletions),
+            (420, 3, 12, 7)
+        );
+        let only_add = parse_commit_detail(
+            "m\u{1f}2026-01-01 00:00:00 -0330\u{1e}\n\n 1 file changed, 58 insertions(+)\n",
+        );
+        assert_eq!(
+            (
+                only_add.offset_min,
+                only_add.files,
+                only_add.insertions,
+                only_add.deletions
+            ),
+            (-210, 1, 58, 0)
+        );
+        let empty = parse_commit_detail("m\u{1f}2026-01-01 00:00:00 +0000\u{1e}\n");
+        assert_eq!((empty.files, empty.insertions, empty.deletions), (0, 0, 0));
     }
 
     #[test]

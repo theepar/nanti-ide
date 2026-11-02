@@ -76,6 +76,20 @@ const ASSETS: &[(&str, &str)] = &[
         include_str!("../assets/icons/folder-plus.svg"),
     ),
     (
+        "icons/person.svg",
+        include_str!("../assets/icons/person.svg"),
+    ),
+    ("icons/clock.svg", include_str!("../assets/icons/clock.svg")),
+    ("icons/copy.svg", include_str!("../assets/icons/copy.svg")),
+    (
+        "icons/external.svg",
+        include_str!("../assets/icons/external.svg"),
+    ),
+    (
+        "icons/commit.svg",
+        include_str!("../assets/icons/commit.svg"),
+    ),
+    (
         "icons/refresh.svg",
         include_str!("../assets/icons/refresh.svg"),
     ),

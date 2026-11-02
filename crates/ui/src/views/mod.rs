@@ -1,4 +1,5 @@
 pub(crate) mod chrome;
+pub(crate) mod commit_tip;
 pub(crate) mod extensions;
 pub(crate) mod panels;
 pub(crate) mod settings;

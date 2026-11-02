@@ -777,7 +777,7 @@ impl Workbench {
         changed
     }
 
-    fn valid_external_url(value: &str) -> bool {
+    pub(crate) fn valid_external_url(value: &str) -> bool {
         if value
             .chars()
             .any(|c| c.is_control() || c.is_whitespace() || c == '\\')
@@ -1675,18 +1675,7 @@ impl Workbench {
                     .rounded_md()
                     .cursor_pointer()
                     .hover(|s| s.bg(rgb(theme::HOVER)))
-                    .when(selected, |d| {
-                        d.bg(rgb(theme::SELECTED)).child(
-                            div()
-                                .absolute()
-                                .left(px(-4.))
-                                .top(px(8.))
-                                .w(px(2.))
-                                .h(px(24.))
-                                .rounded_sm()
-                                .bg(rgb(theme::ACCENT)),
-                        )
-                    })
+                    .when(selected, |d| d.bg(rgb(theme::SELECTED)))
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         this.model.select_activity(a);
                         if this.model.activity == a && this.model.layout.sidebar {
@@ -4071,6 +4060,8 @@ impl Workbench {
             .map_or(0, |d| d.as_secs() as i64);
         for (i, c) in s.history.iter().enumerate() {
             let hash = c.hash.clone();
+            let (hover_hash, tip_hash) = (c.hash.clone(), c.hash.clone());
+            let (hover_entity, tip_entity) = (cx.entity(), cx.entity());
             let expanded = s.expanded_commits.contains(&c.hash);
             let refs: Vec<AnyElement> = c
                 .refs
@@ -4101,6 +4092,20 @@ impl Workbench {
                     .cursor_pointer()
                     .when(expanded, |d| d.bg(rgb(theme::HOVER)))
                     .hover(|s| s.bg(rgb(theme::HOVER)))
+                    .on_hover(move |hovered, _w, cx| {
+                        if *hovered {
+                            let hash = hover_hash.clone();
+                            hover_entity.update(cx, |wb, cx| {
+                                wb.model.scm.request_detail(&hash);
+                                cx.notify();
+                            });
+                        }
+                    })
+                    .hoverable_tooltip(move |_w, cx| {
+                        let (entity, hash) = (tip_entity.clone(), tip_hash.clone());
+                        cx.new(|cx| views::commit_tip::CommitTip::new(entity, hash, cx))
+                            .into()
+                    })
                     .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
                         this.model.scm.toggle_commit(&hash);
                         cx.notify();

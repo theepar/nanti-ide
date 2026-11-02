@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::time::{Duration, Instant};
 
-use git::{Change, Commit, CommitFile, Diff, GitError, Repo, Status};
+use git::{Change, Commit, CommitDetail, CommitFile, Diff, GitError, Repo, Status, WebRemote};
 
 use crate::palette::TextField;
 
@@ -37,6 +37,7 @@ pub enum Job {
     Fetch,
     History(usize),
     CommitFiles(String),
+    CommitDetail(String),
     Checkout(String),
     NewBranch(String),
     Discard(Vec<String>),
@@ -129,6 +130,8 @@ struct Done {
     worktree_changed: bool,
     history: Option<(usize, Result<Vec<Commit>, String>)>,
     files: Option<(String, Result<Vec<CommitFile>, String>)>,
+    detail: Option<(String, Result<CommitDetail, String>)>,
+    web: Option<Option<WebRemote>>,
     reload_history: bool,
 }
 
@@ -176,6 +179,8 @@ pub struct ScmState {
     pub history_open: bool,
     pub expanded_commits: HashSet<String>,
     pub commit_files: HashMap<String, CommitFiles>,
+    pub commit_details: HashMap<String, CommitDetail>,
+    pub web_remote: Option<WebRemote>,
     history_head: Option<String>,
     pub activity: Option<&'static str>,
     queue: VecDeque<Job>,
@@ -205,6 +210,8 @@ impl ScmState {
             history_open: true,
             expanded_commits: HashSet::new(),
             commit_files: HashMap::new(),
+            commit_details: HashMap::new(),
+            web_remote: None,
             history_head: None,
             activity: None,
             queue: VecDeque::new(),
@@ -243,15 +250,22 @@ impl ScmState {
                 .queue
                 .iter()
                 .any(|j| matches!(j, Job::Diff(q) if q.key == r.key)),
-            Job::History(_) | Job::CommitFiles(_) | Job::Push | Job::Pull | Job::Fetch => {
-                self.queue.contains(&job)
-            }
+            Job::History(_)
+            | Job::CommitFiles(_)
+            | Job::CommitDetail(_)
+            | Job::Push
+            | Job::Pull
+            | Job::Fetch => self.queue.contains(&job),
             _ => false,
         };
         if !duplicate {
             if !matches!(
                 job,
-                Job::Refresh | Job::Diff(_) | Job::History(_) | Job::CommitFiles(_)
+                Job::Refresh
+                    | Job::Diff(_)
+                    | Job::History(_)
+                    | Job::CommitFiles(_)
+                    | Job::CommitDetail(_)
             ) {
                 self.notice = None;
             }
@@ -400,6 +414,12 @@ impl ScmState {
                 },
             );
         }
+        if let Some((hash, Ok(detail))) = done.detail {
+            self.commit_details.insert(hash, detail);
+        }
+        if let Some(web) = done.web {
+            self.web_remote = web;
+        }
         let head = self.status.as_ref().and_then(|s| s.oid.clone());
         if self.enabled
             && (done.reload_history || head != self.history_head)
@@ -407,6 +427,7 @@ impl ScmState {
         {
             self.history_head = head;
             self.commit_files.clear();
+            self.commit_details.clear();
             self.expanded_commits.clear();
             self.queue.push_back(Job::History(0));
         }
@@ -423,6 +444,12 @@ impl ScmState {
 
     pub fn fetch(&mut self) {
         self.request(Job::Fetch);
+    }
+
+    pub fn request_detail(&mut self, hash: &str) {
+        if !self.commit_details.contains_key(hash) {
+            self.request(Job::CommitDetail(hash.to_owned()));
+        }
     }
 
     pub fn load_more_history(&mut self) {
@@ -772,6 +799,14 @@ fn execute(root: &Path, repo: Option<Repo>, job: Job) -> Done {
                 skip,
                 repo.log(skip, HISTORY_PAGE).map_err(|e| e.to_string()),
             ));
+            if skip == 0 {
+                done.web = Some(repo.web_remote());
+            }
+            return done;
+        }
+        Job::CommitDetail(hash) => {
+            let result = repo.commit_detail(&hash).map_err(|e| e.to_string());
+            done.detail = Some((hash, result));
             return done;
         }
         Job::CommitFiles(hash) => {
@@ -804,6 +839,61 @@ fn execute(root: &Path, repo: Option<Repo>, job: Job) -> Done {
     done
 }
 
+pub fn relative_long(now: i64, then: i64) -> String {
+    let s = (now - then).max(0);
+    let (n, unit) = match s {
+        0..=44 => return "just now".to_owned(),
+        45..=3_599 => ((s + 30) / 60, "minute"),
+        3_600..=86_399 => (s / 3_600, "hour"),
+        86_400..=2_591_999 => (s / 86_400, "day"),
+        2_592_000..=31_535_999 => (s / 2_592_000, "month"),
+        _ => (s / 31_536_000, "year"),
+    };
+    format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" })
+}
+
+/// "November 3, 2026 at 3:00 AM" for a Unix time seen from the commit's own UTC offset.
+pub fn format_commit_date(unix: i64, offset_min: i32) -> String {
+    const MONTHS: [&str; 12] = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
+    let local = unix + i64::from(offset_min) * 60;
+    let days = local.div_euclid(86_400);
+    let secs = local.rem_euclid(86_400);
+    // civil-from-days (Howard Hinnant): proleptic Gregorian calendar
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    let (hour, minute) = (secs / 3_600, secs % 3_600 / 60);
+    let (h12, half) = match hour {
+        0 => (12, "AM"),
+        1..=11 => (hour, "AM"),
+        12 => (12, "PM"),
+        _ => (hour - 12, "PM"),
+    };
+    format!(
+        "{} {day}, {year} at {h12}:{minute:02} {half}",
+        MONTHS[(month - 1) as usize]
+    )
+}
+
 pub fn relative_time(now: i64, then: i64) -> String {
     let s = (now - then).max(0);
     let (n, unit) = match s {
@@ -820,6 +910,30 @@ pub fn relative_time(now: i64, then: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_relative_time_and_dates_read_like_the_hover_card() {
+        let now = 1_800_000_000;
+        assert_eq!(relative_long(now, now - 300), "5 minutes ago");
+        assert_eq!(relative_long(now, now - 3_600), "1 hour ago");
+        assert_eq!(relative_long(now, now - 86_400), "1 day ago");
+        assert_eq!(relative_long(now, now - 800 * 86_400), "2 years ago");
+        // 2026-11-02 20:00:45 UTC is 3:00 AM on November 3 at +07:00
+        assert_eq!(
+            format_commit_date(1_793_649_645, 420),
+            "November 3, 2026 at 3:00 AM"
+        );
+        assert_eq!(format_commit_date(0, 0), "January 1, 1970 at 12:00 AM");
+        assert_eq!(
+            format_commit_date(951_782_400 + 12 * 3_600, 0),
+            "February 29, 2000 at 12:00 PM"
+        );
+        assert_eq!(
+            format_commit_date(86_399, -30),
+            "January 1, 1970 at 11:29 PM"
+        );
+        assert_eq!(format_commit_date(-1, 0), "December 31, 1969 at 11:59 PM");
+    }
 
     #[test]
     fn relative_time_picks_the_largest_sensible_unit() {
