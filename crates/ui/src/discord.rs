@@ -19,7 +19,8 @@ const SETTLE: Duration = Duration::from_millis(600);
 const QUICK_RETRIES: u32 = 1;
 const RETRY_AFTER: Duration = Duration::from_secs(15);
 const TICK: Duration = Duration::from_millis(100);
-const MIN_SEND_GAP: Duration = Duration::from_secs(15);
+// Discord allows 5 activity updates per 20 seconds, so a change goes out within 4 seconds.
+const MIN_SEND_GAP: Duration = Duration::from_secs(4);
 // Debug builds always have it so it can be worked on; a release build needs `--features discord`.
 pub const AVAILABLE: bool = cfg!(feature = "discord") || cfg!(debug_assertions);
 
@@ -724,7 +725,7 @@ impl DiscordState {
         }
     }
 
-    /// Sends the wanted presence when it changed, at most once per 15 seconds. Returns whether the
+    /// Sends the wanted presence when it changed, at most once per 4 seconds. Returns whether the
     /// settings page should refresh (the status may have changed).
     /// Starts the one-time download of the profile picture once Discord says who is signed in.
     pub fn pump_avatar(&mut self, dir: Option<&Path>) -> bool {
