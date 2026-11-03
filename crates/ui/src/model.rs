@@ -1189,6 +1189,7 @@ impl Model {
             }
             Command::ToggleDiscord
             | Command::DiscordConnect
+            | Command::DiscordLogout
             | Command::ToggleDiscordFile
             | Command::ToggleDiscordWorkspace
             | Command::ToggleDiscordTime => self.run_discord_command(command),

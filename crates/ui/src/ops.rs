@@ -1104,10 +1104,15 @@ impl Model {
             C::ToggleDiscord => {
                 self.discord.settings.enabled = !self.discord.settings.enabled;
             }
+            C::DiscordConnect if !self.discord.settings.enabled => {
+                self.discord.settings.enabled = true;
+            }
             C::DiscordConnect => {
                 self.discord.reconnect();
                 return;
             }
+            // nanti never holds a Discord login; logging out drops the link to the Discord app and clears the status.
+            C::DiscordLogout => self.discord.settings.enabled = false,
             C::ToggleDiscordFile => {
                 self.discord.settings.show_file = !self.discord.settings.show_file;
             }
@@ -1166,10 +1171,16 @@ impl Model {
         {
             parts.push(crate::model::tab_language(t));
         }
+        let small_image = tab.filter(|_| s.show_file).and_then(|t| {
+            let ext = t.path.extension()?.to_str()?;
+            let key = crate::discord::language_asset(ext)?;
+            Some((key.to_owned(), crate::model::tab_language(t)))
+        });
         crate::discord::Presence {
             details,
             state: (!parts.is_empty()).then(|| parts.join(" · ")),
             start_ms: s.show_time.then_some(self.discord.started_ms),
+            small_image,
         }
     }
 

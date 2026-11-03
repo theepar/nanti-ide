@@ -17,7 +17,8 @@ const READY_TIMEOUT: Duration = Duration::from_secs(5);
 const RETRY_AFTER: Duration = Duration::from_secs(15);
 const TICK: Duration = Duration::from_millis(100);
 const MIN_SEND_GAP: Duration = Duration::from_secs(15);
-pub const AVAILABLE: bool = cfg!(feature = "discord");
+// Debug builds always have it so it can be worked on; a release build needs `--features discord`.
+pub const AVAILABLE: bool = cfg!(feature = "discord") || cfg!(debug_assertions);
 
 const SETTINGS_FILE: &str = "discord.json";
 // The public id of nanti's own Discord application; it names the activity and carries no secret.
@@ -117,11 +118,47 @@ impl DiscordStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Presence {
     pub details: String,
     pub state: Option<String>,
     pub start_ms: Option<u64>,
+    // Asset key uploaded in the Discord developer portal, and the text shown when hovering it.
+    pub small_image: Option<(String, String)>,
+}
+
+/// The asset key of the icon that stands for a file's language; the PNGs are made by scripts/gen-discord-assets.ps1.
+pub fn language_asset(ext: &str) -> Option<&'static str> {
+    Some(match ext.to_ascii_lowercase().as_str() {
+        "rs" => "rust",
+        "go" => "go",
+        "dart" => "dart",
+        "js" | "mjs" | "cjs" => "javascript",
+        "ts" | "mts" | "cts" => "typescript",
+        "jsx" | "tsx" => "react",
+        "py" => "python",
+        "html" | "htm" | "xhtml" => "html",
+        "css" | "scss" | "sass" | "less" => "css",
+        "json" | "jsonc" => "json",
+        "md" | "markdown" => "markdown",
+        "ps1" | "psm1" | "psd1" => "powershell",
+        "sh" | "bash" | "zsh" => "shell",
+        "php" => "php",
+        "java" => "java",
+        "kt" | "kts" => "kotlin",
+        "c" | "h" => "c",
+        "cpp" | "cc" | "cxx" | "hpp" => "cpp",
+        "cs" => "csharp",
+        "rb" => "ruby",
+        "swift" => "swift",
+        "lua" => "lua",
+        "sql" => "sql",
+        "yaml" | "yml" => "yaml",
+        "toml" => "toml",
+        "vue" => "vue",
+        "svelte" => "svelte",
+        _ => return None,
+    })
 }
 
 enum Cmd {
@@ -148,6 +185,12 @@ pub fn activity_payload(pid: u32, nonce: u64, presence: Option<&Presence>) -> Va
         if let Some(t) = p.start_ms {
             a["timestamps"] = json!({ "start": t });
         }
+        let mut assets = json!({ "large_image": "nanti", "large_text": "Nanti IDE" });
+        if let Some((key, text)) = &p.small_image {
+            assets["small_image"] = json!(key);
+            assets["small_text"] = json!(clip(text));
+        }
+        a["assets"] = assets;
         a
     });
     json!({
@@ -574,6 +617,35 @@ impl DiscordState {
 }
 
 #[cfg(test)]
+mod asset_tests {
+    use super::*;
+
+    #[test]
+    fn the_activity_carries_the_app_logo_and_the_language_icon() {
+        let p = Presence {
+            details: "Editing a.rs".into(),
+            small_image: Some(("rust".into(), "Rust".into())),
+            ..Presence::default()
+        };
+        let v = activity_payload(1, 2, Some(&p));
+        let assets = &v["args"]["activity"]["assets"];
+        assert_eq!(assets["large_image"], "nanti");
+        assert_eq!(assets["small_image"], "rust");
+        assert_eq!(assets["small_text"], "Rust");
+        let none = activity_payload(1, 3, Some(&Presence::default()));
+        assert!(none["args"]["activity"]["assets"]["small_image"].is_null());
+    }
+
+    #[test]
+    fn languages_map_to_asset_keys_and_unknown_files_have_none() {
+        assert_eq!(language_asset("RS"), Some("rust"));
+        assert_eq!(language_asset("tsx"), Some("react"));
+        assert_eq!(language_asset("ps1"), Some("powershell"));
+        assert_eq!(language_asset("exe"), None);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
 
@@ -677,6 +749,7 @@ mod tests {
             details: "Editing main.rs".into(),
             state: Some("Workspace: nanti-ide".into()),
             start_ms: Some(1_700_000_000_000),
+            ..Presence::default()
         })))
         .unwrap();
         tx.send(Cmd::Presence(None)).unwrap();
@@ -753,8 +826,7 @@ mod tests {
         tx.send(Cmd::Shutdown).unwrap();
         let mut pending = Some(Presence {
             details: "Idle".into(),
-            state: None,
-            start_ms: None,
+            ..Presence::default()
         });
         let status = Mutex::new(DiscordStatus::Connecting);
         let _ = session(
@@ -814,8 +886,7 @@ mod tests {
         assert_eq!(st.status(), DiscordStatus::Off);
         assert!(!st.pump(Some(Presence {
             details: "x".into(),
-            state: None,
-            start_ms: None
+            ..Presence::default()
         })));
     }
 }

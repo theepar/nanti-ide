@@ -290,6 +290,7 @@ struct Scrolls {
     problems: ScrollHandle,
     output: ScrollHandle,
     search: ScrollHandle,
+    tabs: ScrollHandle,
 }
 
 type Spans = Rc<Vec<Vec<LineSpan>>>;
@@ -351,6 +352,7 @@ pub struct Workbench {
     webview_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     webview_applied: Option<(i32, i32, i32, i32)>,
     commit_card: Option<views::commit_tip::CardAnchor>,
+    tabs_revealed: Cell<(Option<usize>, usize, bool)>,
     commit_tip: Option<gpui::Entity<views::commit_tip::CommitTip>>,
     card_gen: u64,
     hovered_commit: Option<String>,
@@ -405,6 +407,7 @@ impl Workbench {
             webview_bounds: Rc::new(Cell::new(None)),
             webview_applied: Some((-1, -1, 0, 0)),
             commit_card: None,
+            tabs_revealed: Cell::new((None, 0, false)),
             commit_tip: None,
             card_gen: 0,
             hovered_commit: None,
@@ -2052,7 +2055,40 @@ impl Workbench {
     }
 
     fn tab_bar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        // Bring the active tab into view once per change, so tabs past the edge are never out of reach.
+        let special = self.model.settings_open || self.model.ext_detail.is_some();
+        let shown = (self.model.active_tab, self.model.tabs.len(), special);
+        if self.tabs_revealed.get() != shown {
+            self.tabs_revealed.set(shown);
+            // The settings and extension pages are the first tabs; a file tab counts after them.
+            let target = if special {
+                Some(0)
+            } else {
+                self.model.active_tab
+            };
+            if let Some(i) = target {
+                self.scrolls.tabs.scroll_to_item(i);
+            }
+        }
         div()
+            .id("tab-bar")
+            .overflow_x_scroll()
+            .track_scroll(&self.scrolls.tabs)
+            .on_scroll_wheel(cx.listener(|this, ev: &ScrollWheelEvent, _w, cx| {
+                let (dx, dy) = match ev.delta {
+                    ScrollDelta::Lines(l) => (l.x * 40.0, l.y * 40.0),
+                    ScrollDelta::Pixels(d) => (f32::from(d.x), f32::from(d.y)),
+                };
+                // A plain mouse wheel only scrolls up and down; over the tabs it moves them sideways.
+                if dx.abs() < dy.abs() {
+                    let o = this.scrolls.tabs.offset();
+                    let max = this.scrolls.tabs.max_offset();
+                    let x = (o.x + px(dy)).clamp(-max.width, px(0.));
+                    this.scrolls.tabs.set_offset(point(x, o.y));
+                    cx.notify();
+                    cx.stop_propagation();
+                }
+            }))
             .flex()
             .flex_none()
             .h(px(35.))
@@ -2145,6 +2181,7 @@ impl Workbench {
                 let dirty = t.is_dirty();
                 div()
                     .id(("tab", i))
+                    .flex_none()
                     .on_mouse_down(
                         MouseButton::Right,
                         cx.listener(move |this, ev: &MouseDownEvent, _w, cx| {

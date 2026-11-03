@@ -85,6 +85,7 @@ pub enum Command {
     ChangeLanguageMode,
     ToggleDiscord,
     DiscordConnect,
+    DiscordLogout,
     ToggleDiscordFile,
     ToggleDiscordWorkspace,
     ToggleDiscordTime,
@@ -99,6 +100,7 @@ impl Command {
             self,
             Command::ToggleDiscord
                 | Command::DiscordConnect
+                | Command::DiscordLogout
                 | Command::ToggleDiscordFile
                 | Command::ToggleDiscordWorkspace
                 | Command::ToggleDiscordTime
@@ -110,7 +112,7 @@ impl Command {
         !self.is_discord() || crate::discord::AVAILABLE
     }
 
-    pub const ALL: [Command; 84] = [
+    pub const ALL: [Command; 85] = [
         Command::CommandPalette,
         Command::QuickOpen,
         Command::Save,
@@ -179,6 +181,7 @@ impl Command {
         Command::OpenSettings,
         Command::ToggleDiscord,
         Command::DiscordConnect,
+        Command::DiscordLogout,
         Command::ToggleDiscordFile,
         Command::ToggleDiscordWorkspace,
         Command::ToggleDiscordTime,
@@ -267,6 +270,7 @@ impl Command {
             Command::OpenSettings => "Preferences: Open Settings",
             Command::ToggleDiscord => "Discord: Toggle Rich Presence",
             Command::DiscordConnect => "Discord: Connect",
+            Command::DiscordLogout => "Discord: Log Out",
             Command::ToggleDiscordFile => "Discord: Toggle Showing the File Name",
             Command::ToggleDiscordWorkspace => "Discord: Toggle Showing the Workspace",
             Command::ToggleDiscordTime => "Discord: Toggle Showing Elapsed Time",
@@ -1680,7 +1684,7 @@ mod discord_gate_tests {
     fn discord_commands_are_listed_only_when_the_feature_is_built() {
         let p = Palette::commands(&[]);
         let listed = p.results().any(|r| r.label.starts_with("Discord:"));
-        assert_eq!(listed, cfg!(feature = "discord"));
+        assert_eq!(listed, crate::discord::AVAILABLE);
         assert!(Command::ALL.iter().any(|c| c.is_discord()));
     }
 }

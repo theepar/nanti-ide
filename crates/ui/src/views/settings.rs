@@ -4,7 +4,7 @@ use gpui::{
 };
 
 use crate::palette::Command;
-use crate::{Workbench, theme};
+use crate::{Workbench, assets, theme};
 
 impl Workbench {
     pub(crate) fn setting_row(
@@ -48,6 +48,114 @@ impl Workbench {
             .into_any_element()
     }
 
+    fn discord_account_card(&self, cx: &mut Context<Self>) -> AnyElement {
+        use crate::discord::DiscordStatus;
+        const AVATARS: [u32; 6] = [0x5865f2, 0x3ba55d, 0xc9811a, 0xc2377f, 0xc03537, 0x2f9e6e];
+        let status = self.model.discord.status();
+        let connected = status.connected();
+        let (title, line) = match &status {
+            DiscordStatus::Connected(name) => (
+                name.clone(),
+                "Signed in on the Discord app on this computer".to_owned(),
+            ),
+            other => ("Discord".to_owned(), other.describe()),
+        };
+        let hue = AVATARS[title.bytes().map(usize::from).sum::<usize>() % AVATARS.len()];
+        let avatar = div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .size(px(46.))
+            .rounded_full()
+            .bg(rgb(if connected { hue } else { 0x3a3a3a }))
+            .text_size(px(19.))
+            .font_weight(FontWeight::BOLD)
+            .text_color(rgb(0xffffff))
+            .child(if connected {
+                div()
+                    .child(SharedString::from(
+                        title
+                            .chars()
+                            .next()
+                            .map_or(String::from("?"), |c| c.to_uppercase().to_string()),
+                    ))
+                    .into_any_element()
+            } else {
+                assets::icon("person", 24., 0xb0b0b0).into_any_element()
+            });
+        let buttons = if connected {
+            div()
+                .flex()
+                .gap_2()
+                .child(
+                    Self::scm_button("set-discord-refresh", "Refresh", true).on_click(cx.listener(
+                        |this, _: &ClickEvent, window, cx| {
+                            this.apply_command(Command::DiscordConnect, window, cx);
+                        },
+                    )),
+                )
+                .child(
+                    Self::scm_button("set-discord-logout", "Log out", true).on_click(cx.listener(
+                        |this, _: &ClickEvent, window, cx| {
+                            this.apply_command(Command::DiscordLogout, window, cx);
+                        },
+                    )),
+                )
+        } else {
+            div().flex().gap_2().child(
+                Self::scm_button("set-discord-connect", "Connect", true).on_click(cx.listener(
+                    |this, _: &ClickEvent, window, cx| {
+                        this.apply_command(Command::DiscordConnect, window, cx);
+                    },
+                )),
+            )
+        };
+        div()
+            .flex()
+            .items_center()
+            .gap_4()
+            .w_full()
+            .max_w(px(820.))
+            .py(px(14.))
+            .border_b_1()
+            .border_color(rgb(0x363636))
+            .child(avatar)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .gap(px(3.))
+                    .child(
+                        div()
+                            .text_size(px(15.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(rgb(0xf0f0f0))
+                            .child(SharedString::from(title)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .text_size(px(12.5))
+                            .text_color(rgb(0xa8a8a8))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .size(px(8.))
+                                    .rounded_full()
+                                    .bg(rgb(if connected { 0x3ba55d } else { 0x6b6b6b })),
+                            )
+                            .child(SharedString::from(line)),
+                    ),
+            )
+            .child(div().flex_none().child(buttons))
+            .into_any_element()
+    }
+
     pub(crate) fn segmented(
         &self,
         id: &'static str,
@@ -57,10 +165,10 @@ impl Workbench {
         div()
             .flex()
             .flex_none()
-            .rounded_md()
-            .border_1()
-            .border_color(rgb(theme::BORDER))
-            .overflow_hidden()
+            .gap(px(2.))
+            .p(px(3.))
+            .rounded_full()
+            .bg(rgb(0x2b2b2b))
             .children(
                 options
                     .into_iter()
@@ -70,8 +178,9 @@ impl Workbench {
                             .id((id, i))
                             .flex()
                             .items_center()
-                            .h(px(28.))
+                            .h(px(26.))
                             .px_3()
+                            .rounded_full()
                             .text_size(px(12.))
                             .cursor_pointer()
                             .when(on, |d| {
@@ -166,7 +275,6 @@ impl Workbench {
             cx,
         );
         let d = &self.model.discord;
-        let discord_status = d.status().describe();
         let saved_in = crate::layout::layout_path()
             .map_or_else(|| "memory only".to_owned(), |p| p.display().to_string());
         let page = div()
@@ -255,15 +363,7 @@ impl Workbench {
                             cx,
                         ),
                     ))
-                    .child(Self::setting_row(
-                        "Account",
-                        discord_status,
-                        Self::flat_button("set-discord-connect", "Connect")
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.apply_command(Command::DiscordConnect, window, cx);
-                            }))
-                            .into_any_element(),
-                    ))
+                    .child(self.discord_account_card(cx))
                     .child(Self::setting_row(
                         "Show the file name",
                         "The file you are editing and its language.",
