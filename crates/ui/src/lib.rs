@@ -58,9 +58,10 @@ const TAB_BAR_HEIGHT: f32 = 35.0;
 const MAX_RENDERED_LINES: usize = 20_000;
 const DIFF_NOTE_H: f32 = 24.0;
 const EDITOR_MAX_LINES: usize = 100_000;
-const OVERSCAN_ROWS: usize = 10;
+pub(crate) const OVERSCAN_ROWS: usize = 10;
 const EXPLORER_ROW_H: f32 = 22.0;
-const SCM_ROW_H: f32 = 22.0;
+pub(crate) const SCM_ROW_H: f32 = 22.0;
+pub(crate) const OUTPUT_ROW_H: f32 = 20.0;
 const SCM_HEADER_H: f32 = 24.0;
 const COMMIT_ROW_H: f32 = 46.0;
 const HISTORY_HEADER_H: f32 = 28.0;
@@ -3590,19 +3591,26 @@ impl Workbench {
         } else {
             summary
         };
-        let mut rows: Vec<AnyElement> = Vec::new();
+        // Up to 2000 hits can come back; only the rows near the viewport become elements.
+        let scrolled = (-f32::from(self.scrolls.search.offset().y)).max(0.0);
+        let viewport = f32::from(self.scrolls.search.bounds().size.height);
+        let viewport = if viewport > 0.0 { viewport } else { 1600.0 };
+        let margin = OVERSCAN_ROWS as f32 * SCM_ROW_H;
+        let mut w = RowWindow::new(scrolled - margin, scrolled + viewport + margin);
         let mut hit_id = 0usize;
         if let Some(r) = &s.results {
             for (fi, file) in r.files.iter().enumerate() {
                 let collapsed = s.collapsed.contains(&file.path);
                 let path = file.path.clone();
-                rows.push(
+                w.push(SCM_ROW_H, || {
                     div()
                         .id(("search-file", fi))
                         .flex()
+                        .flex_none()
+                        .items_center()
+                        .h(px(SCM_ROW_H))
                         .gap_1()
                         .px_2()
-                        .py(px(2.))
                         .text_size(px(12.))
                         .cursor_pointer()
                         .hover(|s| s.bg(rgb(theme::HOVER)))
@@ -3617,8 +3625,8 @@ impl Workbench {
                                 .text_color(rgb(theme::TEXT_DIM))
                                 .child(SharedString::from(format!("({})", file.hits.len()))),
                         )
-                        .into_any_element(),
-                );
+                        .into_any_element()
+                });
                 if collapsed {
                     continue;
                 }
@@ -3629,14 +3637,17 @@ impl Workbench {
                         background_color: Some(rgba(theme::FIND_CURRENT).into()),
                         ..Default::default()
                     };
-                    rows.push(
+                    let id = hit_id;
+                    w.push(SCM_ROW_H, || {
                         div()
-                            .id(("search-hit", hit_id))
+                            .id(("search-hit", id))
                             .flex()
+                            .flex_none()
+                            .items_center()
+                            .h(px(SCM_ROW_H))
                             .gap_2()
                             .pl_5()
                             .pr_2()
-                            .py(px(1.))
                             .text_size(px(12.))
                             .overflow_hidden()
                             .cursor_pointer()
@@ -3659,12 +3670,13 @@ impl Workbench {
                                         .with_highlights([(bytes, highlight)]),
                                 ),
                             )
-                            .into_any_element(),
-                    );
+                            .into_any_element()
+                    });
                     hit_id += 1;
                 }
             }
         }
+        let rows = w.finish();
         let opts = s.opts;
         div()
             .flex()

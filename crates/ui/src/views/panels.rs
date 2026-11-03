@@ -1,7 +1,7 @@
 use gpui::{AnyElement, ClickEvent, Context, IntoElement, SharedString, div, prelude::*, px, rgb};
 
 use crate::palette::Command;
-use crate::{Workbench, theme};
+use crate::{OUTPUT_ROW_H, Workbench, theme};
 
 impl Workbench {
     pub(crate) fn explorer_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -224,31 +224,43 @@ impl Workbench {
                 .child("No syntax problems in the open files. (Syntax check only: no type errors or lints.)")
                 .into_any_element();
         }
-        let mut rows: Vec<AnyElement> = Vec::new();
+        let scrolled = (-f32::from(self.scrolls.problems.offset().y)).max(0.0);
+        let viewport = f32::from(self.scrolls.problems.bounds().size.height);
+        let viewport = if viewport > 0.0 { viewport } else { 1600.0 };
+        let margin = crate::OVERSCAN_ROWS as f32 * crate::SCM_ROW_H;
+        let mut w = crate::RowWindow::new(scrolled - margin, scrolled + viewport + margin);
         let mut id = 0usize;
         for f in files {
-            rows.push(
+            w.push(crate::SCM_ROW_H, || {
                 div()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .h(px(crate::SCM_ROW_H))
                     .px_3()
-                    .py(px(3.))
                     .text_size(px(12.))
                     .child(SharedString::from(format!(
                         "{}  ({})",
                         f.title,
                         f.items.len()
                     )))
-                    .into_any_element(),
-            );
+                    .into_any_element()
+            });
             for d in &f.items {
                 let (path, line, col, len) = (f.path.clone(), d.line, d.col, d.len);
-                rows.push(
+                let row_id = id;
+                w.push(crate::SCM_ROW_H, || {
                     div()
-                        .id(("problem", id))
+                        .id(("problem", row_id))
                         .flex()
+                        .flex_none()
+                        .items_center()
+                        .h(px(crate::SCM_ROW_H))
                         .gap_2()
                         .pl_6()
                         .pr_3()
-                        .py(px(2.))
+                        .whitespace_nowrap()
+                        .overflow_hidden()
                         .text_size(px(12.))
                         .cursor_pointer()
                         .hover(|s| s.bg(rgb(theme::HOVER)))
@@ -269,49 +281,77 @@ impl Workbench {
                                     d.col + 1
                                 ))),
                         )
-                        .into_any_element(),
-                );
+                        .into_any_element()
+                });
                 id += 1;
             }
         }
-        self.scroll_list("problems-list", &self.scrolls.problems, rows, None, cx)
+        self.scroll_list(
+            "problems-list",
+            &self.scrolls.problems,
+            w.finish(),
+            None,
+            cx,
+        )
     }
 
     pub(crate) fn output_view(&self, cx: &mut Context<Self>) -> AnyElement {
         let log = &self.model.output;
-        let lines: Vec<AnyElement> = log
-            .lines()
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .map(|l| {
-                div()
-                    .flex()
-                    .gap_3()
-                    .px_3()
-                    .text_size(px(12.))
-                    .font_family(crate::FONT_FAMILY)
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_color(rgb(theme::LINE_NUMBER))
-                            .child(SharedString::from(crate::output::OutputLog::stamp(l))),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(76.))
-                            .text_color(rgb(theme::ACCENT))
-                            .child(SharedString::from(l.channel.clone())),
-                    )
-                    .child(
-                        div()
-                            .whitespace_nowrap()
-                            .child(SharedString::from(l.text.clone())),
-                    )
-                    .into_any_element()
-            })
-            .collect();
+        // Up to 2000 lines are kept; only the ones near the viewport become elements.
+        let all: Vec<_> = log.lines().collect();
+        let total = all.len();
+        let scrolled = (-f32::from(self.scrolls.output.offset().y)).max(0.0);
+        let viewport = f32::from(self.scrolls.output.bounds().size.height);
+        let viewport = if viewport > 0.0 { viewport } else { 1600.0 };
+        let first = ((scrolled / OUTPUT_ROW_H) as usize)
+            .saturating_sub(crate::OVERSCAN_ROWS)
+            .min(total);
+        let last = (((scrolled + viewport) / OUTPUT_ROW_H).ceil() as usize + crate::OVERSCAN_ROWS)
+            .min(total)
+            .max(first);
+        let spacer = |rows: usize| {
+            div()
+                .h(px(rows as f32 * OUTPUT_ROW_H))
+                .flex_none()
+                .into_any_element()
+        };
+        let mut lines: Vec<AnyElement> = Vec::new();
+        if first > 0 {
+            lines.push(spacer(first));
+        }
+        lines.extend(all.iter().rev().skip(first).take(last - first).map(|l| {
+            div()
+                .flex()
+                .flex_none()
+                .h(px(OUTPUT_ROW_H))
+                .items_center()
+                .gap_3()
+                .px_3()
+                .text_size(px(12.))
+                .font_family(crate::FONT_FAMILY)
+                .child(
+                    div()
+                        .flex_none()
+                        .text_color(rgb(theme::LINE_NUMBER))
+                        .child(SharedString::from(crate::output::OutputLog::stamp(l))),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .w(px(76.))
+                        .text_color(rgb(theme::ACCENT))
+                        .child(SharedString::from(l.channel.clone())),
+                )
+                .child(
+                    div()
+                        .whitespace_nowrap()
+                        .child(SharedString::from(l.text.clone())),
+                )
+                .into_any_element()
+        }));
+        if last < total {
+            lines.push(spacer(total - last));
+        }
         div()
             .flex()
             .flex_col()
