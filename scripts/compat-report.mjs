@@ -1,50 +1,33 @@
 // Runs real extensions from Open VSX through the nanti extension host and reports which ones activate
 // and which VS Code APIs they reach for that the host does not provide.
 //
-// usage: node scripts/compat-report.mjs [--work=<dir>] [--timeout=<ms>] [--json=<file>] publisher.name ...
+// usage: node scripts/compat-report.mjs [--work=<dir>] [--timeout=<ms>] [--json=<file>] [--list=<file>] publisher.name ...
 // Every extension runs in its own process with a throwaway HOME (see probe-extension.mjs); nothing is kept.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { fetchExtension } from "./lib/openvsx.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const opt = (name, dflt) => args.find((a) => a.startsWith(`--${name}=`))?.split("=").slice(1).join("=") ?? dflt;
-const ids = args.filter((a) => !a.startsWith("--"));
+const listFile = opt("list", "");
+const ids = [
+  ...args.filter((a) => !a.startsWith("--")),
+  ...(listFile ? fs.readFileSync(path.resolve(listFile), "utf8").split(/\r?\n/).map((l) => l.replace(/#.*/, "").trim()).filter(Boolean) : []),
+];
 const work = path.resolve(opt("work", path.join(os.tmpdir(), "nanti-compat")));
 const timeout = Number(opt("timeout", "25000"));
 const jsonOut = opt("json", "");
 if (ids.length === 0) {
-  console.error("usage: compat-report.mjs [--work=dir] [--timeout=ms] [--json=file] publisher.name ...");
+  console.error("usage: compat-report.mjs [--work=dir] [--timeout=ms] [--json=file] [--list=file] publisher.name ...");
   process.exit(2);
 }
 fs.mkdirSync(work, { recursive: true });
 
-async function download(id) {
-  const [ns, name] = id.split(".");
-  const meta = await fetch(`https://open-vsx.org/api/${ns}/${name}/latest`).then((r) => (r.ok ? r.json() : null));
-  if (!meta?.files?.download) return { error: "not on Open VSX" };
-  const target = path.join(work, id);
-  const marker = path.join(target, ".version");
-  if (!(fs.existsSync(marker) && fs.readFileSync(marker, "utf8") === meta.version)) {
-    fs.rmSync(target, { recursive: true, force: true });
-    const vsix = path.join(work, `${id}.zip`);
-    const res = await fetch(meta.files.download);
-    if (!res.ok) return { error: `download failed (${res.status})` };
-    fs.writeFileSync(vsix, Buffer.from(await res.arrayBuffer()));
-    const zip = spawnSync(
-      "powershell",
-      ["-NoProfile", "-Command", `Add-Type -A System.IO.Compression.FileSystem; [IO.Compression.ZipFile]::ExtractToDirectory('${vsix}', '${target}')`],
-      { encoding: "utf8" },
-    );
-    fs.rmSync(vsix, { force: true });
-    if (zip.status !== 0) return { error: `extract failed: ${zip.stderr.trim().slice(0, 120)}` };
-    fs.writeFileSync(marker, meta.version);
-  }
-  return { version: meta.version, dir: path.join(target, "extension"), size: meta.size };
-}
+const download = (id) => fetchExtension(id, work);
 
 function probe(dir) {
   const started = Date.now();
