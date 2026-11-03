@@ -75,6 +75,24 @@ impl Model {
         });
     }
 
+    pub fn load_icon_settings(&mut self) {
+        if let Some(dir) = &self.config_dir {
+            self.icon_choice = crate::icon_theme::load_choice(dir);
+        }
+    }
+
+    fn save_icon_choice(&self) {
+        if let Some(dir) = &self.config_dir {
+            let _ = crate::icon_theme::save_choice(dir, &self.icon_choice);
+        }
+    }
+
+    /// `None` goes back to the built-in icons.
+    pub fn set_icon_theme(&mut self, key: Option<String>) {
+        self.icon_choice.active = key;
+        self.save_icon_choice();
+    }
+
     pub fn load_format_settings(&mut self) {
         self.format_on_save = self
             .config_dir
@@ -615,6 +633,17 @@ impl Model {
             Some(dir) => extensions::list_installed(dir, self.panel_extension.as_deref()),
             None => Vec::new(),
         };
+        self.icon_themes = crate::icon_theme::discover(&self.extensions);
+        if self.config_dir.is_some()
+            && let Some(label) =
+                crate::icon_theme::adopt_new(&mut self.icon_choice, &self.icon_themes)
+        {
+            self.save_icon_choice();
+            self.say(
+                "Icons",
+                &format!("{label} is now the file icon theme. You can change it in Settings."),
+            );
+        }
         if self.extensions.is_empty() {
             self.recommend_tried = false;
         }

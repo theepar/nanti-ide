@@ -21,6 +21,7 @@ pub mod emmet;
 pub mod extensions;
 pub mod find;
 pub mod format;
+pub mod icon_theme;
 pub mod launch;
 pub mod layout;
 pub mod lsp;
@@ -352,6 +353,7 @@ pub struct Workbench {
     webview_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     webview_applied: Option<(i32, i32, i32, i32)>,
     commit_card: Option<views::commit_tip::CardAnchor>,
+    icon_theme_cache: RefCell<Option<(String, Option<Rc<icon_theme::IconTheme>>)>>,
     tabs_revealed: Cell<(Option<usize>, usize, bool)>,
     commit_tip: Option<gpui::Entity<views::commit_tip::CommitTip>>,
     card_gen: u64,
@@ -407,6 +409,7 @@ impl Workbench {
             webview_bounds: Rc::new(Cell::new(None)),
             webview_applied: Some((-1, -1, 0, 0)),
             commit_card: None,
+            icon_theme_cache: RefCell::new(None),
             tabs_revealed: Cell::new((None, 0, false)),
             commit_tip: None,
             card_gen: 0,
@@ -451,6 +454,7 @@ impl Workbench {
         self.model.config_dir = Some(dir);
         self.model.load_discord_settings();
         self.model.load_format_settings();
+        self.model.load_icon_settings();
         self.model.panel_extension = panel_extension;
         self.model.refresh_extensions();
     }
@@ -1926,9 +1930,9 @@ impl Workbench {
                                             chevron.map(|c| assets::icon(c, 14., theme::TEXT_DIM)),
                                         ))
                                         .child(if is_dir {
-                                            assets::icon("folder", 15., 0x7f9fbf).into_any_element()
+                                            self.folder_icon(&e.name, e.expanded, e.depth == 0, 15.)
                                         } else {
-                                            Self::file_icon(&e.name, 15.)
+                                            self.file_icon(&e.name, 15.)
                                         })
                                         .child(
                                             div()
@@ -2171,7 +2175,7 @@ impl Workbench {
                     }))
                     .child(match &t.content {
                         TabContent::Webview => self.extension_icon(14.),
-                        _ => Self::file_icon(&t.title, 14.),
+                        _ => self.file_icon(&t.title, 14.),
                     })
                     .child(SharedString::from(t.title.clone()))
                     .child(
@@ -2925,7 +2929,50 @@ impl Workbench {
             .child(body)
     }
 
-    fn file_icon(name: &str, size: f32) -> AnyElement {
+    /// The theme the user picked, loaded once and kept until the choice changes.
+    fn active_icon_theme(&self) -> Option<Rc<icon_theme::IconTheme>> {
+        let key = self.model.icon_choice.active.clone()?;
+        if let Some((k, t)) = &*self.icon_theme_cache.borrow()
+            && *k == key
+        {
+            return t.clone();
+        }
+        let loaded = self
+            .model
+            .icon_themes
+            .iter()
+            .find(|t| t.key == key)
+            .and_then(|t| icon_theme::IconTheme::load(&t.json).ok())
+            .map(Rc::new);
+        *self.icon_theme_cache.borrow_mut() = Some((key, loaded.clone()));
+        loaded
+    }
+
+    fn themed_icon(path: PathBuf, size: f32) -> AnyElement {
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .w(px(size + 4.))
+            .child(gpui::img(path).flex_none().size(px(size)))
+            .into_any_element()
+    }
+
+    fn folder_icon(&self, name: &str, expanded: bool, root: bool, size: f32) -> AnyElement {
+        match self
+            .active_icon_theme()
+            .and_then(|t| t.folder_icon(name, expanded, root))
+        {
+            Some(path) => Self::themed_icon(path, size),
+            None => assets::icon("folder", size, 0x7f9fbf).into_any_element(),
+        }
+    }
+
+    fn file_icon(&self, name: &str, size: f32) -> AnyElement {
+        if let Some(path) = self.active_icon_theme().and_then(|t| t.file_icon(name)) {
+            return Self::themed_icon(path, size);
+        }
         let color = assets::file_color(name);
         match assets::file_badge(name) {
             Some(badge) => div()

@@ -48,6 +48,54 @@ impl Workbench {
             .into_any_element()
     }
 
+    /// One pill per theme the installed extensions bring, plus the built-in icons.
+    fn icon_theme_picker(&self, cx: &mut Context<Self>) -> AnyElement {
+        let active = self.model.icon_choice.active.clone();
+        let mut options: Vec<(String, Option<String>)> = vec![("Built-in".to_owned(), None)];
+        options.extend(
+            self.model
+                .icon_themes
+                .iter()
+                .map(|t| (t.label.clone(), Some(t.key.clone()))),
+        );
+        div()
+            .flex()
+            .flex_wrap()
+            .justify_end()
+            .gap(px(2.))
+            .p(px(3.))
+            .rounded_xl()
+            .bg(rgb(0x2b2b2b))
+            .children(options.into_iter().enumerate().map(|(i, (label, key))| {
+                let on = key == active;
+                div()
+                    .id(("set-icon-theme", i))
+                    .flex()
+                    .items_center()
+                    .h(px(26.))
+                    .px_3()
+                    .rounded_full()
+                    .text_size(px(12.))
+                    .cursor_pointer()
+                    .when(on, |d| {
+                        d.bg(rgb(theme::ACCENT))
+                            .text_color(rgb(0x1e1e1e))
+                            .font_weight(FontWeight::MEDIUM)
+                    })
+                    .when(!on, |d| {
+                        d.text_color(rgb(theme::TEXT))
+                            .hover(|s| s.bg(rgb(theme::HOVER)))
+                    })
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
+                        this.model.set_icon_theme(key.clone());
+                        this.model.message = Some("File icon theme changed".to_owned());
+                        cx.notify();
+                    }))
+                    .child(SharedString::from(label))
+            }))
+            .into_any_element()
+    }
+
     fn discord_account_card(&self, cx: &mut Context<Self>) -> AnyElement {
         use crate::discord::DiscordStatus;
         const AVATARS: [u32; 6] = [0x5865f2, 0x3ba55d, 0xc9811a, 0xc2377f, 0xc03537, 0x2f9e6e];
@@ -356,6 +404,16 @@ impl Workbench {
                         "Status bar",
                         "The bar at the bottom of the window.",
                         self.switch("set-status", l.status_bar, Command::ToggleStatusBar, cx),
+                    ))
+                    .child(section("APPEARANCE"))
+                    .child(Self::setting_row(
+                        "File icon theme",
+                        if self.model.icon_themes.is_empty() {
+                            "Icons of files and folders. No icon theme extension is installed; install one such as Material Icon Theme and it shows up here."
+                        } else {
+                            "Icons of files and folders in the explorer and the tabs. A theme you install is switched on once; pick Built-in to go back."
+                        },
+                        self.icon_theme_picker(cx),
                     ))
                     .child(section("EDITOR"))
                     .child(Self::setting_row(
