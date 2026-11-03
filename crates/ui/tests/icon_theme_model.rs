@@ -96,3 +96,39 @@ fn without_a_config_folder_nothing_is_switched_on() {
     assert!(m.icon_themes.is_empty());
     assert_eq!(m.icon_choice.active, None);
 }
+
+#[gpui::test]
+fn the_settings_dropdown_renders_open_and_picking_an_entry_closes_it(
+    cx: &mut gpui::TestAppContext,
+) {
+    use gpui::VisualTestContext;
+    let t = config_with_theme("dropdown", "demo.icons-1.0.0", "demo-icons", "Demo Icons");
+    let cfg = t.0.clone();
+    let window = cx.add_window(move |_w, cx| {
+        let mut wb = ui::Workbench::new(cfg.clone(), cx);
+        wb.set_config_dir(cfg.clone(), None);
+        wb.model_mut().settings_open = true;
+        wb.model_mut().dropdown_open = Some("set-icon-theme");
+        wb
+    });
+    let vcx = VisualTestContext::from_window(window.into(), cx).into_mut();
+    vcx.run_until_parked();
+    let (open, themes) = window
+        .read_with(vcx, |wb, _| {
+            (wb.model().dropdown_open, wb.model().icon_themes.len())
+        })
+        .unwrap();
+    assert_eq!((open, themes), (Some("set-icon-theme"), 1));
+    window
+        .update(vcx, |wb, _, cx| {
+            wb.pick_icon_theme(None);
+            wb.model_mut().dropdown_open = None;
+            cx.notify();
+        })
+        .unwrap();
+    vcx.run_until_parked();
+    let active = window
+        .read_with(vcx, |wb, _| wb.model().icon_choice.active.clone())
+        .unwrap();
+    assert_eq!(active, None);
+}

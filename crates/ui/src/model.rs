@@ -237,6 +237,8 @@ pub struct Model {
     pub format_on_save: bool,
     pub icon_themes: Vec<crate::icon_theme::ThemeEntry>,
     pub icon_choice: crate::icon_theme::Choice,
+    // Which settings dropdown is open, if any.
+    pub dropdown_open: Option<&'static str>,
     pub panel_extension: Option<PathBuf>,
     pub panel_icon: Option<PathBuf>,
     pub panel_running: bool,
@@ -299,6 +301,7 @@ impl Model {
             format_on_save: false,
             icon_themes: Vec::new(),
             icon_choice: crate::icon_theme::Choice::default(),
+            dropdown_open: None,
             panel_extension: None,
             panel_icon: None,
             panel_running: false,
@@ -1199,6 +1202,7 @@ impl Model {
             }
             Command::ToggleDiscord
             | Command::DiscordConnect
+            | Command::DiscordRefresh
             | Command::DiscordLogout
             | Command::ToggleDiscordFile
             | Command::ToggleDiscordWorkspace

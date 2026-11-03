@@ -1152,7 +1152,14 @@ impl Model {
                 return;
             }
             // nanti never holds a Discord login; logging out drops the link to the Discord app and clears the status.
-            C::DiscordLogout => self.discord.settings.enabled = false,
+            C::DiscordRefresh => {
+                self.discord.refresh();
+                return;
+            }
+            C::DiscordLogout => {
+                self.discord.settings.enabled = false;
+                self.discord.forget_account();
+            }
             C::ToggleDiscordFile => {
                 self.discord.settings.show_file = !self.discord.settings.show_file;
             }
@@ -1167,15 +1174,19 @@ impl Model {
         self.discord_changed();
     }
 
-    fn discord_changed(&mut self) {
-        if !crate::discord::AVAILABLE {
-            return;
-        }
+    fn save_discord_settings(&mut self) {
         if let Some(dir) = self.config_dir.clone()
             && let Err(e) = self.discord.settings.save(&dir)
         {
             self.say("Discord", &format!("Cannot save the Discord settings: {e}"));
         }
+    }
+
+    fn discord_changed(&mut self) {
+        if !crate::discord::AVAILABLE {
+            return;
+        }
+        self.save_discord_settings();
         self.discord.reconfigure();
     }
 
@@ -1185,6 +1196,7 @@ impl Model {
         }
         if let Some(dir) = self.config_dir.clone() {
             self.discord.settings = crate::discord::DiscordSettings::load(&dir);
+            self.discord.restore_avatar(&dir);
             self.discord.reconfigure();
         }
     }
@@ -1235,6 +1247,9 @@ impl Model {
             .then(|| self.discord_presence());
         let mut changed = self.discord.pump(wanted);
         changed |= self.discord.pump_avatar(self.config_dir.as_deref());
+        if self.discord.take_profile_dirty() {
+            self.save_discord_settings();
+        }
         changed
     }
 

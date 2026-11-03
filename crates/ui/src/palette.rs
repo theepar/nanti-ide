@@ -88,6 +88,7 @@ pub enum Command {
     ChangeLanguageMode,
     ToggleDiscord,
     DiscordConnect,
+    DiscordRefresh,
     DiscordLogout,
     ToggleDiscordFile,
     ToggleDiscordWorkspace,
@@ -103,6 +104,7 @@ impl Command {
             self,
             Command::ToggleDiscord
                 | Command::DiscordConnect
+                | Command::DiscordRefresh
                 | Command::DiscordLogout
                 | Command::ToggleDiscordFile
                 | Command::ToggleDiscordWorkspace
@@ -115,7 +117,7 @@ impl Command {
         !self.is_discord() || crate::discord::AVAILABLE
     }
 
-    pub const ALL: [Command; 88] = [
+    pub const ALL: [Command; 89] = [
         Command::CommandPalette,
         Command::QuickOpen,
         Command::Save,
@@ -187,6 +189,7 @@ impl Command {
         Command::OpenSettings,
         Command::ToggleDiscord,
         Command::DiscordConnect,
+        Command::DiscordRefresh,
         Command::DiscordLogout,
         Command::ToggleDiscordFile,
         Command::ToggleDiscordWorkspace,
@@ -279,6 +282,7 @@ impl Command {
             Command::OpenSettings => "Preferences: Open Settings",
             Command::ToggleDiscord => "Discord: Toggle Rich Presence",
             Command::DiscordConnect => "Discord: Connect",
+            Command::DiscordRefresh => "Discord: Refresh",
             Command::DiscordLogout => "Discord: Log Out",
             Command::ToggleDiscordFile => "Discord: Toggle Showing the File Name",
             Command::ToggleDiscordWorkspace => "Discord: Toggle Showing the Workspace",

@@ -35,6 +35,8 @@ pub struct DiscordSettings {
     pub show_file: bool,
     pub show_workspace: bool,
     pub show_time: bool,
+    // The account Discord last reported; switching Rich Presence off keeps it, only logging out forgets it.
+    pub profile: Option<Profile>,
 }
 
 impl Default for DiscordSettings {
@@ -48,6 +50,7 @@ impl Default for DiscordSettings {
             show_file: true,
             show_workspace: true,
             show_time: true,
+            profile: None,
         }
     }
 }
@@ -71,6 +74,7 @@ impl DiscordSettings {
         s.show_file = flag("showFile", s.show_file);
         s.show_workspace = flag("showWorkspace", s.show_workspace);
         s.show_time = flag("showTime", s.show_time);
+        s.profile = v.get("profile").and_then(Profile::from_json);
         if let Some(id) = v
             .get("clientId")
             .and_then(Value::as_str)
@@ -89,6 +93,7 @@ impl DiscordSettings {
             "showFile": self.show_file,
             "showWorkspace": self.show_workspace,
             "showTime": self.show_time,
+            "profile": self.profile.as_ref().map(Profile::to_json),
         }))
         .map_err(|e| e.to_string())?;
         let tmp = dir.join(format!("{SETTINGS_FILE}.tmp"));
@@ -106,6 +111,18 @@ pub struct Profile {
 }
 
 impl Profile {
+    fn to_json(&self) -> Value {
+        json!({ "name": self.name, "id": self.id, "avatar": self.avatar })
+    }
+
+    fn from_json(v: &Value) -> Option<Self> {
+        Some(Self {
+            name: v["name"].as_str().filter(|s| !s.is_empty())?.to_owned(),
+            id: v["id"].as_str().unwrap_or_default().to_owned(),
+            avatar: v["avatar"].as_str().map(str::to_owned),
+        })
+    }
+
     pub fn named(name: &str) -> Self {
         Self {
             name: name.to_owned(),
@@ -659,8 +676,7 @@ pub struct DiscordState {
     pub started_ms: u64,
     avatar_hash: Option<String>,
     pub avatar_path: Option<PathBuf>,
-    // The last account seen, kept on screen while a refresh reconnects.
-    pub last_profile: Option<Profile>,
+    profile_dirty: bool,
     avatar_rx: Option<Receiver<Option<PathBuf>>>,
 }
 
@@ -673,7 +689,7 @@ impl Default for DiscordState {
             sent_at: None,
             avatar_hash: None,
             avatar_path: None,
-            last_profile: None,
+            profile_dirty: false,
             avatar_rx: None,
             started_ms: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -701,9 +717,6 @@ impl DiscordState {
         } else {
             // Off means off: dropping the link ends its worker thread and closes the pipe to Discord.
             self.link = None;
-            self.avatar_hash = None;
-            self.avatar_path = None;
-            self.last_profile = None;
             self.avatar_rx = None;
         }
         if let Some(link) = &self.link {
@@ -711,6 +724,47 @@ impl DiscordState {
         }
         self.sent = None;
         self.sent_at = None;
+    }
+
+    pub fn take_profile_dirty(&mut self) -> bool {
+        std::mem::take(&mut self.profile_dirty)
+    }
+
+    /// Shows the remembered picture again after a restart, without any download.
+    pub fn restore_avatar(&mut self, dir: &Path) {
+        if let Some(hash) = self
+            .settings
+            .profile
+            .as_ref()
+            .and_then(|p| p.avatar.as_ref())
+        {
+            let file = dir.join(format!("discord-avatar-{hash}.png"));
+            if file.is_file() {
+                self.avatar_hash = Some(hash.clone());
+                self.avatar_path = Some(file);
+            }
+        }
+    }
+
+    /// Forgets the remembered account (the picture file stays in the cache folder).
+    pub fn forget_account(&mut self) {
+        self.settings.profile = None;
+        self.avatar_hash = None;
+        self.avatar_path = None;
+        self.avatar_rx = None;
+        self.profile_dirty = true;
+    }
+
+    /// Sends the status again over the open connection. Discord goes quiet for minutes when a closed
+    /// connection is opened again, so a live link is never dropped just to refresh.
+    pub fn refresh(&mut self) {
+        if self.status().connected() {
+            self.sent = None;
+            self.sent_at = None;
+            self.avatar_hash = None;
+        } else {
+            self.reconnect();
+        }
     }
 
     pub fn reconnect(&mut self) {
@@ -743,9 +797,10 @@ impl DiscordState {
         }
         let status = self.status();
         if let DiscordStatus::Connected(p) = &status
-            && self.last_profile.as_ref() != Some(p)
+            && self.settings.profile.as_ref() != Some(p)
         {
-            self.last_profile = Some(p.clone());
+            self.settings.profile = Some(p.clone());
+            self.profile_dirty = true;
             changed = true;
         }
         let (Some(dir), DiscordStatus::Connected(profile)) = (dir, status) else {
@@ -788,6 +843,33 @@ impl DiscordState {
 #[cfg(test)]
 mod asset_tests {
     use super::*;
+
+    #[test]
+    fn switching_off_keeps_the_account_and_only_logging_out_forgets_it() {
+        let mut st = DiscordState::default();
+        st.settings.client_id = String::new();
+        st.settings.profile = Some(Profile::named("thepar"));
+        st.settings.enabled = false;
+        st.reconfigure();
+        assert_eq!(st.settings.profile, Some(Profile::named("thepar")));
+        st.forget_account();
+        assert_eq!(st.settings.profile, None);
+        assert!(st.take_profile_dirty());
+        assert!(!st.take_profile_dirty());
+    }
+
+    #[test]
+    fn refresh_resends_over_a_live_link_instead_of_reconnecting() {
+        let mut st = DiscordState {
+            sent: Some(Presence::default()),
+            sent_at: Some(Instant::now()),
+            ..DiscordState::default()
+        };
+        // No link at all: refresh falls back to connecting (disabled here, so nothing starts).
+        st.settings.enabled = false;
+        st.refresh();
+        assert!(st.link.is_none());
+    }
 
     #[test]
     fn retries_back_off_instead_of_flooding_discord() {
@@ -1087,6 +1169,11 @@ mod tests {
             show_file: false,
             show_workspace: true,
             show_time: false,
+            profile: Some(Profile {
+                name: "thepar".into(),
+                id: "123456789012345678".into(),
+                avatar: Some("abc123".into()),
+            }),
         };
         s.save(&dir).unwrap();
         assert_eq!(DiscordSettings::load(&dir), s);

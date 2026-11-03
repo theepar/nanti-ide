@@ -6,6 +6,9 @@ use gpui::{
 use crate::palette::Command;
 use crate::{Workbench, assets, theme};
 
+/// One entry of a dropdown: its label, whether it is the current one, and what picking it does.
+pub(crate) type DropdownOption = (SharedString, bool, Box<dyn Fn(&mut Workbench) + 'static>);
+
 impl Workbench {
     pub(crate) fn setting_row(
         title: &'static str,
@@ -48,73 +51,167 @@ impl Workbench {
             .into_any_element()
     }
 
-    /// One pill per theme the installed extensions bring, plus the built-in icons.
-    fn icon_theme_picker(&self, cx: &mut Context<Self>) -> AnyElement {
-        let active = self.model.icon_choice.active.clone();
-        let mut options: Vec<(String, Option<String>)> = vec![("Built-in".to_owned(), None)];
-        options.extend(
-            self.model
-                .icon_themes
-                .iter()
-                .map(|t| (t.label.clone(), Some(t.key.clone()))),
-        );
-        div()
-            .flex()
-            .flex_wrap()
-            .justify_end()
-            .gap(px(2.))
-            .p(px(3.))
-            .rounded_xl()
-            .bg(rgb(0x2b2b2b))
-            .children(options.into_iter().enumerate().map(|(i, (label, key))| {
-                let on = key == active;
+    /// A dropdown: the closed box shows the current choice, the open list scrolls so any number of entries fits.
+    pub(crate) fn dropdown(
+        &self,
+        id: &'static str,
+        current: &str,
+        options: Vec<DropdownOption>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let open = self.model.dropdown_open == Some(id);
+        let list = open.then(|| {
+            gpui::deferred(
                 div()
-                    .id(("set-icon-theme", i))
+                    .id((id, 10_000usize))
+                    .absolute()
+                    .top(px(34.))
+                    .right_0()
+                    .w_full()
+                    .max_h(px(260.))
+                    .overflow_y_scroll()
+                    .p(px(4.))
+                    .rounded_md()
+                    .bg(rgb(theme::MENU_BG))
+                    .border_1()
+                    .border_color(rgb(0x4a4a4a))
+                    .shadow_lg()
+                    .occlude()
+                    .children(
+                        options
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, (label, on, pick))| {
+                                div()
+                                    .id((id, i))
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .px_3()
+                                    .py(px(6.))
+                                    .rounded_sm()
+                                    .text_size(px(12.5))
+                                    .cursor_pointer()
+                                    .text_color(rgb(if on { 0xffffff } else { theme::TEXT }))
+                                    .when(on, |d| {
+                                        d.font_weight(FontWeight::MEDIUM).bg(rgb(theme::SELECTED))
+                                    })
+                                    .hover(|s| s.bg(rgb(theme::HOVER_STRONG)))
+                                    .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
+                                        pick(this);
+                                        this.model.dropdown_open = None;
+                                        cx.notify();
+                                    }))
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .overflow_hidden()
+                                            .whitespace_nowrap()
+                                            .child(label),
+                                    )
+                            }),
+                    ),
+            )
+            .with_priority(1)
+        });
+        div()
+            .relative()
+            .w(px(230.))
+            // Clicks inside the button or the list stay inside this box, so only outside clicks close it.
+            .on_mouse_down_out(cx.listener(move |this, _: &gpui::MouseDownEvent, _w, cx| {
+                if this.model.dropdown_open == Some(id) {
+                    this.model.dropdown_open = None;
+                    cx.notify();
+                }
+            }))
+            .child(
+                div()
+                    .id(id)
                     .flex()
                     .items_center()
-                    .h(px(26.))
+                    .justify_between()
+                    .gap_2()
+                    .h(px(30.))
                     .px_3()
-                    .rounded_full()
-                    .text_size(px(12.))
+                    .rounded_md()
+                    .bg(rgb(0x2b2b2b))
+                    .border_1()
+                    .border_color(rgb(if open { 0x6a6a6a } else { 0x3c3c3c }))
                     .cursor_pointer()
-                    .when(on, |d| {
-                        d.bg(rgb(theme::ACCENT))
-                            .text_color(rgb(0x1e1e1e))
-                            .font_weight(FontWeight::MEDIUM)
-                    })
-                    .when(!on, |d| {
-                        d.text_color(rgb(theme::TEXT))
-                            .hover(|s| s.bg(rgb(theme::HOVER)))
-                    })
+                    .hover(|s| s.bg(rgb(0x333333)))
+                    .text_size(px(12.5))
+                    .text_color(rgb(0xe8e8e8))
                     .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
-                        this.model.set_icon_theme(key.clone());
-                        this.model.message = Some("File icon theme changed".to_owned());
+                        this.model.dropdown_open = if this.model.dropdown_open == Some(id) {
+                            None
+                        } else {
+                            Some(id)
+                        };
                         cx.notify();
                     }))
-                    .child(SharedString::from(label))
-            }))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .child(SharedString::from(current.to_owned())),
+                    )
+                    .child(assets::icon("chevron-down", 14., theme::ICON)),
+            )
+            .children(list)
             .into_any_element()
+    }
+
+    fn icon_theme_picker(&self, cx: &mut Context<Self>) -> AnyElement {
+        let active = self.model.icon_choice.active.clone();
+        let mut options: Vec<DropdownOption> = vec![(
+            "Built-in".into(),
+            active.is_none(),
+            Box::new(|wb: &mut Workbench| wb.pick_icon_theme(None)),
+        )];
+        let mut current = "Built-in".to_owned();
+        for t in &self.model.icon_themes {
+            let on = active.as_deref() == Some(t.key.as_str());
+            if on {
+                current = t.label.clone();
+            }
+            let key = t.key.clone();
+            options.push((
+                t.label.clone().into(),
+                on,
+                Box::new(move |wb: &mut Workbench| wb.pick_icon_theme(Some(key.clone()))),
+            ));
+        }
+        self.dropdown("set-icon-theme", &current, options, cx)
+    }
+
+    pub fn pick_icon_theme(&mut self, key: Option<String>) {
+        self.model.set_icon_theme(key);
+        self.model.message = Some("File icon theme changed".to_owned());
     }
 
     fn discord_account_card(&self, cx: &mut Context<Self>) -> AnyElement {
         use crate::discord::DiscordStatus;
         const AVATARS: [u32; 6] = [0x5865f2, 0x3ba55d, 0xc9811a, 0xc2377f, 0xc03537, 0x2f9e6e];
         let status = self.model.discord.status();
-        // While a refresh reconnects, the account stays on screen instead of looking logged out.
-        let refreshing = matches!(status, DiscordStatus::Connecting)
-            .then(|| self.model.discord.last_profile.clone())
-            .flatten();
-        let connected = status.connected() || refreshing.is_some();
-        let (title, line) = match (&status, &refreshing) {
-            (DiscordStatus::Connected(profile), _) => (
-                profile.name.clone(),
+        // The account stays on screen while Rich Presence is off or reconnecting; only Log out forgets it.
+        let account = match &status {
+            DiscordStatus::Connected(p) => Some(p.clone()),
+            _ => self.model.discord.settings.profile.clone(),
+        };
+        let connected = status.connected();
+        let (title, line) = match (&status, &account) {
+            (DiscordStatus::Connected(_), Some(p)) => (
+                p.name.clone(),
                 "Signed in on the Discord app on this computer".to_owned(),
             ),
-            (_, Some(profile)) => (profile.name.clone(), "Refreshing...".to_owned()),
+            (DiscordStatus::Off, Some(p)) => (p.name.clone(), "Rich Presence is off".to_owned()),
+            (other, Some(p)) => (p.name.clone(), other.describe()),
             (other, None) => ("Discord".to_owned(), other.describe()),
         };
+        let has_account = account.is_some();
         let hue = AVATARS[title.bytes().map(usize::from).sum::<usize>() % AVATARS.len()];
-        let photo = connected
+        let photo = has_account
             .then(|| self.model.discord.avatar_path.clone())
             .flatten();
         let letter = div()
@@ -124,11 +221,11 @@ impl Workbench {
             .justify_center()
             .size(px(46.))
             .rounded_full()
-            .bg(rgb(if connected { hue } else { 0x3a3a3a }))
+            .bg(rgb(if has_account { hue } else { 0x3a3a3a }))
             .text_size(px(19.))
             .font_weight(FontWeight::BOLD)
             .text_color(rgb(0xffffff))
-            .child(if connected {
+            .child(if has_account {
                 div()
                     .child(SharedString::from(
                         title
@@ -156,7 +253,7 @@ impl Workbench {
                 .child(
                     Self::scm_button("set-discord-refresh", "Refresh", true).on_click(cx.listener(
                         |this, _: &ClickEvent, window, cx| {
-                            this.apply_command(Command::DiscordConnect, window, cx);
+                            this.apply_command(Command::DiscordRefresh, window, cx);
                         },
                     )),
                 )
@@ -168,13 +265,22 @@ impl Workbench {
                     )),
                 )
         } else {
-            div().flex().gap_2().child(
-                Self::scm_button("set-discord-connect", "Connect", true).on_click(cx.listener(
-                    |this, _: &ClickEvent, window, cx| {
-                        this.apply_command(Command::DiscordConnect, window, cx);
-                    },
-                )),
-            )
+            let connect = Self::scm_button("set-discord-connect", "Connect", true).on_click(
+                cx.listener(|this, _: &ClickEvent, window, cx| {
+                    this.apply_command(Command::DiscordConnect, window, cx);
+                }),
+            );
+            div()
+                .flex()
+                .gap_2()
+                .child(connect)
+                .children(has_account.then(|| {
+                    Self::scm_button("set-discord-logout", "Log out", true).on_click(cx.listener(
+                        |this, _: &ClickEvent, window, cx| {
+                            this.apply_command(Command::DiscordLogout, window, cx);
+                        },
+                    ))
+                }))
         };
         div()
             .flex()
