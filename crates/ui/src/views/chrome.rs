@@ -181,6 +181,10 @@ impl Workbench {
                 crate::model::ContextKind::Editor => menu::editor_items(),
                 crate::model::ContextKind::Tab => menu::tab_items(),
                 crate::model::ContextKind::Terminal => menu::terminal_items(),
+                crate::model::ContextKind::ScmChange => {
+                    menu::change_items(self.model.scm_menu_staged)
+                }
+                crate::model::ContextKind::Commit => menu::commit_items(self.model.scm_menu_web),
             };
             let h = items
                 .iter()

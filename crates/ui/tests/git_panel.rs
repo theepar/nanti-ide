@@ -912,3 +912,61 @@ fn a_long_loaded_history_keeps_frames_cheap(cx: &mut TestAppContext) {
         "a frame took {per_frame:?} with {loaded} commits loaded"
     );
 }
+
+#[test]
+fn right_click_commands_act_on_the_row_that_was_clicked() {
+    use ui::palette::Command;
+    let t = repo("ctxmenu");
+    std::fs::write(t.0.join("a.txt"), "changed\n").unwrap();
+    let mut m = model(&t.0);
+    assert_eq!(rels(&m, GroupKind::Changes), ["a.txt"]);
+
+    m.open_change_menu("a.txt", false, false, 10.0, 10.0);
+    m.close_menus();
+    m.run_command(Command::ScmStage);
+    settle(&mut m);
+    assert_eq!(rels(&m, GroupKind::Staged), ["a.txt"]);
+
+    m.open_change_menu("a.txt", true, false, 10.0, 10.0);
+    assert!(
+        m.scm_menu_staged,
+        "the menu offers Unstage for a staged row"
+    );
+    m.close_menus();
+    m.run_command(Command::ScmUnstage);
+    settle(&mut m);
+    assert_eq!(rels(&m, GroupKind::Changes), ["a.txt"]);
+
+    m.open_change_menu("a.txt", false, false, 10.0, 10.0);
+    m.close_menus();
+    m.run_command(Command::ScmCopyPath);
+    assert_eq!(m.clipboard_request.as_deref(), Some("a.txt"));
+    m.run_command(Command::ScmDiscard);
+    assert!(m.prompt.is_some(), "discarding asks first");
+    m.run_command(Command::ScmOpenFile);
+    assert!(m.tabs.iter().any(|t| t.title == "a.txt"));
+
+    let hash = m.scm.history.first().expect("a commit").hash.clone();
+    m.open_commit_menu(&hash, 10.0, 10.0);
+    m.close_menus();
+    m.run_command(Command::CommitCopyHash);
+    assert_eq!(m.clipboard_request.as_deref(), Some(hash.as_str()));
+    m.run_command(Command::CommitCopyMessage);
+    assert_eq!(m.clipboard_request.as_deref(), Some("base"));
+    m.run_command(Command::CommitToggleFiles);
+    assert!(m.scm.expanded_commits.contains(&hash));
+}
+
+#[test]
+fn row_menus_are_not_in_the_command_palette() {
+    use ui::palette::{Command, Palette};
+    let p = Palette::commands(&[]);
+    assert!(
+        p.results().all(|r| !r.label.contains("Commit Hash")
+            && !r.label.contains("Stage Changes")
+            && !r.label.contains("Open Changes")),
+        "commands that need a clicked row stay out of the palette"
+    );
+    assert!(Command::ScmStage.is_contextual());
+    assert!(!Command::Save.is_contextual());
+}

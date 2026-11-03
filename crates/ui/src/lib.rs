@@ -1032,6 +1032,20 @@ impl Workbench {
 
     fn apply_command(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
         match command {
+            Command::CommitOpenWeb => {
+                if let Some(model::ContextTarget::Commit { hash }) = &self.model.context_target
+                    && let Some(url) = self
+                        .model
+                        .scm
+                        .web_remote
+                        .as_ref()
+                        .and_then(|w| w.commit_url(hash))
+                    && Self::valid_external_url(&url)
+                {
+                    cx.open_url(&url);
+                }
+                return cx.notify();
+            }
             Command::TerminalCopy => {
                 self.terminal_copy_or_interrupt(true, cx);
                 return cx.notify();
@@ -3980,6 +3994,20 @@ impl Workbench {
                 body.push(
                     div()
                         .id(("scm-row", rid))
+                        .on_mouse_down(MouseButton::Right, {
+                            let rel = row.rel.clone();
+                            let untracked = row.untracked;
+                            cx.listener(move |this, ev: &MouseDownEvent, _w, cx| {
+                                this.model.open_change_menu(
+                                    &rel,
+                                    staged_group,
+                                    untracked,
+                                    f32::from(ev.position.x),
+                                    f32::from(ev.position.y),
+                                );
+                                cx.notify();
+                            })
+                        })
                         .flex()
                         .flex_none()
                         .items_center()
@@ -4349,6 +4377,17 @@ impl Workbench {
                     .collect();
                 div()
                     .id(("scm-commit-row", i))
+                    .on_mouse_down(MouseButton::Right, {
+                        let hash = c.hash.clone();
+                        cx.listener(move |this, ev: &MouseDownEvent, _w, cx| {
+                            this.model.open_commit_menu(
+                                &hash,
+                                f32::from(ev.position.x),
+                                f32::from(ev.position.y),
+                            );
+                            cx.notify();
+                        })
+                    })
                     .flex()
                     .flex_none()
                     .flex_col()

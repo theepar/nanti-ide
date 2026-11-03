@@ -151,6 +151,21 @@ pub enum ContextKind {
     Editor,
     Tab,
     Terminal,
+    ScmChange,
+    Commit,
+}
+
+/// The row a source control context menu was opened on; kept after the menu closes so its command can use it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContextTarget {
+    Change {
+        rel: String,
+        staged: bool,
+        untracked: bool,
+    },
+    Commit {
+        hash: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -239,6 +254,9 @@ pub struct Model {
     pub icon_choice: crate::icon_theme::Choice,
     // Which settings dropdown is open, if any.
     pub dropdown_open: Option<&'static str>,
+    pub context_target: Option<ContextTarget>,
+    pub scm_menu_staged: bool,
+    pub scm_menu_web: bool,
     pub panel_extension: Option<PathBuf>,
     pub panel_icon: Option<PathBuf>,
     pub panel_running: bool,
@@ -302,6 +320,9 @@ impl Model {
             icon_themes: Vec::new(),
             icon_choice: crate::icon_theme::Choice::default(),
             dropdown_open: None,
+            context_target: None,
+            scm_menu_staged: false,
+            scm_menu_web: false,
             panel_extension: None,
             panel_icon: None,
             panel_running: false,
@@ -1142,6 +1163,17 @@ impl Model {
                 }
             }
             // The clipboard belongs to the window, so the workbench handles these before the model sees them.
+            Command::ScmOpenChanges
+            | Command::ScmOpenFile
+            | Command::ScmStage
+            | Command::ScmUnstage
+            | Command::ScmDiscard
+            | Command::ScmCopyPath
+            | Command::CommitToggleFiles
+            | Command::CommitCopyHash
+            | Command::CommitCopyMessage => self.run_scm_context(command),
+            // Opening a web page needs the window, so the workbench handles it.
+            Command::CommitOpenWeb => {}
             Command::Cut
             | Command::Copy
             | Command::Paste

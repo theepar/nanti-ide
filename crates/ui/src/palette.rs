@@ -87,6 +87,16 @@ pub enum Command {
     SwitchBranch,
     ChangeLanguageMode,
     ToggleDiscord,
+    ScmOpenChanges,
+    ScmOpenFile,
+    ScmStage,
+    ScmUnstage,
+    ScmDiscard,
+    ScmCopyPath,
+    CommitToggleFiles,
+    CommitCopyHash,
+    CommitCopyMessage,
+    CommitOpenWeb,
     DiscordConnect,
     DiscordRefresh,
     DiscordLogout,
@@ -112,12 +122,29 @@ impl Command {
         )
     }
 
-    /// Commands of a feature this build leaves out never reach the palette.
-    pub fn available(self) -> bool {
-        !self.is_discord() || crate::discord::AVAILABLE
+    /// These act on the row that was right-clicked, so they only make sense from a context menu.
+    pub fn is_contextual(self) -> bool {
+        matches!(
+            self,
+            Command::ScmOpenChanges
+                | Command::ScmOpenFile
+                | Command::ScmStage
+                | Command::ScmUnstage
+                | Command::ScmDiscard
+                | Command::ScmCopyPath
+                | Command::CommitToggleFiles
+                | Command::CommitCopyHash
+                | Command::CommitCopyMessage
+                | Command::CommitOpenWeb
+        )
     }
 
-    pub const ALL: [Command; 89] = [
+    /// Commands of a feature this build leaves out, or that need a right-clicked row, never reach the palette.
+    pub fn available(self) -> bool {
+        (!self.is_discord() || crate::discord::AVAILABLE) && !self.is_contextual()
+    }
+
+    pub const ALL: [Command; 99] = [
         Command::CommandPalette,
         Command::QuickOpen,
         Command::Save,
@@ -188,6 +215,16 @@ impl Command {
         Command::Exit,
         Command::OpenSettings,
         Command::ToggleDiscord,
+        Command::ScmOpenChanges,
+        Command::ScmOpenFile,
+        Command::ScmStage,
+        Command::ScmUnstage,
+        Command::ScmDiscard,
+        Command::ScmCopyPath,
+        Command::CommitToggleFiles,
+        Command::CommitCopyHash,
+        Command::CommitCopyMessage,
+        Command::CommitOpenWeb,
         Command::DiscordConnect,
         Command::DiscordRefresh,
         Command::DiscordLogout,
@@ -281,6 +318,16 @@ impl Command {
             Command::Exit => "File: Exit",
             Command::OpenSettings => "Preferences: Open Settings",
             Command::ToggleDiscord => "Discord: Toggle Rich Presence",
+            Command::ScmOpenChanges => "Source Control: Open Changes",
+            Command::ScmOpenFile => "Source Control: Open File",
+            Command::ScmStage => "Source Control: Stage Changes",
+            Command::ScmUnstage => "Source Control: Unstage Changes",
+            Command::ScmDiscard => "Source Control: Discard Changes",
+            Command::ScmCopyPath => "Source Control: Copy Path",
+            Command::CommitToggleFiles => "Source Control: Show Changed Files of Commit",
+            Command::CommitCopyHash => "Source Control: Copy Commit Hash",
+            Command::CommitCopyMessage => "Source Control: Copy Commit Message",
+            Command::CommitOpenWeb => "Source Control: Open Commit on the Web",
             Command::DiscordConnect => "Discord: Connect",
             Command::DiscordRefresh => "Discord: Refresh",
             Command::DiscordLogout => "Discord: Log Out",

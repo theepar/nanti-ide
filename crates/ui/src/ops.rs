@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use crate::extensions;
 use crate::menu::MenuKind;
+use crate::model::ContextTarget;
 use crate::model::{
     ContextKind, ContextMenu, Model, PanelTab, Prompt, SaveOutcome, Tab, TabContent,
 };
@@ -217,6 +218,85 @@ impl Model {
             x,
             y,
         });
+    }
+
+    pub fn open_change_menu(&mut self, rel: &str, staged: bool, untracked: bool, x: f32, y: f32) {
+        self.menu_open = None;
+        self.context_target = Some(ContextTarget::Change {
+            rel: rel.to_owned(),
+            staged,
+            untracked,
+        });
+        self.scm_menu_staged = staged;
+        self.context_menu = Some(ContextMenu {
+            kind: ContextKind::ScmChange,
+            path: PathBuf::new(),
+            is_dir: false,
+            x,
+            y,
+        });
+    }
+
+    pub fn open_commit_menu(&mut self, hash: &str, x: f32, y: f32) {
+        self.menu_open = None;
+        self.context_target = Some(ContextTarget::Commit {
+            hash: hash.to_owned(),
+        });
+        self.scm_menu_web = self
+            .scm
+            .web_remote
+            .as_ref()
+            .is_some_and(|w| w.commit_url(hash).is_some());
+        self.context_menu = Some(ContextMenu {
+            kind: ContextKind::Commit,
+            path: PathBuf::new(),
+            is_dir: false,
+            x,
+            y,
+        });
+    }
+
+    pub(crate) fn run_scm_context(&mut self, command: crate::palette::Command) {
+        use crate::palette::Command as C;
+        match (command, self.context_target.clone()) {
+            (C::ScmOpenChanges, Some(ContextTarget::Change { rel, staged, .. })) => {
+                self.open_diff(&rel, staged);
+            }
+            (C::ScmOpenFile, Some(ContextTarget::Change { rel, .. })) => {
+                if let Some(root) = self.scm.repo_root().map(Path::to_path_buf) {
+                    self.open_file(&root.join(&rel));
+                }
+            }
+            (C::ScmStage, Some(ContextTarget::Change { rel, .. })) => self.scm.stage(&rel),
+            (C::ScmUnstage, Some(ContextTarget::Change { rel, .. })) => self.scm.unstage(&rel),
+            (C::ScmDiscard, Some(ContextTarget::Change { rel, untracked, .. })) => {
+                self.confirm_discard(&rel, untracked);
+            }
+            (C::ScmCopyPath, Some(ContextTarget::Change { rel, .. })) => {
+                self.clipboard_request = Some(rel);
+                self.say("Git", "Path copied to the clipboard");
+            }
+            (C::CommitToggleFiles, Some(ContextTarget::Commit { hash })) => {
+                self.scm.toggle_commit(&hash);
+            }
+            (C::CommitCopyHash, Some(ContextTarget::Commit { hash })) => {
+                self.clipboard_request = Some(hash);
+                self.say("Git", "Commit hash copied to the clipboard");
+            }
+            (C::CommitCopyMessage, Some(ContextTarget::Commit { hash })) => {
+                let subject = self
+                    .scm
+                    .history
+                    .iter()
+                    .find(|c| c.hash == hash)
+                    .map(|c| c.subject.clone());
+                if let Some(text) = subject {
+                    self.clipboard_request = Some(text);
+                    self.say("Git", "Commit message copied to the clipboard");
+                }
+            }
+            _ => {}
+        }
     }
 
     pub fn open_tab_menu(&mut self, index: usize, x: f32, y: f32) {

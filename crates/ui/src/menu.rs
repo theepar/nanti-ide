@@ -174,6 +174,30 @@ pub fn editor_items() -> Vec<MenuItem> {
     ]
 }
 
+pub fn change_items(staged: bool) -> Vec<MenuItem> {
+    let mut v = vec![Cmd(C::ScmOpenChanges), Cmd(C::ScmOpenFile), Sep];
+    if staged {
+        v.push(Cmd(C::ScmUnstage));
+    } else {
+        v.extend([Cmd(C::ScmStage), Cmd(C::ScmDiscard)]);
+    }
+    v.extend([Sep, Cmd(C::ScmCopyPath)]);
+    v
+}
+
+pub fn commit_items(has_web: bool) -> Vec<MenuItem> {
+    let mut v = vec![
+        Cmd(C::CommitToggleFiles),
+        Sep,
+        Cmd(C::CommitCopyHash),
+        Cmd(C::CommitCopyMessage),
+    ];
+    if has_web {
+        v.extend([Sep, Cmd(C::CommitOpenWeb)]);
+    }
+    v
+}
+
 pub fn terminal_items() -> Vec<MenuItem> {
     vec![
         Cmd(C::TerminalCopy),
@@ -227,6 +251,10 @@ mod tests {
         v.push(editor_items());
         v.push(tab_items());
         v.push(terminal_items());
+        v.push(change_items(true));
+        v.push(change_items(false));
+        v.push(commit_items(true));
+        v.push(commit_items(false));
         v
     }
 
