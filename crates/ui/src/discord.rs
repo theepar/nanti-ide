@@ -17,6 +17,8 @@ const READY_TIMEOUT: Duration = Duration::from_secs(5);
 const RETRY_AFTER: Duration = Duration::from_secs(15);
 const TICK: Duration = Duration::from_millis(100);
 const MIN_SEND_GAP: Duration = Duration::from_secs(15);
+pub const AVAILABLE: bool = cfg!(feature = "discord");
+
 const SETTINGS_FILE: &str = "discord.json";
 // The public id of nanti's own Discord application; it names the activity and carries no secret.
 pub const APPLICATION_ID: &str = "1055749894926774333";

@@ -17,6 +17,7 @@ use terminal_ui::{GridMetrics, TerminalSession};
 
 pub mod assets;
 pub mod discord;
+pub mod emmet;
 pub mod extensions;
 pub mod find;
 pub mod format;
@@ -1528,10 +1529,19 @@ impl Workbench {
             }
         }
 
+        let html = self
+            .model
+            .active()
+            .is_some_and(|t| emmet::applies_to(&t.path));
         let Some(e) = self.model.active_editor_mut() else {
             return;
         };
         let s = m.shift;
+        if key == "tab" && !s && html && emmet::expand_at_cursor(e, model::INDENT_UNIT) {
+            self.reveal_cursor();
+            cx.stop_propagation();
+            return cx.notify();
+        }
         match key {
             "left" => e.move_left(s),
             "right" => e.move_right(s),

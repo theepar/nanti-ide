@@ -104,9 +104,13 @@ graph TD
 - **Fast Find & Replace (`Ctrl+F` / `Ctrl+H`):** Regex support, match highlighting, and case/whole-word toggling.
 - **Workspace Search (`Ctrl+Shift+F`):** Rapid multi-file regex search grouped by file.
 
-### Discord Rich Presence (opt-in)
-- On by default and switchable in Settings > Discord. It connects to the Discord desktop app over its local pipe (no password, no network, no token): it uses nanti's own Discord application, so there is nothing to set up. Set `NANTI_DISCORD_CLIENT_ID` to show a different application.
-- When on, the file name, language, workspace folder name and elapsed time are shown in your Discord status; each can be switched off. Nothing is sent anywhere except to the local Discord app, which shows it on your profile.
+### Editing Helpers
+- **Format Document (`Shift+Alt+F`) and format on save:** rustfmt, gofmt, `dart format` and Prettier (the project's own, the one inside the Prettier extension, or one on PATH). On by default, switch it in Settings. A formatter error never blocks a save.
+- **Right-click menus** in the editor and on tabs, with cut, copy, paste, rename in file, format and the command palette.
+- **HTML shortcuts:** `!` then `Tab` writes an HTML5 page; `ul>li*3`, `div.box`, `a` and similar abbreviations expand on `Tab` in `.html`, `.htm`, `.vue` and `.svelte` files. Built in, no extension needed.
+
+### Discord Rich Presence (not in 1.0.0)
+- The code is in the tree but left out of the 1.0.0 build: nothing in Settings, no palette commands, no connection to Discord. Build with `cargo build --release --features discord` to try it.
 
 ### Modern Dark Theme
 - Tailored dark palette (`#181818` / `#1e1e1e`) with clean borders and subtle contrast.

@@ -17,23 +17,34 @@ impl Workbench {
             .items_center()
             .justify_between()
             .gap_6()
-            .py_3()
+            .w_full()
+            .max_w(px(820.))
+            .py(px(14.))
             .border_b_1()
-            .border_color(rgb(theme::BORDER))
+            .border_color(rgb(0x363636))
             .child(
                 div()
                     .flex()
                     .flex_col()
-                    .gap(px(2.))
-                    .child(div().text_size(px(13.)).child(title))
+                    .flex_1()
+                    .min_w_0()
+                    .gap(px(3.))
                     .child(
                         div()
-                            .text_size(px(12.))
-                            .text_color(rgb(theme::TEXT_DIM))
+                            .text_size(px(14.))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(rgb(0xe8e8e8))
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(12.5))
+                            .line_height(px(18.))
+                            .text_color(rgb(0xa8a8a8))
                             .child(hint.into()),
                     ),
             )
-            .child(control)
+            .child(div().flex_none().child(control))
             .into_any_element()
     }
 
@@ -117,10 +128,15 @@ impl Workbench {
         let l = &self.model.layout;
         let section = |text: &'static str| {
             div()
-                .pt_4()
-                .text_size(px(11.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(rgb(theme::TEXT_DIM))
+                .w_full()
+                .max_w(px(820.))
+                .pt_8()
+                .pb_2()
+                .border_b_1()
+                .border_color(rgb(0x4a4a4a))
+                .text_size(px(12.))
+                .font_weight(FontWeight::BOLD)
+                .text_color(rgb(0xf2f2f2))
                 .child(text)
         };
         let sidebar_side = self.segmented(
@@ -227,7 +243,8 @@ impl Workbench {
                             cx,
                         ),
                     ))
-                    .child(section("DISCORD"))
+                    .when(crate::discord::AVAILABLE, |el| {
+                        el.child(section("DISCORD"))
                     .child(Self::setting_row(
                         "Rich Presence",
                         "Show what you are working on in your Discord status.",
@@ -277,6 +294,7 @@ impl Workbench {
                             cx,
                         ),
                     ))
+                    })
                     .child(
                         div()
                             .flex()

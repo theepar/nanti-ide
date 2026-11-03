@@ -1096,6 +1096,9 @@ impl Model {
     }
 
     pub(crate) fn run_discord_command(&mut self, command: crate::palette::Command) {
+        if !crate::discord::AVAILABLE {
+            return;
+        }
         use crate::palette::Command as C;
         match command {
             C::ToggleDiscord => {
@@ -1120,6 +1123,9 @@ impl Model {
     }
 
     fn discord_changed(&mut self) {
+        if !crate::discord::AVAILABLE {
+            return;
+        }
         if let Some(dir) = self.config_dir.clone()
             && let Err(e) = self.discord.settings.save(&dir)
         {
@@ -1129,6 +1135,9 @@ impl Model {
     }
 
     pub fn load_discord_settings(&mut self) {
+        if !crate::discord::AVAILABLE {
+            return;
+        }
         if let Some(dir) = self.config_dir.clone() {
             self.discord.settings = crate::discord::DiscordSettings::load(&dir);
             self.discord.reconfigure();
@@ -1165,6 +1174,9 @@ impl Model {
     }
 
     pub fn pump_discord(&mut self) -> bool {
+        if !crate::discord::AVAILABLE {
+            return false;
+        }
         let wanted = self
             .discord
             .settings

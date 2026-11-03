@@ -94,6 +94,22 @@ pub enum Command {
 }
 
 impl Command {
+    pub fn is_discord(self) -> bool {
+        matches!(
+            self,
+            Command::ToggleDiscord
+                | Command::DiscordConnect
+                | Command::ToggleDiscordFile
+                | Command::ToggleDiscordWorkspace
+                | Command::ToggleDiscordTime
+        )
+    }
+
+    /// Commands of a feature this build leaves out never reach the palette.
+    pub fn available(self) -> bool {
+        !self.is_discord() || crate::discord::AVAILABLE
+    }
+
     pub const ALL: [Command; 84] = [
         Command::CommandPalette,
         Command::QuickOpen,
@@ -1279,6 +1295,7 @@ impl Palette {
     pub fn commands(extensions: &[crate::extensions::Extension]) -> Self {
         let mut items: Vec<PaletteItem> = Command::ALL
             .iter()
+            .filter(|c| c.available())
             .map(|c| PaletteItem {
                 label: c.title().to_owned(),
                 detail: c.keybinding().map(str::to_owned),
@@ -1527,7 +1544,10 @@ mod tests {
     #[test]
     fn command_palette_lists_only_real_commands_and_filters() {
         let mut p = Palette::commands(&[]);
-        assert_eq!(p.result_count(), Command::ALL.len());
+        assert_eq!(
+            p.result_count(),
+            Command::ALL.iter().filter(|c| c.available()).count()
+        );
         p.field.insert("save");
         p.refilter();
         assert_eq!(
@@ -1545,7 +1565,10 @@ mod tests {
     fn selection_wraps_and_resets_on_new_query() {
         let mut p = Palette::commands(&[]);
         p.move_selection(-1);
-        assert_eq!(p.selected, Command::ALL.len() - 1);
+        assert_eq!(
+            p.selected,
+            Command::ALL.iter().filter(|c| c.available()).count() - 1
+        );
         p.move_selection(1);
         assert_eq!(p.selected, 0);
         p.move_selection(2);
@@ -1646,5 +1669,18 @@ mod tests {
         assert_eq!(f.utf16_to_char(3), 2);
         assert_eq!(f.utf16_to_char(99), 3);
         assert_eq!(f.slice(1..2), "🌍");
+    }
+}
+
+#[cfg(test)]
+mod discord_gate_tests {
+    use super::*;
+
+    #[test]
+    fn discord_commands_are_listed_only_when_the_feature_is_built() {
+        let p = Palette::commands(&[]);
+        let listed = p.results().any(|r| r.label.starts_with("Discord:"));
+        assert_eq!(listed, cfg!(feature = "discord"));
+        assert!(Command::ALL.iter().any(|c| c.is_discord()));
     }
 }
