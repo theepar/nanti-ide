@@ -1337,6 +1337,7 @@ impl Model {
             .then(|| self.discord_presence());
         let mut changed = self.discord.pump(wanted);
         changed |= self.discord.pump_avatar(self.config_dir.as_deref());
+        changed |= self.discord.tick();
         if self.discord.take_profile_dirty() {
             self.save_discord_settings();
         }

@@ -112,7 +112,7 @@ graph TD
 - **File icon themes:** an installed icon theme extension (for example Material Icon Theme) is switched on the first time it appears and drawn in the explorer and the tabs; Settings > Appearance switches between it and the built-in icons. SVG and PNG themes work; glyph-font themes do not.
 
 ### Discord Rich Presence (not in the 1.0.0 release build)
-- The code is in the tree but left out of the 1.0.0 build: nothing in Settings, no palette commands, no connection to Discord. While it is signed in, your Discord profile picture is downloaded once from Discord's image server (cdn.discordapp.com) and kept in the config folder; switching Rich Presence off stops the connection and the background thread. Debug builds (`cargo run`) always include it; for a release build use `cargo build --release --features discord`.
+- The code is in the tree but left out of the 1.0.0 build: nothing in Settings, no palette commands, no connection to Discord. While it is signed in, your Discord profile picture is downloaded once from Discord's image server (cdn.discordapp.com) and kept in the config folder; switching Rich Presence off clears the status and keeps the connection for ten minutes, so switching it back on is instant (Discord goes quiet for minutes when a closed connection is opened again), then the connection and its background thread are closed; Log out closes them at once. Debug builds (`cargo run`) always include it; for a release build use `cargo build --release --features discord`.
 
 ### Modern Dark Theme
 - Tailored dark palette (`#181818` / `#1e1e1e`) with clean borders and subtle contrast.

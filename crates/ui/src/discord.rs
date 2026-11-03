@@ -17,6 +17,8 @@ const MAX_FRAME: usize = 64 * 1024;
 const READY_TIMEOUT: Duration = Duration::from_secs(8);
 const SETTLE: Duration = Duration::from_millis(600);
 const QUICK_RETRIES: u32 = 1;
+// How long a switched-off connection stays open, so switching back on needs no new handshake.
+const STANDBY_LIMIT: Duration = Duration::from_secs(10 * 60);
 const RETRY_AFTER: Duration = Duration::from_secs(15);
 const TICK: Duration = Duration::from_millis(100);
 // Discord allows 5 activity updates per 20 seconds, so a change goes out within 4 seconds.
@@ -203,6 +205,8 @@ pub fn language_asset(ext: &str) -> Option<&'static str> {
 enum Cmd {
     Config { enabled: bool, client_id: String },
     Presence(Option<Presence>),
+    // Clears the status but keeps the connection (true), or shows the status again (false).
+    Pause(bool),
     Shutdown,
 }
 
@@ -389,6 +393,7 @@ fn session(
         *s = DiscordStatus::Connected(user);
     }
     let mut nonce = 0u64;
+    let mut paused = false;
     let mut send = |pipe: &mut dyn Pipe, p: Option<&Presence>| {
         nonce += 1;
         pipe.write_all(&encode_frame(OP_FRAME, &activity_payload(pid, nonce, p)))
@@ -416,10 +421,17 @@ fn session(
         }
         match rx.recv_timeout(TICK) {
             Ok(Cmd::Presence(p)) => {
-                if let Err(e) = send(pipe, p.as_ref()) {
+                if !paused && let Err(e) = send(pipe, p.as_ref()) {
                     return lost(e);
                 }
                 *pending = p;
+            }
+            Ok(Cmd::Pause(on)) => {
+                paused = on;
+                let shown = if on { None } else { pending.as_ref() };
+                if let Err(e) = send(pipe, shown) {
+                    return lost(e);
+                }
             }
             Ok(Cmd::Config { enabled, client_id }) => {
                 goodbye(pipe, pid);
@@ -524,6 +536,7 @@ impl Wanted {
                 self.client_id = client_id;
             }
             Cmd::Presence(p) => self.pending = p,
+            Cmd::Pause(_) => {}
             Cmd::Shutdown => return false,
         }
         true
@@ -651,6 +664,10 @@ impl DiscordLink {
         });
     }
 
+    pub fn pause(&self, on: bool) {
+        let _ = self.tx.send(Cmd::Pause(on));
+    }
+
     pub fn set_presence(&self, presence: Option<Presence>) {
         let _ = self.tx.send(Cmd::Presence(presence));
     }
@@ -677,6 +694,8 @@ pub struct DiscordState {
     avatar_hash: Option<String>,
     pub avatar_path: Option<PathBuf>,
     profile_dirty: bool,
+    standby_since: Option<Instant>,
+    sent_config: Option<(bool, String)>,
     avatar_rx: Option<Receiver<Option<PathBuf>>>,
 }
 
@@ -690,6 +709,8 @@ impl Default for DiscordState {
             avatar_hash: None,
             avatar_path: None,
             profile_dirty: false,
+            standby_since: None,
+            sent_config: None,
             avatar_rx: None,
             started_ms: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -701,6 +722,8 @@ impl Default for DiscordState {
 impl DiscordState {
     pub fn status(&self) -> DiscordStatus {
         match &self.link {
+            // A connection kept open while switched off is standing by, which is "off" to the user.
+            Some(_) if !self.settings.enabled => DiscordStatus::Off,
             Some(l) => l.status(),
             None if !self.settings.enabled => DiscordStatus::Off,
             None if self.settings.client_id.is_empty() => DiscordStatus::NeedsId,
@@ -710,20 +733,59 @@ impl DiscordState {
 
     /// Applies new settings; starts the worker only once the feature is wanted.
     pub fn reconfigure(&mut self) {
+        let wanted = (self.settings.enabled, self.settings.client_id.clone());
         if self.settings.enabled {
-            if self.link.is_none() {
-                self.link = Some(DiscordLink::start());
+            match &self.link {
+                Some(l) if self.standby_since.take().is_some() => l.pause(false),
+                Some(l) => {
+                    // The worker restarts its connection on a new configuration, so it only hears about real changes.
+                    if self.sent_config.as_ref() != Some(&wanted) {
+                        l.configure(&self.settings);
+                    }
+                }
+                None => {
+                    let l = DiscordLink::start();
+                    l.configure(&self.settings);
+                    self.link = Some(l);
+                }
             }
+            self.sent_config = Some(wanted);
+        } else if self.link.as_ref().is_some_and(|l| l.status().connected()) {
+            // Standing by: the status is cleared but the connection stays, so switching back on is instant.
+            // tick() ends it for good after a while.
+            if let Some(l) = &self.link {
+                l.pause(true);
+            }
+            self.standby_since.get_or_insert_with(Instant::now);
         } else {
-            // Off means off: dropping the link ends its worker thread and closes the pipe to Discord.
-            self.link = None;
-            self.avatar_rx = None;
-        }
-        if let Some(link) = &self.link {
-            link.configure(&self.settings);
+            // Nothing worth keeping: dropping the link ends its worker thread and closes the pipe to Discord.
+            self.drop_link();
         }
         self.sent = None;
         self.sent_at = None;
+    }
+
+    fn drop_link(&mut self) {
+        self.link = None;
+        self.standby_since = None;
+        self.sent_config = None;
+        self.avatar_rx = None;
+    }
+
+    /// Closes a connection that has stood by for too long. Returns whether something changed.
+    pub fn tick(&mut self) -> bool {
+        if self
+            .standby_since
+            .is_some_and(|t| t.elapsed() >= STANDBY_LIMIT)
+        {
+            self.drop_link();
+            return true;
+        }
+        false
+    }
+
+    pub fn standing_by(&self) -> bool {
+        self.standby_since.is_some()
     }
 
     pub fn take_profile_dirty(&mut self) -> bool {
@@ -748,6 +810,7 @@ impl DiscordState {
 
     /// Forgets the remembered account (the picture file stays in the cache folder).
     pub fn forget_account(&mut self) {
+        self.drop_link();
         self.settings.profile = None;
         self.avatar_hash = None;
         self.avatar_path = None;
@@ -768,12 +831,12 @@ impl DiscordState {
     }
 
     pub fn reconnect(&mut self) {
-        self.link = None;
+        self.drop_link();
         if self.settings.enabled {
-            self.link = Some(DiscordLink::start_after(SETTLE));
-            if let Some(link) = &self.link {
-                link.configure(&self.settings);
-            }
+            let link = DiscordLink::start_after(SETTLE);
+            link.configure(&self.settings);
+            self.link = Some(link);
+            self.sent_config = Some((true, self.settings.client_id.clone()));
             self.sent = None;
             self.sent_at = None;
         }
@@ -1094,6 +1157,66 @@ mod tests {
             frames[2].1["args"]["activity"].is_null(),
             "None clears the presence"
         );
+    }
+
+    #[test]
+    fn pausing_clears_the_status_but_keeps_the_connection_and_resuming_shows_it_again() {
+        let mut fake = Fake::default();
+        fake.push(OP_FRAME, &ready("Deva"));
+        let (tx, rx) = mpsc::channel();
+        let status = Mutex::new(DiscordStatus::Connecting);
+        let show = |text: &str| Presence {
+            details: text.into(),
+            ..Presence::default()
+        };
+        tx.send(Cmd::Presence(Some(show("one")))).unwrap();
+        tx.send(Cmd::Pause(true)).unwrap();
+        tx.send(Cmd::Presence(Some(show("two")))).unwrap();
+        tx.send(Cmd::Pause(false)).unwrap();
+        tx.send(Cmd::Shutdown).unwrap();
+        let mut pending = None;
+        let ended = session(
+            &mut fake,
+            "123456789012345678",
+            &rx,
+            &status,
+            &mut pending,
+            77,
+        );
+        assert!(
+            matches!(ended, Ended::Shutdown),
+            "no reconnect happened in between"
+        );
+        let shown: Vec<Option<String>> = fake
+            .frames()
+            .iter()
+            .filter(|(op, v)| *op == OP_FRAME && v["cmd"] == "SET_ACTIVITY")
+            .map(|(_, v)| v["args"]["activity"]["details"].as_str().map(str::to_owned))
+            .collect();
+        assert_eq!(
+            shown,
+            [Some("one".into()), None, Some("two".into()), None],
+            "shown, cleared on pause, the update made while paused only appears on resume, then the goodbye clear"
+        );
+        assert_eq!(
+            fake.frames()
+                .iter()
+                .filter(|(op, _)| *op == OP_HANDSHAKE)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_connection_left_standing_by_is_closed_after_the_limit() {
+        let mut st = DiscordState {
+            standby_since: Some(Instant::now() - STANDBY_LIMIT - Duration::from_secs(1)),
+            ..DiscordState::default()
+        };
+        assert!(st.standing_by());
+        assert!(st.tick());
+        assert!(!st.standing_by());
+        assert!(!st.tick());
     }
 
     #[test]
