@@ -7,6 +7,8 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 import { watch as fsWatch, existsSync } from "node:fs";
 import { ConfigStore, CONFIGURATION_TARGET } from "./configuration.mjs";
 import { createWebviewHub } from "./webview.mjs";
+import * as types from "./types.mjs";
+import { makeDocument, makeCancellation } from "./types.mjs";
 
 export function globToRegExp(pattern) {
   let re = "";
@@ -316,20 +318,12 @@ export function createVscode({ workspaceFolders = [], notify, settings = {}, get
   function syncOpenDocument({ uri, languageId, version, text }) {
     const parsed = typeof uri === "string" ? Uri.parse(uri) : uri;
     const key = parsed.toString();
-    const doc = {
+    const doc = makeDocument({
       uri: parsed,
-      fileName: parsed.fsPath,
       languageId: languageId || LANGUAGE_BY_EXT[path.extname(parsed.fsPath).toLowerCase()] || "plaintext",
       version: version ?? 1,
-      isDirty: false,
-      isUntitled: false,
-      isClosed: false,
-      lineCount: text === "" ? 1 : text.split(/\r\n|\r|\n/).length,
-      getText(range) {
-        if (range !== undefined) throw new UnsupportedCapability("vscode.TextDocument.getText(range)");
-        return text;
-      },
-    };
+      text,
+    });
     state.documents.set(key, doc);
     state.activeEditor = {
       document: doc,
@@ -350,13 +344,7 @@ export function createVscode({ workspaceFolders = [], notify, settings = {}, get
     if (!doc) {
       return syncOpenDocument({ uri: parsed, version, text });
     }
-    doc.version = version ?? (doc.version + 1);
-    doc.isDirty = true;
-    doc.lineCount = text === "" ? 1 : text.split(/\r\n|\r|\n/).length;
-    doc.getText = (range) => {
-      if (range !== undefined) throw new UnsupportedCapability("vscode.TextDocument.getText(range)");
-      return text;
-    };
+    doc._update(text, version ?? doc.version + 1, true);
     emitter("onDidChangeTextDocument").fire({
       document: doc,
       contentChanges: contentChanges || [{ text }],
@@ -432,8 +420,66 @@ export function createVscode({ workspaceFolders = [], notify, settings = {}, get
     index,
   }));
 
+  const same = (a, b) => (process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b);
+  const within = (child, parent) => {
+    const rel = path.relative(parent, child);
+    return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+  };
+  const folderOf = (fsPath) =>
+    folders
+      .filter((f) => within(fsPath, f.uri.fsPath) || same(fsPath, f.uri.fsPath))
+      .sort((a, b) => b.uri.fsPath.length - a.uri.fsPath.length)[0];
+
+  async function walk(root, visit) {
+    const entries = await fs.readdir(root, { withFileTypes: true }).catch(() => []);
+    for (const e of entries) {
+      if (IGNORED_SEGMENTS.has(e.name)) continue;
+      const full = path.join(root, e.name);
+      if (e.isDirectory()) {
+        if ((await walk(full, visit)) === false) return false;
+      } else if (visit(full) === false) return false;
+    }
+    return true;
+  }
+
   const workspace = strict("vscode.workspace", {
     workspaceFolders: folders.length ? folders : undefined,
+    get rootPath() {
+      return workspaceFolders[0];
+    },
+    get name() {
+      return folders[0]?.name;
+    },
+    isTrusted: true,
+    workspaceFile: undefined,
+    getWorkspaceFolder(uri) {
+      return uri && uri.fsPath ? folderOf(uri.fsPath) : undefined;
+    },
+    asRelativePath(pathOrUri, includeWorkspaceFolder) {
+      const p = typeof pathOrUri === "string" ? pathOrUri : pathOrUri.fsPath;
+      const folder = folderOf(p);
+      if (!folder) return p;
+      const rel = path.relative(folder.uri.fsPath, p).replace(/\\/g, "/");
+      const withName = includeWorkspaceFolder ?? folders.length > 1;
+      return withName ? `${folder.name}/${rel}` : rel;
+    },
+    async findFiles(include, exclude, maxResults = 10000) {
+      const roots = typeof include === "string" ? folders.map((f) => f.uri.fsPath) : [include.base];
+      const pattern = typeof include === "string" ? include : include.pattern;
+      const wanted = globToRegExp(pattern);
+      const skipped = typeof exclude === "string" ? globToRegExp(exclude) : undefined;
+      const found = [];
+      for (const root of roots) {
+        const keepGoing = await walk(root, (full) => {
+          const rel = path.relative(root, full).replace(/\\/g, "/");
+          if (!wanted.test(rel) || skipped?.test(rel)) return true;
+          found.push(Uri.file(full));
+          return found.length < maxResults;
+        });
+        if (!keepGoing) break;
+      }
+      return found;
+    },
     getConfiguration: (section) => config.section(section),
     onDidChangeConfiguration: emitter("onDidChangeConfiguration").event,
     onDidChangeWorkspaceFolders: emitter("onDidChangeWorkspaceFolders").event,
@@ -499,20 +545,12 @@ export function createVscode({ workspaceFolders = [], notify, settings = {}, get
         return state.documents.get(key);
       }
       const text = await fs.readFile(uri.fsPath, "utf8");
-      const doc = {
+      const doc = makeDocument({
         uri,
-        fileName: uri.fsPath,
         languageId: LANGUAGE_BY_EXT[path.extname(uri.fsPath).toLowerCase()] ?? "plaintext",
         version: (state.documents.get(key)?.version ?? 0) + 1,
-        isDirty: false,
-        isUntitled: false,
-        isClosed: false,
-        lineCount: text === "" ? 1 : text.split(/\r\n|\r|\n/).length,
-        getText(range) {
-          if (range !== undefined) throw new UnsupportedCapability("vscode.TextDocument.getText(range)");
-          return text;
-        },
-      };
+        text,
+      });
       if (!state.documents.has(key)) emitter("onDidOpenTextDocument").fire(doc);
       state.documents.set(key, doc);
       return doc;
@@ -527,6 +565,24 @@ export function createVscode({ workspaceFolders = [], notify, settings = {}, get
       async stat(uri) {
         const s = await fs.stat(uri.fsPath);
         return { type: s.isDirectory() ? 2 : 1, size: s.size, mtime: s.mtimeMs, ctime: s.ctimeMs };
+      },
+      async readDirectory(uri) {
+        const entries = await fs.readdir(uri.fsPath, { withFileTypes: true });
+        return entries.map((e) => [e.name, e.isDirectory() ? 2 : e.isSymbolicLink() ? 64 : 1]);
+      },
+      async createDirectory(uri) {
+        await fs.mkdir(uri.fsPath, { recursive: true });
+      },
+      async delete(uri, options = {}) {
+        await fs.rm(uri.fsPath, { recursive: options.recursive === true, force: false });
+      },
+      async rename(source, target, options = {}) {
+        if (!options.overwrite && existsSync(target.fsPath)) throw types.FileSystemError.FileExists(target);
+        await fs.rename(source.fsPath, target.fsPath);
+      },
+      async copy(source, target, options = {}) {
+        if (!options.overwrite && existsSync(target.fsPath)) throw types.FileSystemError.FileExists(target);
+        await fs.cp(source.fsPath, target.fsPath, { recursive: true, force: options.overwrite === true });
       },
     }),
   });
@@ -753,6 +809,8 @@ export function createVscode({ workspaceFolders = [], notify, settings = {}, get
     TerminalLocation,
     TerminalExitReason,
     RelativePattern,
+    ...types,
+    CancellationTokenSource: makeCancellation(EventEmitter),
     version: HOST_VERSION,
     NotebookCellOutputItem,
     commands,

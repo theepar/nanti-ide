@@ -266,7 +266,7 @@ test("tabGroups, editor state, providers, openTextDocument (VH-04 partial)", asy
   assert.equal(doc.getText(), "one\ntwo\r\nthree");
   assert.deepEqual(opened, [file]);
   assert.equal(vscode.workspace.textDocuments.length, 1);
-  assert.throws(() => doc.getText({}), /UnsupportedCapability/);
+  assert.equal(doc.getText(new vscode.Range(0, 1, 1, 2)), "ne\ntw");
   await assert.rejects(vscode.workspace.openTextDocument(vscode.Uri.parse("untitled:x")), /UnsupportedCapability/);
   fs.rmSync(dir, { recursive: true });
 });
@@ -507,3 +507,4 @@ test("live editor buffer sync between IDE and host (AI-04 / AI-05 / VH-04)", asy
   assert.equal(api.vscode.workspace.textDocuments.length, 0);
 
 });
+
