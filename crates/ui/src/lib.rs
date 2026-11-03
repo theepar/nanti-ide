@@ -463,31 +463,6 @@ impl Workbench {
         self.model.marketplace_enabled = true;
     }
 
-    #[cfg(windows)]
-    fn native_pick(mode: &str, title: &str) -> Option<PathBuf> {
-        static PICKER_BYTES: &[u8] = include_bytes!("../res/nanti-picker.exe");
-        let temp_picker = std::env::temp_dir().join("nanti-picker.exe");
-        if !temp_picker.exists()
-            || temp_picker.metadata().map(|m| m.len()).unwrap_or(0) != PICKER_BYTES.len() as u64
-        {
-            let _ = std::fs::write(&temp_picker, PICKER_BYTES);
-        }
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        let output = std::process::Command::new(&temp_picker)
-            .args([mode, title])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output()
-            .ok()?;
-        if output.status.success() && !output.stdout.is_empty() {
-            let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !s.is_empty() {
-                return Some(PathBuf::from(s));
-            }
-        }
-        None
-    }
-
     pub fn enable_native_dialogs(&mut self) {
         self.model.native_dialogs = true;
     }
@@ -499,37 +474,8 @@ impl Workbench {
         cx: &mut Context<Self>,
     ) {
         use crate::model::PickRequest;
-        let (mode, title) = match req {
-            PickRequest::File => ("file", "Open File"),
-            PickRequest::Folder => ("folder", "Select Workspace Folder"),
-            PickRequest::Vsix => ("vsix", "Install Extension from VSIX"),
-        };
-        #[cfg(windows)]
-        {
-            let mode_s = mode.to_string();
-            let title_s = title.to_string();
-            cx.spawn_in(window, async move |this, cx| {
-                let chosen = cx
-                    .background_executor()
-                    .spawn(async move { Self::native_pick(&mode_s, &title_s) })
-                    .await;
-                let Some(path) = chosen else {
-                    return;
-                };
-                this.update_in(cx, |wb, window, cx| {
-                    wb.model.apply_picked(req, path);
-                    if req == PickRequest::File {
-                        wb.focus_editor(window);
-                    }
-                    wb.sync_focus(window);
-                    wb.reveal_cursor();
-                    cx.notify();
-                })
-                .ok();
-            })
-            .detach();
-        }
-        #[cfg(not(windows))]
+        // The system dialog runs inside this process and is owned by this window, so it stays in front of it
+        // and gets no taskbar button of its own.
         {
             let (files, directories, prompt) = match req {
                 PickRequest::File => (true, false, None),

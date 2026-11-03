@@ -93,7 +93,7 @@ Record the IME name/version and the result for each step here.
 
 - **LSP Client Engine:** Integrated JSON-RPC 2.0 language server client for `rust-analyzer` and `gopls` with real-time `publishDiagnostics`, editor squiggles, line highlights, and Problems panel integration.
 - **Open VSX Marketplace Integration:** Integrated marketplace search in the Extensions view with 1-click download and unpacking.
-- **Modern Windows Dialogs:** Native Windows COM `IFileOpenDialog` (Folder and VSIX file picker with dark theme and modern Explorer breadcrumbs).
+- **Modern Windows Dialogs:** the system `IFileOpenDialog` (file, folder and VSIX picker) runs inside the nanti process through GPUI and is owned by the main window, so it has no separate process or taskbar button.
 - **Terminal Multi-Session Tabs:** Vertical split side-tabs for managing multiple terminal sessions cleanly.
 - **Theme and Polish:** Dark Modern palette with subtle contrast, active line background highlights, and dedicated SVG icon assets.
 
