@@ -145,8 +145,16 @@ pub enum DetailTab {
     Pack,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextKind {
+    Item,
+    Editor,
+    Tab,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContextMenu {
+    pub kind: ContextKind,
     pub path: PathBuf,
     pub is_dir: bool,
     pub x: f32,
@@ -225,6 +233,7 @@ pub struct Model {
     pub tasks: Vec<Task>,
     pub extensions: Vec<Extension>,
     pub config_dir: Option<PathBuf>,
+    pub format_on_save: bool,
     pub panel_extension: Option<PathBuf>,
     pub panel_icon: Option<PathBuf>,
     pub panel_running: bool,
@@ -284,6 +293,7 @@ impl Model {
             tasks: Vec::new(),
             extensions: Vec::new(),
             config_dir: None,
+            format_on_save: false,
             panel_extension: None,
             panel_icon: None,
             panel_running: false,
@@ -769,6 +779,9 @@ impl Model {
     }
 
     pub fn save_tab(&mut self, index: usize, force: bool) -> SaveOutcome {
+        if self.format_on_save && self.tabs.get(index).is_some_and(Tab::is_dirty) {
+            self.format_tab(index, false);
+        }
         let Some(tab) = self.tabs.get_mut(index) else {
             return SaveOutcome::NothingToSave;
         };
@@ -1120,6 +1133,15 @@ impl Model {
                     e.select_all();
                 }
             }
+            // The clipboard belongs to the window, so the workbench handles these before the model sees them.
+            Command::Cut | Command::Copy | Command::Paste => {}
+            Command::FormatDocument => {
+                if let Some(i) = self.active_tab {
+                    self.format_tab(i, true);
+                }
+            }
+            Command::ToggleFormatOnSave => self.toggle_format_on_save(),
+            Command::RenameSymbol => self.begin_rename_symbol(),
             Command::NewTerminal => {
                 self.show_terminal_panel();
                 self.terminal_request = Some(TerminalRequest::New);

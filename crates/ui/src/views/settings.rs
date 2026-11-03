@@ -216,6 +216,17 @@ impl Workbench {
                         "The bar at the bottom of the window.",
                         self.switch("set-status", l.status_bar, Command::ToggleStatusBar, cx),
                     ))
+                    .child(section("EDITOR"))
+                    .child(Self::setting_row(
+                        "Format on save",
+                        "Format the file with rustfmt, gofmt, dart format or Prettier right before it is saved.",
+                        self.switch(
+                            "set-format-on-save",
+                            self.model.format_on_save,
+                            Command::ToggleFormatOnSave,
+                            cx,
+                        ),
+                    ))
                     .child(section("DISCORD"))
                     .child(Self::setting_row(
                         "Rich Presence",

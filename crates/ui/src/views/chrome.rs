@@ -176,8 +176,22 @@ impl Workbench {
                 f32::from(window.viewport_size().width),
                 f32::from(window.viewport_size().height),
             );
-            let items = menu::context_items(c.is_dir);
-            let h = items.len() as f32 * 26.0;
+            let items = match c.kind {
+                crate::model::ContextKind::Item => menu::context_items(c.is_dir),
+                crate::model::ContextKind::Editor => menu::editor_items(),
+                crate::model::ContextKind::Tab => menu::tab_items(),
+            };
+            let h = items
+                .iter()
+                .map(|i| {
+                    if matches!(i, MenuItem::Separator) {
+                        9.0
+                    } else {
+                        30.0
+                    }
+                })
+                .sum::<f32>()
+                + 8.0;
             (
                 c.x.min(vw - MENU_W - 4.0).max(0.0),
                 c.y.min(vh - h - 8.0).max(0.0),

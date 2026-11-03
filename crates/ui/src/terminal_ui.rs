@@ -12,7 +12,7 @@ use terminal::{CursorShape, KeyMods, SelectKind, Terminal, TerminalOptions, enco
 
 use crate::model::{PanelTab, TerminalRequest};
 use crate::palette::Command;
-use crate::{FONT_FAMILY, FONT_SIZE, LINE_HEIGHT, Target, Workbench, theme, x_of_col};
+use crate::{FONT_FAMILY, FONT_SIZE, LINE_HEIGHT, Target, Workbench, assets, theme, x_of_col};
 
 const DEFAULT_COLS: u16 = 100;
 const DEFAULT_ROWS: u16 = 10;
@@ -532,7 +532,7 @@ impl Workbench {
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                                 this.apply_command(Command::KillTerminal, window, cx);
                             }))
-                            .child("🗑"),
+                            .child(assets::icon("trash", 14., theme::TEXT_DIM)),
                     ),
             )
             .child(

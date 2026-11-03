@@ -712,6 +712,51 @@ impl Editor {
         self.cursor = self.buffer.len_chars();
     }
 
+    /// Swaps the whole text for `text` as one undo step, touching only the span that differs so the cursor stays put.
+    pub fn replace_document(&mut self, text: &str) -> bool {
+        self.end_composition();
+        let new = self.normalize_eol(text);
+        let old = self.text();
+        if old == new {
+            return false;
+        }
+        let o: Vec<char> = old.chars().collect();
+        let n: Vec<char> = new.chars().collect();
+        let room = o.len().min(n.len());
+        let mut pre = 0;
+        while pre < room && o[pre] == n[pre] {
+            pre += 1;
+        }
+        let mut suf = 0;
+        while suf < room - pre && o[o.len() - 1 - suf] == n[n.len() - 1 - suf] {
+            suf += 1;
+        }
+        let removed = pre..o.len() - suf;
+        let added: String = n[pre..n.len() - suf].iter().collect();
+        let added_len = added.chars().count();
+        let cur = self.cursor;
+        self.buffer.transact(|b| {
+            if !removed.is_empty() {
+                b.delete(removed.clone());
+            }
+            if !added.is_empty() {
+                b.insert(pre, &added);
+            }
+        });
+        self.cursor = if cur <= pre {
+            cur
+        } else if cur >= removed.end {
+            (cur + added_len).saturating_sub(removed.len())
+        } else {
+            pre + added_len
+        }
+        .min(self.buffer.len_chars());
+        self.anchor = self.cursor;
+        self.typing_run = false;
+        self.goal_col = None;
+        true
+    }
+
     fn normalize_eol(&self, text: &str) -> String {
         if !text.contains(['\r', '\n']) {
             return text.to_owned();
@@ -747,6 +792,25 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replace_document_edits_only_the_changed_span_and_undoes_in_one_step() {
+        let mut e = Editor::new("fn a(){}\nlet x=1;\nend\n");
+        e.set_cursor(e.buffer().line_start(2) + 1, false);
+        assert!(e.replace_document("fn a() {}\nlet x = 1;\nend\n"));
+        assert_eq!(e.text(), "fn a() {}\nlet x = 1;\nend\n");
+        assert_eq!(e.line_col(), (2, 1), "the cursor stays on its line");
+        assert!(!e.replace_document("fn a() {}\nlet x = 1;\nend\n"));
+        assert!(e.undo());
+        assert_eq!(e.text(), "fn a(){}\nlet x=1;\nend\n");
+    }
+
+    #[test]
+    fn replace_document_keeps_the_document_line_endings() {
+        let mut e = Editor::new("a\r\nb\r\n");
+        assert!(e.replace_document("a\nc\n"));
+        assert_eq!(e.text(), "a\r\nc\r\n");
+    }
 
     #[test]
     fn insert_delete_roundtrip_with_unicode() {

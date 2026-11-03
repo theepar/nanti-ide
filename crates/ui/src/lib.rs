@@ -19,6 +19,7 @@ pub mod assets;
 pub mod discord;
 pub mod extensions;
 pub mod find;
+pub mod format;
 pub mod launch;
 pub mod layout;
 pub mod lsp;
@@ -444,6 +445,7 @@ impl Workbench {
     pub fn set_config_dir(&mut self, dir: PathBuf, panel_extension: Option<PathBuf>) {
         self.model.config_dir = Some(dir);
         self.model.load_discord_settings();
+        self.model.load_format_settings();
         self.model.panel_extension = panel_extension;
         self.model.refresh_extensions();
     }
@@ -1074,11 +1076,63 @@ impl Workbench {
     }
 
     fn apply_command(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
+        match command {
+            Command::Copy | Command::Cut | Command::Paste => {
+                self.clipboard_command(command, cx);
+                self.focus_editor(window);
+                self.reveal_cursor();
+                return cx.notify();
+            }
+            _ => {}
+        }
         self.model.run_command(command);
         self.process_terminal_request();
         self.drain_requests(window, cx);
         self.sync_focus(window);
         self.reveal_cursor();
+        cx.notify();
+    }
+
+    fn clipboard_command(&mut self, command: Command, cx: &mut Context<Self>) {
+        let Some(e) = self.model.active_editor_mut() else {
+            return;
+        };
+        match command {
+            Command::Copy if e.has_selection() => {
+                cx.write_to_clipboard(ClipboardItem::new_string(e.selected_text()));
+            }
+            Command::Cut if e.has_selection() => {
+                cx.write_to_clipboard(ClipboardItem::new_string(e.cut()));
+            }
+            Command::Paste => {
+                if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
+                    e.insert(&text);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn on_editor_right_down(
+        &mut self,
+        ev: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.focus_editor(window);
+        if self.model.prompt.is_some() {
+            return;
+        }
+        if let Some(pos) = self.position_at(ev.position, window)
+            && let Some(e) = self.model.active_editor_mut()
+            && !e.selection().contains(&pos)
+        {
+            e.set_cursor(pos, false);
+        }
+        if self.model.active_editor_mut().is_some() {
+            self.model
+                .open_editor_menu(f32::from(ev.position.x), f32::from(ev.position.y));
+        }
         cx.notify();
     }
 
@@ -1464,6 +1518,7 @@ impl Workbench {
             let command = match (key, m.shift) {
                 ("up", false) => Some(Command::MoveLineUp),
                 ("down", false) => Some(Command::MoveLineDown),
+                ("f", true) => Some(Command::FormatDocument),
                 ("up", true) => Some(Command::DuplicateLineUp),
                 ("down", true) => Some(Command::DuplicateLineDown),
                 _ => None,
@@ -2079,6 +2134,17 @@ impl Workbench {
                 let dirty = t.is_dirty();
                 div()
                     .id(("tab", i))
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, ev: &MouseDownEvent, _w, cx| {
+                            this.model.open_tab_menu(
+                                i,
+                                f32::from(ev.position.x),
+                                f32::from(ev.position.y),
+                            );
+                            cx.notify();
+                        }),
+                    )
                     .relative()
                     .flex()
                     .items_center()
@@ -2156,7 +2222,7 @@ impl Workbench {
                             .map_or("this file", |t| t.title.as_str())
                     ),
                     "Save",
-                    "Don't Save",
+                    Some("Don't Save"),
                     false,
                 ),
                 Prompt::SaveConflict {
@@ -2165,11 +2231,11 @@ impl Workbench {
                     "File Save Conflict",
                     format!("{reason}\n\nOverwrite it with your version?"),
                     "Overwrite",
-                    if *then_close {
+                    Some(if *then_close {
                         "Discard Mine"
                     } else {
                         "Reload from Disk"
-                    },
+                    }),
                     true,
                 ),
                 Prompt::QuitDirty => (
@@ -2179,7 +2245,7 @@ impl Workbench {
                         self.model.dirty_count()
                     ),
                     "Save All & Quit",
-                    "Discard & Quit",
+                    Some("Discard & Quit"),
                     false,
                 ),
                 Prompt::DeleteItem(p) => (
@@ -2190,7 +2256,7 @@ impl Workbench {
                             .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
                     ),
                     "Move to Recycle Bin",
-                    "Keep",
+                    None,
                     true,
                 ),
                 Prompt::DiscardChanges { rel, untracked } => (
@@ -2213,7 +2279,7 @@ impl Workbench {
                     } else {
                         "Discard Changes"
                     },
-                    "Keep",
+                    None,
                     true,
                 ),
                 Prompt::Push {
@@ -2231,7 +2297,7 @@ impl Workbench {
                         )
                     },
                     "Push",
-                    "Cancel",
+                    None,
                     false,
                 ),
                 Prompt::RemoveExtension(p) => (
@@ -2242,7 +2308,7 @@ impl Workbench {
                             .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
                     ),
                     "Remove",
-                    "Keep",
+                    None,
                     true,
                 ),
             };
@@ -2275,25 +2341,28 @@ impl Workbench {
                 }))
                 .child(primary);
 
-            let secondary_btn = div()
-                .id("prompt-secondary")
-                .flex()
-                .items_center()
-                .h(px(30.))
-                .px_3()
-                .rounded_md()
-                .cursor_pointer()
-                .bg(rgb(0x333333))
-                .text_color(rgb(0xd0d0d0))
-                .text_size(px(12.))
-                .hover(|s| s.bg(rgb(0x404040)).text_color(rgb(0xffffff)))
-                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                    if this.model.resolve_discard() {
-                        return this.finish_quit(window, cx);
-                    }
-                    cx.notify();
-                }))
-                .child(secondary);
+            // Only prompts with a third outcome (like "Don't Save") get a second button; Cancel is always there.
+            let secondary_btn = secondary.map(|label| {
+                div()
+                    .id("prompt-secondary")
+                    .flex()
+                    .items_center()
+                    .h(px(30.))
+                    .px_3()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .bg(rgb(0x333333))
+                    .text_color(rgb(0xd0d0d0))
+                    .text_size(px(12.))
+                    .hover(|s| s.bg(rgb(0x404040)).text_color(rgb(0xffffff)))
+                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        if this.model.resolve_discard() {
+                            return this.finish_quit(window, cx);
+                        }
+                        cx.notify();
+                    }))
+                    .child(label)
+            });
 
             let cancel_btn = div()
                 .id("prompt-cancel")
@@ -2354,11 +2423,9 @@ impl Workbench {
                                     .flex()
                                     .items_center()
                                     .gap_2()
-                                    .child(div().text_size(px(16.)).child(if destructive {
-                                        "⚠️"
-                                    } else {
-                                        "ℹ️"
-                                    }))
+                                    .children(
+                                        destructive.then(|| assets::icon("warning", 16., 0xe5a50a)),
+                                    )
                                     .child(
                                         div()
                                             .text_size(px(14.))
@@ -2381,7 +2448,7 @@ impl Workbench {
                                     .gap_2()
                                     .pt_3()
                                     .child(primary_btn)
-                                    .child(secondary_btn)
+                                    .children(secondary_btn)
                                     .child(cancel_btn),
                             ),
                     )
@@ -2510,6 +2577,7 @@ impl Workbench {
             .track_scroll(&self.scroll)
             .track_focus(&self.focus)
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_editor_mouse_down))
+            .on_mouse_down(MouseButton::Right, cx.listener(Self::on_editor_right_down))
             .on_mouse_move(cx.listener(Self::on_editor_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_editor_mouse_up))
             .bg(rgb(theme::EDITOR))

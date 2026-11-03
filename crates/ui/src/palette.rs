@@ -21,6 +21,12 @@ pub enum Command {
     ShowExtensions,
     Undo,
     Redo,
+    Cut,
+    Copy,
+    Paste,
+    FormatDocument,
+    ToggleFormatOnSave,
+    RenameSymbol,
     SelectAll,
     Find,
     Replace,
@@ -88,7 +94,7 @@ pub enum Command {
 }
 
 impl Command {
-    pub const ALL: [Command; 78] = [
+    pub const ALL: [Command; 84] = [
         Command::CommandPalette,
         Command::QuickOpen,
         Command::Save,
@@ -103,6 +109,12 @@ impl Command {
         Command::ShowExtensions,
         Command::Undo,
         Command::Redo,
+        Command::Cut,
+        Command::Copy,
+        Command::Paste,
+        Command::FormatDocument,
+        Command::ToggleFormatOnSave,
+        Command::RenameSymbol,
         Command::SelectAll,
         Command::Find,
         Command::Replace,
@@ -185,6 +197,12 @@ impl Command {
             Command::ShowExtensions => "View: Show Extensions",
             Command::Undo => "Edit: Undo",
             Command::Redo => "Edit: Redo",
+            Command::Cut => "Edit: Cut",
+            Command::Copy => "Edit: Copy",
+            Command::Paste => "Edit: Paste",
+            Command::FormatDocument => "Editor: Format Document",
+            Command::ToggleFormatOnSave => "Editor: Toggle Format on Save",
+            Command::RenameSymbol => "Editor: Rename Symbol in File...",
             Command::SelectAll => "Edit: Select All",
             Command::Find => "Edit: Find",
             Command::Replace => "Edit: Replace",
@@ -271,6 +289,10 @@ impl Command {
             Command::ToggleSidebar => Some("Ctrl+B"),
             Command::Undo => Some("Ctrl+Z"),
             Command::Redo => Some("Ctrl+Y"),
+            Command::Cut => Some("Ctrl+X"),
+            Command::Copy => Some("Ctrl+C"),
+            Command::Paste => Some("Ctrl+V"),
+            Command::FormatDocument => Some("Shift+Alt+F"),
             Command::SelectAll => Some("Ctrl+A"),
             Command::Find => Some("Ctrl+F"),
             Command::Replace => Some("Ctrl+H"),
@@ -1202,6 +1224,7 @@ pub enum InputKind {
     Rename(PathBuf),
     InstallVsix,
     NewBranch,
+    RenameSymbol(String),
 }
 
 impl InputKind {
@@ -1213,6 +1236,7 @@ impl InputKind {
             InputKind::Rename(_) => "New name",
             InputKind::InstallVsix => "Full path of a .vsix file",
             InputKind::NewBranch => "New branch name",
+            InputKind::RenameSymbol(_) => "New name for every whole-word match in this file",
         }
     }
 }

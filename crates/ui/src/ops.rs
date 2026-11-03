@@ -3,7 +3,9 @@ use std::time::Instant;
 
 use crate::extensions;
 use crate::menu::MenuKind;
-use crate::model::{ContextMenu, Model, PanelTab, Prompt, SaveOutcome, Tab, TabContent};
+use crate::model::{
+    ContextKind, ContextMenu, Model, PanelTab, Prompt, SaveOutcome, Tab, TabContent,
+};
 use crate::palette::{InputKind, Palette, PaletteMode};
 use crate::problems::DEBOUNCE;
 use crate::tasks;
@@ -65,8 +67,137 @@ impl Model {
         self.menu_open = None;
         self.select_entry(path);
         self.context_menu = Some(ContextMenu {
+            kind: ContextKind::Item,
             path: path.to_path_buf(),
             is_dir,
+            x,
+            y,
+        });
+    }
+
+    pub fn load_format_settings(&mut self) {
+        self.format_on_save = self
+            .config_dir
+            .as_deref()
+            .is_some_and(crate::format::load_format_on_save);
+    }
+
+    pub(crate) fn toggle_format_on_save(&mut self) {
+        self.format_on_save = !self.format_on_save;
+        if let Some(dir) = &self.config_dir {
+            let _ = crate::format::save_format_on_save(dir, self.format_on_save);
+        }
+        let state = if self.format_on_save { "on" } else { "off" };
+        self.say("Format", &format!("Format on save is {state}"));
+    }
+
+    /// Runs the file's formatter on the whole document and applies the result as one undo step.
+    pub fn format_tab(&mut self, index: usize, announce: bool) -> bool {
+        let Some(tab) = self.tabs.get(index) else {
+            return false;
+        };
+        let TabContent::Text(editor) = &tab.content else {
+            return false;
+        };
+        let (path, before) = (tab.path.clone(), editor.text());
+        let dirs: Vec<PathBuf> = self.extensions.iter().map(|x| x.dir.clone()).collect();
+        let Some(plan) = crate::format::plan(&path, &dirs) else {
+            if announce {
+                self.say("Format", "There is no formatter for this file type");
+            }
+            return false;
+        };
+        match crate::format::run(&plan, &path, &before) {
+            Ok(out) => {
+                let changed = match self.tabs.get_mut(index).map(|t| &mut t.content) {
+                    Some(TabContent::Text(e)) => e.replace_document(&out),
+                    _ => false,
+                };
+                if announce {
+                    let text = if changed {
+                        format!("Formatted with {}", plan.name)
+                    } else {
+                        "Already formatted".to_owned()
+                    };
+                    self.say("Format", &text);
+                }
+                changed
+            }
+            Err(msg) => {
+                // A formatter that fails (syntax error, tool missing) must never stop a save.
+                self.say("Format", &msg);
+                false
+            }
+        }
+    }
+
+    pub(crate) fn begin_rename_symbol(&mut self) {
+        let Some(e) = self.active_editor_mut() else {
+            return;
+        };
+        if !e.has_selection() {
+            let at = e.cursor();
+            e.select_word_at(at);
+        }
+        let word = e.selected_text();
+        if word.is_empty() || word.contains(char::is_whitespace) {
+            return self.say("Rename", "Put the cursor on a name first");
+        }
+        self.open_input(InputKind::RenameSymbol(word.clone()), &word);
+    }
+
+    pub(crate) fn rename_symbol_in_file(&mut self, old: &str, new: &str) -> Result<(), String> {
+        use editor_core::find::{FindOptions, Finder};
+        let new = new.trim();
+        if new.is_empty() || new == old {
+            return Err("enter a different name".into());
+        }
+        if !new
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '$')
+        {
+            return Err("a name may only have letters, digits, _ and $".into());
+        }
+        let finder = Finder::new(
+            old,
+            FindOptions {
+                case_sensitive: true,
+                whole_word: true,
+                regex: false,
+            },
+        )
+        .map_err(|e| e.0)?
+        .ok_or("nothing to rename")?;
+        let Some(e) = self.active_editor_mut() else {
+            return Err("open a file first".into());
+        };
+        let n = e.replace_matches(&finder, new, None);
+        self.say(
+            "Rename",
+            &format!("Renamed {n} whole-word match(es) of {old} in this file"),
+        );
+        Ok(())
+    }
+
+    pub fn open_editor_menu(&mut self, x: f32, y: f32) {
+        self.menu_open = None;
+        self.context_menu = Some(ContextMenu {
+            kind: ContextKind::Editor,
+            path: PathBuf::new(),
+            is_dir: false,
+            x,
+            y,
+        });
+    }
+
+    pub fn open_tab_menu(&mut self, index: usize, x: f32, y: f32) {
+        self.menu_open = None;
+        self.activate_tab(index);
+        self.explorer_sel = None;
+        self.context_menu = Some(ContextMenu {
+            kind: ContextKind::Tab,
+            path: PathBuf::new(),
+            is_dir: false,
             x,
             y,
         });
@@ -289,6 +420,7 @@ impl Model {
                 self.after_rename(&from, &to);
                 Ok(())
             }
+            InputKind::RenameSymbol(old) => self.rename_symbol_in_file(&old, text),
             InputKind::NewBranch => {
                 let name = text.trim();
                 if name.is_empty() {

@@ -78,6 +78,11 @@ pub fn items(kind: MenuKind) -> Vec<MenuItem> {
             Sep,
             Cmd(C::FindInFiles),
             Sep,
+            Cmd(C::Cut),
+            Cmd(C::Copy),
+            Cmd(C::Paste),
+            Sep,
+            Cmd(C::FormatDocument),
             Cmd(C::ToggleComment),
             Cmd(C::DeleteLine),
         ],
@@ -143,6 +148,44 @@ pub fn items(kind: MenuKind) -> Vec<MenuItem> {
     }
 }
 
+pub fn editor_items() -> Vec<MenuItem> {
+    vec![
+        Cmd(C::RenameSymbol),
+        Cmd(C::FormatDocument),
+        Cmd(C::ToggleComment),
+        Sep,
+        Cmd(C::Cut),
+        Cmd(C::Copy),
+        Cmd(C::Paste),
+        Cmd(C::SelectAll),
+        Sep,
+        Cmd(C::Undo),
+        Cmd(C::Redo),
+        Sep,
+        Cmd(C::Find),
+        Cmd(C::Replace),
+        Cmd(C::GoToLine),
+        Cmd(C::ChangeLanguageMode),
+        Sep,
+        Cmd(C::CopyPath),
+        Cmd(C::RevealInOs),
+        Sep,
+        Cmd(C::CommandPalette),
+    ]
+}
+
+pub fn tab_items() -> Vec<MenuItem> {
+    vec![
+        Cmd(C::Save),
+        Sep,
+        Cmd(C::CloseTab),
+        Cmd(C::CloseAllTabs),
+        Sep,
+        Cmd(C::CopyPath),
+        Cmd(C::RevealInOs),
+    ]
+}
+
 pub fn context_items(is_dir: bool) -> Vec<MenuItem> {
     let mut v = Vec::new();
     if is_dir {
@@ -169,6 +212,8 @@ mod tests {
         let mut v: Vec<_> = MenuKind::ALL.iter().map(|k| items(*k)).collect();
         v.push(context_items(true));
         v.push(context_items(false));
+        v.push(editor_items());
+        v.push(tab_items());
         v
     }
 
