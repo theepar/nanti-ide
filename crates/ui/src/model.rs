@@ -150,6 +150,7 @@ pub enum ContextKind {
     Item,
     Editor,
     Tab,
+    Terminal,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1138,7 +1139,12 @@ impl Model {
                 }
             }
             // The clipboard belongs to the window, so the workbench handles these before the model sees them.
-            Command::Cut | Command::Copy | Command::Paste => {}
+            Command::Cut
+            | Command::Copy
+            | Command::Paste
+            | Command::TerminalCopy
+            | Command::TerminalPaste
+            | Command::TerminalClear => {}
             Command::FormatDocument => {
                 if let Some(i) = self.active_tab {
                     self.format_tab(i, true);

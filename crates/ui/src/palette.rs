@@ -34,6 +34,9 @@ pub enum Command {
     FindPrev,
     FindInFiles,
     NewTerminal,
+    TerminalCopy,
+    TerminalPaste,
+    TerminalClear,
     ToggleTerminal,
     KillTerminal,
     TogglePanel,
@@ -112,7 +115,7 @@ impl Command {
         !self.is_discord() || crate::discord::AVAILABLE
     }
 
-    pub const ALL: [Command; 85] = [
+    pub const ALL: [Command; 88] = [
         Command::CommandPalette,
         Command::QuickOpen,
         Command::Save,
@@ -140,6 +143,9 @@ impl Command {
         Command::FindPrev,
         Command::FindInFiles,
         Command::NewTerminal,
+        Command::TerminalCopy,
+        Command::TerminalPaste,
+        Command::TerminalClear,
         Command::ToggleTerminal,
         Command::KillTerminal,
         Command::TogglePanel,
@@ -229,6 +235,9 @@ impl Command {
             Command::FindPrev => "Edit: Find Previous",
             Command::FindInFiles => "Search: Find in Files",
             Command::NewTerminal => "Terminal: New Terminal",
+            Command::TerminalCopy => "Terminal: Copy Selection",
+            Command::TerminalPaste => "Terminal: Paste",
+            Command::TerminalClear => "Terminal: Clear",
             Command::ToggleTerminal => "Terminal: Toggle Terminal",
             Command::KillTerminal => "Terminal: Kill Active Terminal",
             Command::TogglePanel => "View: Toggle Panel",

@@ -263,7 +263,7 @@ impl Workbench {
         cx.notify();
     }
 
-    fn terminal_copy_or_interrupt(&mut self, force_copy: bool, cx: &mut Context<Self>) {
+    pub(crate) fn terminal_copy_or_interrupt(&mut self, force_copy: bool, cx: &mut Context<Self>) {
         let Some(session) = self.terminals.get(self.active_terminal) else {
             return;
         };
@@ -282,7 +282,7 @@ impl Workbench {
         cx.notify();
     }
 
-    fn terminal_paste(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn terminal_paste(&mut self, cx: &mut Context<Self>) {
         if let (Some(s), Some(text)) = (
             self.terminals.get(self.active_terminal),
             cx.read_from_clipboard().and_then(|c| c.text()),
@@ -665,6 +665,14 @@ impl Workbench {
             .font_family(FONT_FAMILY)
             .text_size(px(FONT_SIZE))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_term_mouse_down))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, ev: &MouseDownEvent, _w, cx| {
+                    this.model
+                        .open_terminal_menu(f32::from(ev.position.x), f32::from(ev.position.y));
+                    cx.notify();
+                }),
+            )
             .on_mouse_move(cx.listener(Self::on_term_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_term_mouse_up))
             .on_scroll_wheel(cx.listener(Self::on_term_scroll))

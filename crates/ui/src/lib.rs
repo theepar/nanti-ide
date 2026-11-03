@@ -1032,6 +1032,22 @@ impl Workbench {
 
     fn apply_command(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
         match command {
+            Command::TerminalCopy => {
+                self.terminal_copy_or_interrupt(true, cx);
+                return cx.notify();
+            }
+            Command::TerminalPaste => {
+                self.terminal_paste(cx);
+                return cx.notify();
+            }
+            Command::TerminalClear => {
+                if let Some(s) = self.terminals.get(self.active_terminal) {
+                    s.term.scroll_to_bottom();
+                    // Ctrl+L: the shell clears the screen and redraws its prompt.
+                    s.term.write(vec![0x0c]);
+                }
+                return cx.notify();
+            }
             Command::Copy | Command::Cut | Command::Paste => {
                 self.clipboard_command(command, cx);
                 self.focus_editor(window);

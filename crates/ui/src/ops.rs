@@ -208,6 +208,17 @@ impl Model {
         });
     }
 
+    pub fn open_terminal_menu(&mut self, x: f32, y: f32) {
+        self.menu_open = None;
+        self.context_menu = Some(ContextMenu {
+            kind: ContextKind::Terminal,
+            path: PathBuf::new(),
+            is_dir: false,
+            x,
+            y,
+        });
+    }
+
     pub fn open_tab_menu(&mut self, index: usize, x: f32, y: f32) {
         self.menu_open = None;
         self.activate_tab(index);

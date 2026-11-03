@@ -174,6 +174,18 @@ pub fn editor_items() -> Vec<MenuItem> {
     ]
 }
 
+pub fn terminal_items() -> Vec<MenuItem> {
+    vec![
+        Cmd(C::TerminalCopy),
+        Cmd(C::TerminalPaste),
+        Sep,
+        Cmd(C::TerminalClear),
+        Sep,
+        Cmd(C::NewTerminal),
+        Cmd(C::KillTerminal),
+    ]
+}
+
 pub fn tab_items() -> Vec<MenuItem> {
     vec![
         Cmd(C::Save),
@@ -214,6 +226,7 @@ mod tests {
         v.push(context_items(false));
         v.push(editor_items());
         v.push(tab_items());
+        v.push(terminal_items());
         v
     }
 

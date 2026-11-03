@@ -180,6 +180,7 @@ impl Workbench {
                 crate::model::ContextKind::Item => menu::context_items(c.is_dir),
                 crate::model::ContextKind::Editor => menu::editor_items(),
                 crate::model::ContextKind::Tab => menu::tab_items(),
+                crate::model::ContextKind::Terminal => menu::terminal_items(),
             };
             let h = items
                 .iter()
