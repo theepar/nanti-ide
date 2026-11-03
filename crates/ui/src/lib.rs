@@ -16,6 +16,7 @@ use syntax::{Language, LineSpan, SyntaxHighlighter, Token};
 use terminal_ui::{GridMetrics, TerminalSession};
 
 pub mod assets;
+pub mod color_theme;
 pub mod discord;
 pub mod emmet;
 pub mod extensions;
@@ -75,50 +76,227 @@ const EDITOR_PAD_Y: f32 = 8.0;
 const TAB_WIDTH: usize = 4;
 
 pub mod theme {
-    pub const SCROLL_TRACK: u32 = 0x1e1e1e;
-    pub const SCROLL_THUMB: u32 = 0x424242;
-    pub const ACTIVITY_BAR: u32 = 0x181818;
-    pub const SIDEBAR: u32 = 0x1e1e1e;
-    pub const EDITOR: u32 = 0x1e1e1e;
-    pub const TAB_BAR: u32 = 0x181818;
-    pub const PANEL: u32 = 0x181818;
-    pub const STATUS_BAR: u32 = 0x181818;
-    pub const BORDER: u32 = 0x2b2b2b;
-    pub const TEXT: u32 = 0xcccccc;
-    pub const TEXT_DIM: u32 = 0x858585;
-    pub const ICON: u32 = 0xb4b4b4;
-    pub const ACCENT: u32 = 0xe6e6e6;
-    pub const LINE_NUMBER: u32 = 0x6e7681;
-    pub const LINE_NUMBER_ACTIVE: u32 = 0xc6c6c6;
-    pub const HOVER: u32 = 0x2a2d2e;
-    pub const SELECTED: u32 = 0x37373d;
-    pub const HOVER_STRONG: u32 = 0x3c3f41;
-    pub const SELECTION: u32 = 0x264f7880;
-    pub const BANNER: u32 = 0x2b2a1f;
-    pub const WARN: u32 = 0xe5c07b;
-    pub const FIND_MATCH: u32 = 0x515c6b66;
-    pub const FIND_CURRENT: u32 = 0xe5c07b99;
-    pub const MENU_BG: u32 = 0x252526;
+    //! The colours of the interface. They are read through functions so the active palette can be swapped.
+    #![allow(non_snake_case)]
+
+    use std::cell::Cell;
+
+    /// Every colour the interface and the syntax highlighting use; `selection` and the find colours carry an alpha byte.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Palette {
+        pub scroll_track: u32,
+        pub scroll_thumb: u32,
+        pub activity_bar: u32,
+        pub sidebar: u32,
+        pub editor: u32,
+        pub tab_bar: u32,
+        pub panel: u32,
+        pub status_bar: u32,
+        pub border: u32,
+        pub text: u32,
+        pub text_dim: u32,
+        pub icon: u32,
+        pub accent: u32,
+        pub line_number: u32,
+        pub line_number_active: u32,
+        pub hover: u32,
+        pub selected: u32,
+        pub hover_strong: u32,
+        pub selection: u32,
+        pub banner: u32,
+        pub warn: u32,
+        pub find_match: u32,
+        pub find_current: u32,
+        pub menu_bg: u32,
+        pub tokens: [u32; 14],
+    }
+
+    impl Palette {
+        pub const DARK: Palette = Palette {
+            scroll_track: 0x1e1e1e,
+            scroll_thumb: 0x424242,
+            activity_bar: 0x181818,
+            sidebar: 0x1e1e1e,
+            editor: 0x1e1e1e,
+            tab_bar: 0x181818,
+            panel: 0x181818,
+            status_bar: 0x181818,
+            border: 0x2b2b2b,
+            text: 0xcccccc,
+            text_dim: 0x858585,
+            icon: 0xb4b4b4,
+            accent: 0xe6e6e6,
+            line_number: 0x6e7681,
+            line_number_active: 0xc6c6c6,
+            hover: 0x2a2d2e,
+            selected: 0x37373d,
+            hover_strong: 0x3c3f41,
+            selection: 0x264f7880,
+            banner: 0x2b2a1f,
+            warn: 0xe5c07b,
+            find_match: 0x515c6b66,
+            find_current: 0xe5c07b99,
+            menu_bg: 0x252526,
+            tokens: [
+                0xc586c0, 0xce9178, 0x6a9955, 0xb5cea8, 0x569cd6, 0x4ec9b0, 0xdcdcaa, 0x9cdcfe,
+                0x9cdcfe, 0xd4d4d4, 0x569cd6, 0x569cd6, 0xce9178, 0x3794ff,
+            ],
+        };
+    }
+
+    thread_local! {
+        static CURRENT: Cell<Palette> = const { Cell::new(Palette::DARK) };
+    }
+
+    fn with<R>(f: impl FnOnce(&Palette) -> R) -> R {
+        CURRENT.with(|c| {
+            let p = c.get();
+            f(&p)
+        })
+    }
+
+    pub fn set(palette: Palette) {
+        CURRENT.with(|c| c.set(palette));
+    }
+
+    pub fn current() -> Palette {
+        CURRENT.with(Cell::get)
+    }
+
+    pub fn SCROLL_TRACK() -> u32 {
+        with(|p| p.scroll_track)
+    }
+
+    pub fn SCROLL_THUMB() -> u32 {
+        with(|p| p.scroll_thumb)
+    }
+
+    pub fn ACTIVITY_BAR() -> u32 {
+        with(|p| p.activity_bar)
+    }
+
+    pub fn SIDEBAR() -> u32 {
+        with(|p| p.sidebar)
+    }
+
+    pub fn EDITOR() -> u32 {
+        with(|p| p.editor)
+    }
+
+    pub fn TAB_BAR() -> u32 {
+        with(|p| p.tab_bar)
+    }
+
+    pub fn PANEL() -> u32 {
+        with(|p| p.panel)
+    }
+
+    pub fn STATUS_BAR() -> u32 {
+        with(|p| p.status_bar)
+    }
+
+    pub fn BORDER() -> u32 {
+        with(|p| p.border)
+    }
+
+    pub fn TEXT() -> u32 {
+        with(|p| p.text)
+    }
+
+    pub fn TEXT_DIM() -> u32 {
+        with(|p| p.text_dim)
+    }
+
+    pub fn ICON() -> u32 {
+        with(|p| p.icon)
+    }
+
+    pub fn ACCENT() -> u32 {
+        with(|p| p.accent)
+    }
+
+    pub fn LINE_NUMBER() -> u32 {
+        with(|p| p.line_number)
+    }
+
+    pub fn LINE_NUMBER_ACTIVE() -> u32 {
+        with(|p| p.line_number_active)
+    }
+
+    pub fn HOVER() -> u32 {
+        with(|p| p.hover)
+    }
+
+    pub fn SELECTED() -> u32 {
+        with(|p| p.selected)
+    }
+
+    pub fn HOVER_STRONG() -> u32 {
+        with(|p| p.hover_strong)
+    }
+
+    pub fn SELECTION() -> u32 {
+        with(|p| p.selection)
+    }
+
+    pub fn BANNER() -> u32 {
+        with(|p| p.banner)
+    }
+
+    pub fn WARN() -> u32 {
+        with(|p| p.warn)
+    }
+
+    pub fn FIND_MATCH() -> u32 {
+        with(|p| p.find_match)
+    }
+
+    pub fn FIND_CURRENT() -> u32 {
+        with(|p| p.find_current)
+    }
+
+    pub fn MENU_BG() -> u32 {
+        with(|p| p.menu_bg)
+    }
 
     pub fn token_color(t: syntax::Token) -> u32 {
         use syntax::Token::*;
-        match t {
-            Keyword => 0xc586c0,
-            String => 0xce9178,
-            Comment => 0x6a9955,
-            Number => 0xb5cea8,
-            Constant => 0x569cd6,
-            Type => 0x4ec9b0,
-            Function => 0xdcdcaa,
-            Attribute => 0x9cdcfe,
-            Property => 0x9cdcfe,
-            Operator => 0xd4d4d4,
-            Tag => 0x569cd6,
-            Heading => 0x569cd6,
-            Code => 0xce9178,
-            Link => 0x3794ff,
-        }
+        let i = match t {
+            Keyword => 0,
+            String => 1,
+            Comment => 2,
+            Number => 3,
+            Constant => 4,
+            Type => 5,
+            Function => 6,
+            Attribute => 7,
+            Property => 8,
+            Operator => 9,
+            Tag => 10,
+            Heading => 11,
+            Code => 12,
+            Link => 13,
+        };
+        with(|p| p.tokens[i])
     }
+
+    /// The order of `Palette::tokens`.
+    pub const TOKEN_ORDER: [&str; 14] = [
+        "Keyword",
+        "String",
+        "Comment",
+        "Number",
+        "Constant",
+        "Type",
+        "Function",
+        "Attribute",
+        "Property",
+        "Operator",
+        "Tag",
+        "Heading",
+        "Code",
+        "Link",
+    ];
 }
 
 pub fn tone_color(t: scm::Tone) -> u32 {
@@ -1702,11 +1880,11 @@ impl Workbench {
                 div()
                     .size_full()
                     .bg(if active {
-                        rgb(theme::ACCENT)
+                        rgb(theme::ACCENT())
                     } else {
-                        rgb(theme::BORDER)
+                        rgb(theme::BORDER())
                     })
-                    .group_hover(id, |s| s.bg(rgb(theme::ACCENT))),
+                    .group_hover(id, |s| s.bg(rgb(theme::ACCENT()))),
             )
             .child(
                 div()
@@ -1758,14 +1936,14 @@ impl Workbench {
             .flex_none()
             .w(px(48.))
             .h_full()
-            .bg(rgb(theme::ACTIVITY_BAR))
+            .bg(rgb(theme::ACTIVITY_BAR()))
             .when(self.model.layout.sidebar_side == Side::Left, |d| {
                 d.border_r_1()
             })
             .when(self.model.layout.sidebar_side == Side::Right, |d| {
                 d.border_l_1()
             })
-            .border_color(rgb(theme::BORDER))
+            .border_color(rgb(theme::BORDER()))
             .items_center()
             .pt_2()
             .gap_1()
@@ -1783,8 +1961,8 @@ impl Workbench {
                     .h(px(40.))
                     .rounded_md()
                     .cursor_pointer()
-                    .hover(|s| s.bg(rgb(theme::HOVER)))
-                    .when(selected, |d| d.bg(rgb(theme::SELECTED)))
+                    .hover(|s| s.bg(rgb(theme::HOVER())))
+                    .when(selected, |d| d.bg(rgb(theme::SELECTED())))
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         this.model.select_activity(a);
                         if this.model.activity == a && this.model.layout.sidebar {
@@ -1804,7 +1982,7 @@ impl Workbench {
                     .child(assets::icon(
                         activity_icon(a),
                         22.,
-                        if selected { 0xffffff } else { theme::ICON },
+                        if selected { 0xffffff } else { theme::ICON() },
                     ))
                     .children(badge.map(|n| {
                         div()
@@ -1818,7 +1996,7 @@ impl Workbench {
                             .items_center()
                             .justify_center()
                             .rounded_full()
-                            .bg(rgb(theme::ACCENT))
+                            .bg(rgb(theme::ACCENT()))
                             .text_color(rgb(0x111111))
                             .text_size(px(10.))
                             .child(SharedString::from(if n > 99 {
@@ -1840,8 +2018,8 @@ impl Workbench {
                     .mb_2()
                     .rounded_md()
                     .cursor_pointer()
-                    .hover(|s| s.bg(rgb(theme::HOVER)))
-                    .when(self.model.settings_open, |d| d.bg(rgb(theme::SELECTED)))
+                    .hover(|s| s.bg(rgb(theme::HOVER())))
+                    .when(self.model.settings_open, |d| d.bg(rgb(theme::SELECTED())))
                     .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                         this.apply_command(Command::OpenSettings, window, cx);
                     }))
@@ -1851,7 +2029,7 @@ impl Workbench {
                         if self.model.settings_open {
                             0xffffff
                         } else {
-                            theme::ICON
+                            theme::ICON()
                         },
                     )),
             )
@@ -1911,7 +2089,7 @@ impl Workbench {
                             let path = e.path.clone();
                             let is_dir = e.is_dir;
                             let decor = self.model.scm.decor_for(&e.path, e.is_dir);
-                            let name_color = decor.map_or(theme::TEXT, |d| tone_color(d.tone));
+                            let name_color = decor.map_or(theme::TEXT(), |d| tone_color(d.tone));
                             div()
                                 .id(("entry", i))
                                 .flex()
@@ -1938,8 +2116,8 @@ impl Workbench {
                                         }
                                     }),
                                 )
-                                .when(selected, |d| d.bg(rgb(theme::SELECTED)))
-                                .hover(|s| s.bg(rgb(theme::HOVER)))
+                                .when(selected, |d| d.bg(rgb(theme::SELECTED())))
+                                .hover(|s| s.bg(rgb(theme::HOVER())))
                                 .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                                     this.model.select_entry(&path);
                                     if is_dir {
@@ -1956,9 +2134,13 @@ impl Workbench {
                                         .items_center()
                                         .gap(px(4.))
                                         .min_w_0()
-                                        .child(div().flex_none().w(px(14.)).children(
-                                            chevron.map(|c| assets::icon(c, 14., theme::TEXT_DIM)),
-                                        ))
+                                        .child(
+                                            div().flex_none().w(px(14.)).children(
+                                                chevron.map(|c| {
+                                                    assets::icon(c, 14., theme::TEXT_DIM())
+                                                }),
+                                            ),
+                                        )
                                         .child(if is_dir {
                                             self.folder_icon(&e.name, e.expanded, e.depth == 0, 15.)
                                         } else {
@@ -2013,14 +2195,14 @@ impl Workbench {
                 window.viewport_size().width,
             ))))
             .h_full()
-            .bg(rgb(theme::SIDEBAR))
+            .bg(rgb(theme::SIDEBAR()))
             .when(self.model.layout.sidebar_side == Side::Left, |d| {
                 d.border_r_1()
             })
             .when(self.model.layout.sidebar_side == Side::Right, |d| {
                 d.border_l_1()
             })
-            .border_color(rgb(theme::BORDER))
+            .border_color(rgb(theme::BORDER()))
             .child(
                 div()
                     .flex_none()
@@ -2028,7 +2210,7 @@ impl Workbench {
                     .py_2()
                     .text_size(px(11.))
                     .font_weight(FontWeight::BOLD)
-                    .text_color(rgb(theme::TEXT_DIM))
+                    .text_color(rgb(theme::TEXT_DIM()))
                     .child(self.model.activity.title().to_uppercase()),
             )
             .child(body)
@@ -2077,16 +2259,16 @@ impl Workbench {
                     && self.model.ext_detail.is_none()
                     && !self.model.settings_open
                 {
-                    theme::EDITOR
+                    theme::EDITOR()
                 } else {
-                    theme::TAB_BAR
+                    theme::TAB_BAR()
                 },
             ))
             .when(
                 !self.model.tabs.is_empty()
                     || self.model.ext_detail.is_some()
                     || self.model.settings_open,
-                |d| d.border_b_1().border_color(rgb(theme::BORDER)),
+                |d| d.border_b_1().border_color(rgb(theme::BORDER())),
             )
             .children(self.model.settings_open.then(|| {
                 div()
@@ -2098,10 +2280,10 @@ impl Workbench {
                     .pr_1()
                     .text_size(px(13.))
                     .border_r_1()
-                    .border_color(rgb(theme::BORDER))
-                    .bg(rgb(theme::EDITOR))
-                    .text_color(rgb(theme::TEXT))
-                    .child(assets::icon("settings", 14., theme::TEXT_DIM))
+                    .border_color(rgb(theme::BORDER()))
+                    .bg(rgb(theme::EDITOR()))
+                    .text_color(rgb(theme::TEXT()))
+                    .child(assets::icon("settings", 14., theme::TEXT_DIM()))
                     .child("Settings")
                     .child(
                         div()
@@ -2113,12 +2295,12 @@ impl Workbench {
                             .h(px(18.))
                             .rounded_sm()
                             .cursor_pointer()
-                            .hover(|s| s.bg(rgb(theme::SELECTED)))
+                            .hover(|s| s.bg(rgb(theme::SELECTED())))
                             .on_click(cx.listener(|this, _: &ClickEvent, _w, cx| {
                                 this.model.close_settings();
                                 cx.notify();
                             }))
-                            .child(assets::icon("close", 12., theme::TEXT_DIM)),
+                            .child(assets::icon("close", 12., theme::TEXT_DIM())),
                     )
             }))
             .children(self.model.ext_detail.as_ref().map(|d| {
@@ -2131,10 +2313,10 @@ impl Workbench {
                     .pr_1()
                     .text_size(px(13.))
                     .border_r_1()
-                    .border_color(rgb(theme::BORDER))
-                    .bg(rgb(theme::EDITOR))
-                    .text_color(rgb(theme::TEXT))
-                    .child(assets::icon("extensions", 14., theme::TEXT_DIM))
+                    .border_color(rgb(theme::BORDER()))
+                    .bg(rgb(theme::EDITOR()))
+                    .text_color(rgb(theme::TEXT()))
+                    .child(assets::icon("extensions", 14., theme::TEXT_DIM()))
                     .child(SharedString::from(format!("Extension: {}", d.display_name)))
                     .child(
                         div()
@@ -2146,12 +2328,12 @@ impl Workbench {
                             .h(px(18.))
                             .rounded_sm()
                             .cursor_pointer()
-                            .hover(|s| s.bg(rgb(theme::SELECTED)))
+                            .hover(|s| s.bg(rgb(theme::SELECTED())))
                             .on_click(cx.listener(|this, _: &ClickEvent, _w, cx| {
                                 this.model.close_ext_detail();
                                 cx.notify();
                             }))
-                            .child(assets::icon("close", 12., theme::TEXT_DIM)),
+                            .child(assets::icon("close", 12., theme::TEXT_DIM())),
                     )
             }))
             .children(self.model.tabs.iter().enumerate().map(|(i, t)| {
@@ -2181,22 +2363,22 @@ impl Workbench {
                     .pr_1()
                     .text_size(px(13.))
                     .border_r_1()
-                    .border_color(rgb(theme::BORDER))
+                    .border_color(rgb(theme::BORDER()))
                     .cursor_pointer()
                     .when(active, |d| {
-                        d.bg(rgb(theme::EDITOR)).text_color(rgb(0xffffff)).child(
+                        d.bg(rgb(theme::EDITOR())).text_color(rgb(0xffffff)).child(
                             div()
                                 .absolute()
                                 .top_0()
                                 .left_0()
                                 .right_0()
                                 .h(px(2.))
-                                .bg(rgb(theme::ACCENT)),
+                                .bg(rgb(theme::ACCENT())),
                         )
                     })
                     .when(!active, |d| {
-                        d.text_color(rgb(theme::TEXT_DIM))
-                            .hover(|s| s.bg(rgb(theme::HOVER)))
+                        d.text_color(rgb(theme::TEXT_DIM()))
+                            .hover(|s| s.bg(rgb(theme::HOVER())))
                     })
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         this.model.activate_tab(i);
@@ -2217,7 +2399,7 @@ impl Workbench {
                             .w(px(18.))
                             .h(px(18.))
                             .rounded_sm()
-                            .hover(|s| s.bg(rgb(theme::SELECTED)))
+                            .hover(|s| s.bg(rgb(theme::SELECTED())))
                             .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
                                 cx.stop_propagation();
                                 this.model.close_tab(i);
@@ -2228,10 +2410,10 @@ impl Workbench {
                                     .w(px(8.))
                                     .h(px(8.))
                                     .rounded_full()
-                                    .bg(rgb(theme::TEXT))
+                                    .bg(rgb(theme::TEXT()))
                                     .into_any_element()
                             } else {
-                                assets::icon("close", 12., theme::TEXT_DIM).into_any_element()
+                                assets::icon("close", 12., theme::TEXT_DIM()).into_any_element()
                             }),
                     )
             }))
@@ -2357,7 +2539,7 @@ impl Workbench {
                         .hover(|s| s.bg(rgb(0xba3636)))
                 })
                 .when(!destructive, |d| {
-                    d.bg(rgb(theme::ACCENT))
+                    d.bg(rgb(theme::ACCENT()))
                         .text_color(rgb(0x1e1e1e))
                         .hover(|s| s.bg(rgb(0xffffff)))
                 })
@@ -2401,7 +2583,7 @@ impl Workbench {
                 .rounded_md()
                 .cursor_pointer()
                 .bg(rgb(0x282828))
-                .text_color(rgb(theme::TEXT_DIM))
+                .text_color(rgb(theme::TEXT_DIM()))
                 .text_size(px(12.))
                 .hover(|s| s.bg(rgb(0x363636)).text_color(rgb(0xffffff)))
                 .on_click(cx.listener(|this, _: &ClickEvent, _w, cx| {
@@ -2440,9 +2622,9 @@ impl Workbench {
                             .w(px(460.))
                             .max_w(px(520.))
                             .rounded_lg()
-                            .bg(rgb(theme::MENU_BG))
+                            .bg(rgb(theme::MENU_BG()))
                             .border_1()
-                            .border_color(rgb(theme::BORDER))
+                            .border_color(rgb(theme::BORDER()))
                             .shadow_2xl()
                             .p_5()
                             .gap_3()
@@ -2496,7 +2678,7 @@ impl Workbench {
                 .cursor_pointer()
                 .text_size(px(12.))
                 .font_weight(FontWeight::MEDIUM)
-                .bg(rgb(theme::ACCENT))
+                .bg(rgb(theme::ACCENT()))
                 .text_color(rgb(0x1e1e1e))
                 .hover(|s| s.bg(rgb(0xffffff)))
                 .on_click(cx.listener(|this, _: &ClickEvent, _w, cx| {
@@ -2513,7 +2695,7 @@ impl Workbench {
                 .rounded_md()
                 .cursor_pointer()
                 .bg(rgb(0x282828))
-                .text_color(rgb(theme::TEXT_DIM))
+                .text_color(rgb(theme::TEXT_DIM()))
                 .text_size(px(12.))
                 .hover(|s| s.bg(rgb(0x363636)).text_color(rgb(0xffffff)))
                 .on_click(cx.listener(|this, _: &ClickEvent, _w, cx| {
@@ -2550,9 +2732,9 @@ impl Workbench {
                             .w(px(460.))
                             .max_w(px(520.))
                             .rounded_lg()
-                            .bg(rgb(theme::MENU_BG))
+                            .bg(rgb(theme::MENU_BG()))
                             .border_1()
-                            .border_color(rgb(theme::BORDER))
+                            .border_color(rgb(theme::BORDER()))
                             .shadow_2xl()
                             .p_5()
                             .gap_3()
@@ -2608,11 +2790,11 @@ impl Workbench {
             .on_mouse_down(MouseButton::Right, cx.listener(Self::on_editor_right_down))
             .on_mouse_move(cx.listener(Self::on_editor_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_editor_mouse_up))
-            .bg(rgb(theme::EDITOR))
+            .bg(rgb(theme::EDITOR()))
             .py(px(EDITOR_PAD_Y))
             .font_family(FONT_FAMILY)
             .text_size(px(FONT_SIZE))
-            .text_color(rgb(theme::TEXT));
+            .text_color(rgb(theme::TEXT()));
         let has_text = matches!(
             self.model.active().map(|t| &t.content),
             Some(TabContent::Text(_))
@@ -2626,7 +2808,7 @@ impl Workbench {
                 .child(self.welcome(cx)),
             Some(TabContent::Unavailable(reason)) => base
                 .px_4()
-                .text_color(rgb(theme::TEXT_DIM))
+                .text_color(rgb(theme::TEXT_DIM()))
                 .child(SharedString::from(reason.clone())),
             Some(TabContent::Webview) => {
                 let slot = self.webview_bounds.clone();
@@ -2715,9 +2897,9 @@ impl Workbench {
                                     .text_color(rgb(if has_error {
                                         0xe5534b
                                     } else if is_active_line {
-                                        theme::LINE_NUMBER_ACTIVE
+                                        theme::LINE_NUMBER_ACTIVE()
                                     } else {
-                                        theme::LINE_NUMBER
+                                        theme::LINE_NUMBER()
                                     }))
                                     .child(SharedString::from(line_num.to_string())),
                             )
@@ -2734,9 +2916,9 @@ impl Workbench {
                             let x2 = x_of_col(window, &text, m.end.min(le) - ls);
                             if x2 > x1 {
                                 let color = if find_current == Some(k) {
-                                    theme::FIND_CURRENT
+                                    theme::FIND_CURRENT()
                                 } else {
-                                    theme::FIND_MATCH
+                                    theme::FIND_MATCH()
                                 };
                                 row = row.child(
                                     div()
@@ -2780,7 +2962,7 @@ impl Workbench {
                                         .left(px(GUTTER_WIDTH) + x1)
                                         .w(x2 - x1)
                                         .h(px(LINE_HEIGHT))
-                                        .bg(rgba(theme::SELECTION)),
+                                        .bg(rgba(theme::SELECTION())),
                                 );
                             }
                         }
@@ -2798,7 +2980,7 @@ impl Workbench {
                                     .left(px(GUTTER_WIDTH) + x1)
                                     .w(x2 - x1)
                                     .h(px(1.))
-                                    .bg(rgb(theme::TEXT)),
+                                    .bg(rgb(theme::TEXT())),
                             );
                         }
                         if focused && n == cursor_line {
@@ -2809,21 +2991,22 @@ impl Workbench {
                                     .left(px(GUTTER_WIDTH) + x_of_col(window, &text, cursor_col))
                                     .w(px(2.))
                                     .h(px(LINE_HEIGHT - 4.))
-                                    .bg(rgb(theme::TEXT)),
+                                    .bg(rgb(theme::TEXT())),
                             );
                         }
                         row.into_any_element()
                     })
                     .collect();
-                let note =
-                    (total > shown).then(|| {
-                        div().px_4().py_2().text_color(rgb(theme::TEXT_DIM)).child(
-                            SharedString::from(format!(
-                                "… {} more lines not shown (viewer limit {EDITOR_MAX_LINES})",
-                                total - shown
-                            )),
-                        )
-                    });
+                let note = (total > shown).then(|| {
+                    div()
+                        .px_4()
+                        .py_2()
+                        .text_color(rgb(theme::TEXT_DIM()))
+                        .child(SharedString::from(format!(
+                            "… {} more lines not shown (viewer limit {EDITOR_MAX_LINES})",
+                            total - shown
+                        )))
+                });
                 base.child(div().h(px(first as f32 * LINE_HEIGHT)).flex_none())
                     .children(rows)
                     .child(div().h(px((shown - last) as f32 * LINE_HEIGHT)).flex_none())
@@ -2875,12 +3058,12 @@ impl Workbench {
             .when(!maximized && pos.is_side(), |d| {
                 d.flex_none().h_full().w(px(panel_w))
             })
-            .bg(rgb(theme::PANEL))
+            .bg(rgb(theme::PANEL()))
             .when(pos == PanelPos::Bottom, |d| d.border_t_1())
             .when(pos == PanelPos::Top, |d| d.border_b_1())
             .when(pos == PanelPos::Left, |d| d.border_r_1())
             .when(pos == PanelPos::Right, |d| d.border_l_1())
-            .border_color(rgb(theme::BORDER))
+            .border_color(rgb(theme::BORDER()))
             .child(
                 div()
                     .flex()
@@ -2898,16 +3081,16 @@ impl Workbench {
                             .text_size(px(11.))
                             .cursor_pointer()
                             .text_color(rgb(if selected {
-                                theme::TEXT
+                                theme::TEXT()
                             } else {
-                                theme::TEXT_DIM
+                                theme::TEXT_DIM()
                             }))
                             .when(selected, |d| {
-                                d.bg(rgb(theme::SELECTED))
+                                d.bg(rgb(theme::SELECTED()))
                                     .border_b_1()
-                                    .border_color(rgb(theme::ACCENT))
+                                    .border_color(rgb(theme::ACCENT()))
                             })
-                            .hover(|s| s.bg(rgb(theme::HOVER)))
+                            .hover(|s| s.bg(rgb(theme::HOVER())))
                             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                                 if t == PanelTab::Terminal {
                                     this.open_terminal_tab(window);
@@ -3033,7 +3216,7 @@ impl Workbench {
                 .flex_none()
                 .size(px(size))
                 .into_any_element(),
-            None => assets::icon("extensions", size, theme::ICON).into_any_element(),
+            None => assets::icon("extensions", size, theme::ICON()).into_any_element(),
         }
     }
 
@@ -3047,8 +3230,8 @@ impl Workbench {
             .h(px(24.))
             .rounded_sm()
             .cursor_pointer()
-            .hover(|s| s.bg(rgb(theme::HOVER)))
-            .child(assets::icon(icon_name, 17., theme::ICON))
+            .hover(|s| s.bg(rgb(theme::HOVER())))
+            .child(assets::icon(icon_name, 17., theme::ICON()))
     }
 
     fn layout_button(
@@ -3067,8 +3250,8 @@ impl Workbench {
             .h(px(20.))
             .rounded_sm()
             .cursor_pointer()
-            .when(on, |d| d.bg(rgb(theme::SELECTED)))
-            .hover(|s| s.bg(rgb(theme::HOVER_STRONG)))
+            .when(on, |d| d.bg(rgb(theme::SELECTED())))
+            .hover(|s| s.bg(rgb(theme::HOVER_STRONG())))
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 this.apply_command(command, window, cx);
             }))
@@ -3083,7 +3266,7 @@ impl Workbench {
                     icon_name
                 },
                 17.,
-                if on { 0xe6e6e6 } else { theme::ICON },
+                if on { 0xe6e6e6 } else { theme::ICON() },
             ))
     }
 
@@ -3121,11 +3304,11 @@ impl Workbench {
             .justify_between()
             .h(px(STATUS_BAR_HEIGHT))
             .px_3()
-            .bg(rgb(theme::STATUS_BAR))
+            .bg(rgb(theme::STATUS_BAR()))
             .border_t_1()
-            .border_color(rgb(theme::BORDER))
+            .border_color(rgb(theme::BORDER()))
             .text_size(px(12.))
-            .text_color(rgb(theme::TEXT))
+            .text_color(rgb(theme::TEXT()))
             .child(
                 div()
                     .flex()
@@ -3135,7 +3318,7 @@ impl Workbench {
                             .id("status-branch")
                             .px_2()
                             .cursor_pointer()
-                            .hover(|s| s.bg(rgb(theme::HOVER)))
+                            .hover(|s| s.bg(rgb(theme::HOVER())))
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                                 this.apply_command(Command::SwitchBranch, window, cx);
                             }))
@@ -3152,9 +3335,9 @@ impl Workbench {
                             .text_color(rgb(if problems > 0 {
                                 0xe5534b
                             } else {
-                                theme::TEXT_DIM
+                                theme::TEXT_DIM()
                             }))
-                            .hover(|s| s.bg(rgb(theme::HOVER)))
+                            .hover(|s| s.bg(rgb(theme::HOVER())))
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                                 this.apply_command(Command::ShowProblems, window, cx);
                             }))
@@ -3164,7 +3347,7 @@ impl Workbench {
                                 if problems > 0 {
                                     0xe5534b
                                 } else {
-                                    theme::TEXT_DIM
+                                    theme::TEXT_DIM()
                                 },
                             ))
                             .child(SharedString::from(problems.to_string())),
@@ -3174,8 +3357,8 @@ impl Workbench {
                             .id("status-commands")
                             .px_2()
                             .cursor_pointer()
-                            .text_color(rgb(theme::TEXT_DIM))
-                            .hover(|s| s.bg(rgb(theme::HOVER)).text_color(rgb(theme::TEXT)))
+                            .text_color(rgb(theme::TEXT_DIM()))
+                            .hover(|s| s.bg(rgb(theme::HOVER())).text_color(rgb(theme::TEXT())))
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                                 this.apply_command(Command::CommandPalette, window, cx);
                             }))
@@ -3183,7 +3366,7 @@ impl Workbench {
                     )
                     .children(self.model.message.clone().map(|m| {
                         div()
-                            .text_color(rgb(theme::TEXT_DIM))
+                            .text_color(rgb(theme::TEXT_DIM()))
                             .child(SharedString::from(m))
                     })),
             )
@@ -3196,7 +3379,7 @@ impl Workbench {
                             .id(SharedString::from(format!("status-item-{id}")))
                             .px_2()
                             .cursor_pointer()
-                            .hover(|s| s.bg(rgb(theme::HOVER)))
+                            .hover(|s| s.bg(rgb(theme::HOVER())))
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                                 this.apply_command(Command::OpenExtensionPanel, window, cx);
                             }))
@@ -3207,7 +3390,7 @@ impl Workbench {
                             .id("status-position")
                             .px_2()
                             .cursor_pointer()
-                            .hover(|s| s.bg(rgb(theme::HOVER)))
+                            .hover(|s| s.bg(rgb(theme::HOVER())))
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                                 this.apply_command(Command::GoToLine, window, cx);
                             }))
@@ -3220,7 +3403,7 @@ impl Workbench {
                             .id("status-language")
                             .px_2()
                             .cursor_pointer()
-                            .hover(|s| s.bg(rgb(theme::HOVER)))
+                            .hover(|s| s.bg(rgb(theme::HOVER())))
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                                 this.apply_command(Command::ChangeLanguageMode, window, cx);
                             }))
@@ -3409,13 +3592,13 @@ impl Workbench {
             .px(px(FIELD_PAD))
             .flex()
             .items_center()
-            .bg(rgb(theme::EDITOR))
+            .bg(rgb(theme::EDITOR()))
             .border_1()
-            .border_color(rgb(if focused { 0x8c8c8c } else { theme::BORDER }))
+            .border_color(rgb(if focused { 0x8c8c8c } else { theme::BORDER() }))
             .rounded_md()
             .font_family(FONT_FAMILY)
             .text_size(px(FONT_SIZE))
-            .text_color(rgb(theme::TEXT))
+            .text_color(rgb(theme::TEXT()))
             .cursor_text()
             .overflow_hidden()
             .on_mouse_down(
@@ -3430,7 +3613,7 @@ impl Workbench {
                 cx.notify();
             }))
             .child(if text.is_empty() {
-                div().text_color(rgb(theme::TEXT_DIM)).child(placeholder)
+                div().text_color(rgb(theme::TEXT_DIM())).child(placeholder)
             } else {
                 div().whitespace_nowrap().child(SharedString::from(text))
             })
@@ -3441,7 +3624,7 @@ impl Workbench {
                     .left(px(FIELD_PAD) + caret_x)
                     .w(px(2.))
                     .h(px(18.))
-                    .bg(rgb(theme::TEXT))
+                    .bg(rgb(theme::TEXT()))
             }))
             .children(underline.map(|(x1, x2)| {
                 div()
@@ -3450,7 +3633,7 @@ impl Workbench {
                     .left(px(FIELD_PAD) + x1)
                     .w(x2 - x1)
                     .h(px(1.))
-                    .bg(rgb(theme::TEXT))
+                    .bg(rgb(theme::TEXT()))
             }))
             .child(input_canvas)
     }
@@ -3463,10 +3646,12 @@ impl Workbench {
             .rounded_sm()
             .cursor_pointer()
             .text_size(px(12.))
-            .when(on, |d| d.bg(rgb(theme::SELECTED)).text_color(rgb(0xffffff)))
+            .when(on, |d| {
+                d.bg(rgb(theme::SELECTED())).text_color(rgb(0xffffff))
+            })
             .when(!on, |d| {
-                d.text_color(rgb(theme::TEXT_DIM))
-                    .hover(|s| s.bg(rgb(theme::HOVER)))
+                d.text_color(rgb(theme::TEXT_DIM()))
+                    .hover(|s| s.bg(rgb(theme::HOVER())))
             })
             .child(label)
     }
@@ -3534,7 +3719,11 @@ impl Workbench {
                     .min_w(px(70.))
                     .px_2()
                     .text_size(px(12.))
-                    .text_color(rgb(if error { theme::WARN } else { theme::TEXT_DIM }))
+                    .text_color(rgb(if error {
+                        theme::WARN()
+                    } else {
+                        theme::TEXT_DIM()
+                    }))
                     .child(SharedString::from(status)),
             )
             .child(
@@ -3606,9 +3795,9 @@ impl Workbench {
                 .gap_1()
                 .px_2()
                 .py(px(4.))
-                .bg(rgb(theme::SIDEBAR))
+                .bg(rgb(theme::SIDEBAR()))
                 .border_b_1()
-                .border_color(rgb(theme::BORDER))
+                .border_color(rgb(theme::BORDER()))
                 .child(row1)
                 .children(row2),
         )
@@ -3673,7 +3862,7 @@ impl Workbench {
                         .px_2()
                         .text_size(px(12.))
                         .cursor_pointer()
-                        .hover(|s| s.bg(rgb(theme::HOVER)))
+                        .hover(|s| s.bg(rgb(theme::HOVER())))
                         .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
                             this.model.search.toggle_file(&path);
                             cx.notify();
@@ -3682,7 +3871,7 @@ impl Workbench {
                         .child(SharedString::from(file.rel.clone()))
                         .child(
                             div()
-                                .text_color(rgb(theme::TEXT_DIM))
+                                .text_color(rgb(theme::TEXT_DIM()))
                                 .child(SharedString::from(format!("({})", file.hits.len()))),
                         )
                         .into_any_element()
@@ -3694,7 +3883,7 @@ impl Workbench {
                     let (path, line, col, len) = (file.path.clone(), hit.line, hit.col, hit.len);
                     let bytes = char_range_to_bytes(&hit.preview, hit.preview_range.clone());
                     let highlight = HighlightStyle {
-                        background_color: Some(rgba(theme::FIND_CURRENT).into()),
+                        background_color: Some(rgba(theme::FIND_CURRENT()).into()),
                         ..Default::default()
                     };
                     let id = hit_id;
@@ -3711,7 +3900,7 @@ impl Workbench {
                             .text_size(px(12.))
                             .overflow_hidden()
                             .cursor_pointer()
-                            .hover(|s| s.bg(rgb(theme::HOVER)))
+                            .hover(|s| s.bg(rgb(theme::HOVER())))
                             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                                 this.model.open_at(&path, line, col, len);
                                 this.focus_editor(window);
@@ -3721,7 +3910,7 @@ impl Workbench {
                             .child(
                                 div()
                                     .flex_none()
-                                    .text_color(rgb(theme::LINE_NUMBER))
+                                    .text_color(rgb(theme::LINE_NUMBER()))
                                     .child(SharedString::from((hit.line + 1).to_string())),
                             )
                             .child(
@@ -3789,7 +3978,7 @@ impl Workbench {
                     .child(
                         div()
                             .text_size(px(11.))
-                            .text_color(rgb(theme::TEXT_DIM))
+                            .text_color(rgb(theme::TEXT_DIM()))
                             .child(SharedString::from(summary)),
                     ),
             )
@@ -3814,7 +4003,7 @@ impl Workbench {
             .font_weight(FontWeight::MEDIUM)
             .when(enabled, |d| {
                 d.cursor_pointer()
-                    .bg(rgb(theme::ACCENT))
+                    .bg(rgb(theme::ACCENT()))
                     .text_color(rgb(0x1e1e1e))
                     .hover(|s| s.bg(rgb(0xffffff)))
             })
@@ -3844,7 +4033,7 @@ impl Workbench {
                 .gap_2()
                 .px_3()
                 .text_size(px(12.))
-                .text_color(rgb(theme::TEXT_DIM))
+                .text_color(rgb(theme::TEXT_DIM()))
                 .child(SharedString::from(text))
                 .child(
                     Self::scm_button("scm-refresh", "Refresh", false).on_click(cx.listener(
@@ -3903,9 +4092,9 @@ impl Workbench {
                     .h(px(24.))
                     .text_size(px(11.))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(rgb(theme::ICON))
+                    .text_color(rgb(theme::ICON()))
                     .cursor_pointer()
-                    .hover(|s| s.bg(rgb(theme::HOVER)))
+                    .hover(|s| s.bg(rgb(theme::HOVER())))
                     .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
                         this.model.scm.toggle_group(kind);
                         cx.notify();
@@ -3922,7 +4111,7 @@ impl Workbench {
                                     "chevron-down"
                                 },
                                 14.,
-                                theme::TEXT_DIM,
+                                theme::TEXT_DIM(),
                             ))
                             .child(SharedString::from(kind.title()))
                             .child(
@@ -3932,7 +4121,7 @@ impl Workbench {
                                     .rounded_full()
                                     .bg(rgb(0x2f2f2f))
                                     .font_weight(FontWeight::NORMAL)
-                                    .text_color(rgb(theme::TEXT_DIM))
+                                    .text_color(rgb(theme::TEXT_DIM()))
                                     .child(SharedString::from(total.to_string())),
                             ),
                     )
@@ -3945,7 +4134,7 @@ impl Workbench {
                             .w(px(20.))
                             .h(px(20.))
                             .rounded_sm()
-                            .hover(|s| s.bg(rgb(theme::SELECTED)))
+                            .hover(|s| s.bg(rgb(theme::SELECTED())))
                             .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
                                 cx.stop_propagation();
                                 if kind == scm::GroupKind::Staged {
@@ -3955,7 +4144,7 @@ impl Workbench {
                                 }
                                 cx.notify();
                             }))
-                            .child(assets::icon(icon_name, 14., theme::ICON))
+                            .child(assets::icon(icon_name, 14., theme::ICON()))
                     }))
                     .into_any_element(),
             );
@@ -4017,7 +4206,7 @@ impl Workbench {
                         .pr_2()
                         .text_size(px(13.))
                         .cursor_pointer()
-                        .hover(|s| s.bg(rgb(theme::HOVER)))
+                        .hover(|s| s.bg(rgb(theme::HOVER())))
                         .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                             this.model.open_diff(&rel_open, staged_group);
                             this.focus_editor(window);
@@ -4039,7 +4228,7 @@ impl Workbench {
                                     div()
                                         .whitespace_nowrap()
                                         .text_size(px(11.))
-                                        .text_color(rgb(theme::TEXT_DIM))
+                                        .text_color(rgb(theme::TEXT_DIM()))
                                         .child(SharedString::from(dir)),
                                 ),
                         )
@@ -4057,8 +4246,8 @@ impl Workbench {
                                         .px_2()
                                         .rounded_sm()
                                         .text_size(px(14.))
-                                        .text_color(rgb(theme::TEXT))
-                                        .hover(|s| s.bg(rgb(theme::SELECTED)))
+                                        .text_color(rgb(theme::TEXT()))
+                                        .hover(|s| s.bg(rgb(theme::SELECTED())))
                                         .on_click(cx.listener(
                                             move |this, _: &ClickEvent, _w, cx| {
                                                 cx.stop_propagation();
@@ -4074,8 +4263,8 @@ impl Workbench {
                                         .px_2()
                                         .rounded_sm()
                                         .text_size(px(14.))
-                                        .text_color(rgb(theme::TEXT))
-                                        .hover(|s| s.bg(rgb(theme::SELECTED)))
+                                        .text_color(rgb(theme::TEXT()))
+                                        .hover(|s| s.bg(rgb(theme::SELECTED())))
                                         .on_click(cx.listener(
                                             move |this, _: &ClickEvent, _w, cx| {
                                                 cx.stop_propagation();
@@ -4115,7 +4304,7 @@ impl Workbench {
                     .px_3()
                     .py_2()
                     .text_size(px(12.))
-                    .text_color(rgb(theme::TEXT_DIM))
+                    .text_color(rgb(theme::TEXT_DIM()))
                     .child("No changes.")
                     .into_any_element(),
             );
@@ -4126,7 +4315,7 @@ impl Workbench {
                     .px_3()
                     .py_1()
                     .text_size(px(11.))
-                    .text_color(rgb(theme::WARN))
+                    .text_color(rgb(theme::WARN()))
                     .child(SharedString::from(format!(
                         "Only the first {} changes are shown.",
                         git::MAX_STATUS_ENTRIES
@@ -4188,12 +4377,12 @@ impl Workbench {
                                     .h(px(28.))
                                     .rounded_md()
                                     .cursor_pointer()
-                                    .hover(|s| s.bg(rgb(theme::HOVER)))
+                                    .hover(|s| s.bg(rgb(theme::HOVER())))
                                     .on_click(cx.listener(|this, _: &ClickEvent, _w, cx| {
                                         this.model.scm.refresh();
                                         cx.notify();
                                     }))
-                                    .child(assets::icon("refresh", 16., theme::ICON)),
+                                    .child(assets::icon("refresh", 16., theme::ICON())),
                             ),
                     )
                     .child(
@@ -4202,8 +4391,8 @@ impl Workbench {
                             .items_center()
                             .gap_1()
                             .text_size(px(11.))
-                            .text_color(rgb(theme::TEXT_DIM))
-                            .child(assets::icon("git", 13., theme::TEXT_DIM))
+                            .text_color(rgb(theme::TEXT_DIM()))
+                            .child(assets::icon("git", 13., theme::TEXT_DIM()))
                             .child(SharedString::from(branch_line)),
                     )
                     .child(self.scm_sync_row(cx)),
@@ -4269,7 +4458,7 @@ impl Workbench {
             .children(s.activity.map(|text| {
                 div()
                     .text_size(px(11.))
-                    .text_color(rgb(theme::TEXT_DIM))
+                    .text_color(rgb(theme::TEXT_DIM()))
                     .child(text)
             }))
     }
@@ -4299,9 +4488,9 @@ impl Workbench {
                 .mt_1()
                 .text_size(px(11.))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(rgb(theme::ICON))
+                .text_color(rgb(theme::ICON()))
                 .cursor_pointer()
-                .hover(|s| s.bg(rgb(theme::HOVER)))
+                .hover(|s| s.bg(rgb(theme::HOVER())))
                 .on_click(cx.listener(|this, _: &ClickEvent, _w, cx| {
                     this.model.scm.history_open = !this.model.scm.history_open;
                     cx.notify();
@@ -4313,7 +4502,7 @@ impl Workbench {
                         "chevron-right"
                     },
                     14.,
-                    theme::TEXT_DIM,
+                    theme::TEXT_DIM(),
                 ))
                 .child("COMMITS")
                 .into_any_element(),
@@ -4370,7 +4559,7 @@ impl Workbench {
                             .rounded_sm()
                             .text_size(px(10.))
                             .bg(rgb(if head { 0x264f78 } else { 0x2f2f2f }))
-                            .text_color(rgb(if head { 0xffffff } else { theme::TEXT_DIM }))
+                            .text_color(rgb(if head { 0xffffff } else { theme::TEXT_DIM() }))
                             .child(SharedString::from(name))
                             .into_any_element()
                     })
@@ -4396,8 +4585,8 @@ impl Workbench {
                     .gap(px(1.))
                     .px_2()
                     .cursor_pointer()
-                    .when(expanded, |d| d.bg(rgb(theme::HOVER)))
-                    .hover(|s| s.bg(rgb(theme::HOVER)))
+                    .when(expanded, |d| d.bg(rgb(theme::HOVER())))
+                    .hover(|s| s.bg(rgb(theme::HOVER())))
                     .on_hover(move |hovered, window, cx| {
                         let at = window.mouse_position();
                         hover_entity.update(cx, |wb, cx| {
@@ -4425,7 +4614,7 @@ impl Workbench {
                                     "chevron-right"
                                 },
                                 12.,
-                                theme::TEXT_DIM,
+                                theme::TEXT_DIM(),
                             ))
                             .child(
                                 div()
@@ -4444,7 +4633,7 @@ impl Workbench {
                             .whitespace_nowrap()
                             .overflow_hidden()
                             .text_size(px(11.))
-                            .text_color(rgb(theme::TEXT_DIM))
+                            .text_color(rgb(theme::TEXT_DIM()))
                             .child(SharedString::from(format!(
                                 "{} \u{b7} {} \u{b7} {}",
                                 c.short(),
@@ -4460,7 +4649,7 @@ impl Workbench {
             match s.commit_files.get(&c.hash) {
                 None | Some(scm::CommitFiles::Loading) => {
                     w.push(SCM_ROW_H, || {
-                        note("Loading files...".into(), theme::TEXT_DIM)
+                        note("Loading files...".into(), theme::TEXT_DIM())
                     });
                 }
                 Some(scm::CommitFiles::Failed(e)) => {
@@ -4497,7 +4686,7 @@ impl Workbench {
                                 .pr_2()
                                 .text_size(px(12.))
                                 .cursor_pointer()
-                                .hover(|s| s.bg(rgb(theme::HOVER)))
+                                .hover(|s| s.bg(rgb(theme::HOVER())))
                                 .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                                     this.model.open_commit_diff(&hash, &file);
                                     this.focus_editor(window);
@@ -4519,7 +4708,7 @@ impl Workbench {
                                             div()
                                                 .whitespace_nowrap()
                                                 .text_size(px(11.))
-                                                .text_color(rgb(theme::TEXT_DIM))
+                                                .text_color(rgb(theme::TEXT_DIM()))
                                                 .child(SharedString::from(dir)),
                                         ),
                                 )
@@ -4546,7 +4735,7 @@ impl Workbench {
                     } else {
                         "Scroll for more commits".into()
                     },
-                    theme::TEXT_DIM,
+                    theme::TEXT_DIM(),
                 )
             });
             if near_end && !s.history_loading() {
@@ -4578,7 +4767,7 @@ impl Workbench {
         };
         let d = match &view.state {
             scm::DiffState::Loading => {
-                return vec![note("Loading diff...".into(), theme::TEXT_DIM)];
+                return vec![note("Loading diff...".into(), theme::TEXT_DIM())];
             }
             scm::DiffState::Failed(e) => {
                 return vec![note(format!("Could not read the diff: {e}"), 0xe5534b)];
@@ -4600,18 +4789,20 @@ impl Workbench {
                         format!("  ({})", d.notes.join(", "))
                     }
                 ),
-                theme::TEXT,
+                theme::TEXT(),
             )
         });
         if d.binary {
             w.push(DIFF_NOTE_H, || {
                 note(
                     "Binary file: there is no text diff.".into(),
-                    theme::TEXT_DIM,
+                    theme::TEXT_DIM(),
                 )
             });
         } else if d.hunks.is_empty() {
-            w.push(DIFF_NOTE_H, || note("No changes.".into(), theme::TEXT_DIM));
+            w.push(DIFF_NOTE_H, || {
+                note("No changes.".into(), theme::TEXT_DIM())
+            });
         }
         let mut shown = 0usize;
         'hunks: for h in &d.hunks {
@@ -4635,7 +4826,7 @@ impl Workbench {
                     w.push(DIFF_NOTE_H, || {
                         note(
                             format!("Showing the first {MAX_RENDERED_LINES} lines of the diff."),
-                            theme::WARN,
+                            theme::WARN(),
                         )
                     });
                     break 'hunks;
@@ -4644,8 +4835,8 @@ impl Workbench {
                 let (bg, marker, mcolor) = match l.kind {
                     git::LineKind::Add => (Some(0x1d3326), "+", 0x81b88b),
                     git::LineKind::Del => (Some(0x3a1f22), "−", 0xc74e39),
-                    git::LineKind::Context => (None, " ", theme::TEXT_DIM),
-                    git::LineKind::NoNewline => (None, " ", theme::TEXT_DIM),
+                    git::LineKind::Context => (None, " ", theme::TEXT_DIM()),
+                    git::LineKind::NoNewline => (None, " ", theme::TEXT_DIM()),
                 };
                 let num = |n: Option<u32>| {
                     div()
@@ -4654,7 +4845,7 @@ impl Workbench {
                         .pr_2()
                         .flex()
                         .justify_end()
-                        .text_color(rgb(theme::LINE_NUMBER))
+                        .text_color(rgb(theme::LINE_NUMBER()))
                         .child(SharedString::from(
                             n.map_or(String::new(), |n| n.to_string()),
                         ))
@@ -4680,7 +4871,7 @@ impl Workbench {
                                 .whitespace_nowrap()
                                 .overflow_hidden()
                                 .when(l.kind == git::LineKind::NoNewline, |d| {
-                                    d.text_color(rgb(theme::TEXT_DIM))
+                                    d.text_color(rgb(theme::TEXT_DIM()))
                                 })
                                 .child(SharedString::from(display_text(&l.text))),
                         )
@@ -4692,7 +4883,7 @@ impl Workbench {
             w.push(DIFF_NOTE_H, || {
                 note(
                     "The diff is larger than the display limit and was cut.".into(),
-                    theme::WARN,
+                    theme::WARN(),
                 )
             });
         }
@@ -4759,9 +4950,9 @@ impl Workbench {
                 .text_size(px(13.))
                 .cursor_pointer()
                 .when(i == p.selected, |d| {
-                    d.bg(rgb(theme::SELECTED)).text_color(rgb(0xffffff))
+                    d.bg(rgb(theme::SELECTED())).text_color(rgb(0xffffff))
                 })
-                .hover(|s| s.bg(rgb(theme::HOVER)))
+                .hover(|s| s.bg(rgb(theme::HOVER())))
                 .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                     if let Some(p) = this.model.palette.as_mut() {
                         p.select(i);
@@ -4797,7 +4988,7 @@ impl Workbench {
                     div()
                         .flex_none()
                         .text_size(px(11.))
-                        .text_color(rgb(theme::TEXT_DIM))
+                        .text_color(rgb(theme::TEXT_DIM()))
                         .child(SharedString::from(item.detail.clone().unwrap_or_default())),
                 )
                 .into_any_element();
@@ -4812,7 +5003,7 @@ impl Workbench {
                         .px_3()
                         .py(px(3.))
                         .border_b_1()
-                        .border_color(rgb(theme::BORDER))
+                        .border_color(rgb(theme::BORDER()))
                         .text_size(px(11.))
                         .child("")
                         .child(
@@ -4838,7 +5029,7 @@ impl Workbench {
                 .px_3()
                 .py_2()
                 .text_size(px(13.))
-                .text_color(rgb(theme::TEXT_DIM))
+                .text_color(rgb(theme::TEXT_DIM()))
                 .child(if p.loading {
                     "Indexing files..."
                 } else {
@@ -4874,12 +5065,12 @@ impl Workbench {
                         .track_focus(&self.palette_focus)
                         .flex()
                         .flex_col()
-                        .bg(rgb(theme::MENU_BG))
+                        .bg(rgb(theme::MENU_BG()))
                         .border_1()
-                        .border_color(rgb(theme::BORDER))
+                        .border_color(rgb(theme::BORDER()))
                         .rounded_md()
                         .shadow_xl()
-                        .text_color(rgb(theme::TEXT))
+                        .text_color(rgb(theme::TEXT()))
                         .child(
                             div()
                                 .relative()
@@ -4889,12 +5080,12 @@ impl Workbench {
                                 .flex()
                                 .items_center()
                                 .border_b_1()
-                                .border_color(rgb(theme::BORDER))
+                                .border_color(rgb(theme::BORDER()))
                                 .font_family(FONT_FAMILY)
                                 .text_size(px(FONT_SIZE))
                                 .child(if query.is_empty() {
                                     div()
-                                        .text_color(rgb(theme::TEXT_DIM))
+                                        .text_color(rgb(theme::TEXT_DIM()))
                                         .child(p.placeholder())
                                 } else {
                                     div()
@@ -4908,7 +5099,7 @@ impl Workbench {
                                         .left(px(PALETTE_INPUT_PAD) + caret_x)
                                         .w(px(2.))
                                         .h(px(20.))
-                                        .bg(rgb(theme::TEXT)),
+                                        .bg(rgb(theme::TEXT())),
                                 )
                                 .children(underline.map(|(x1, x2)| {
                                     div()
@@ -4917,7 +5108,7 @@ impl Workbench {
                                         .left(px(PALETTE_INPUT_PAD) + x1)
                                         .w(x2 - x1)
                                         .h(px(1.))
-                                        .bg(rgb(theme::TEXT))
+                                        .bg(rgb(theme::TEXT()))
                                 }))
                                 .child(input_canvas),
                         )
@@ -4952,7 +5143,7 @@ impl Workbench {
                                         .h(relative(frac(PALETTE_ROWS).max(0.06)))
                                         .w(px(3.))
                                         .rounded_sm()
-                                        .bg(rgb(theme::SCROLL_THUMB))
+                                        .bg(rgb(theme::SCROLL_THUMB()))
                                 })),
                         )
                         .children(empty)
@@ -5354,8 +5545,7 @@ impl Render for Workbench {
             .flex()
             .flex_col()
             .size_full()
-            .bg(rgb(theme::EDITOR))
-            .track_focus(&self.root_focus)
+            .bg(rgb(theme::EDITOR()))
             .on_key_down(cx.listener(Self::on_key_down))
             .on_mouse_move(cx.listener(Self::on_root_mouse_move))
             .on_mouse_down(
@@ -5363,18 +5553,28 @@ impl Render for Workbench {
                 cx.listener(|this, _: &MouseDownEvent, _w, _cx| this.reclaim_focus()),
             )
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_root_mouse_up))
-            .text_color(rgb(theme::TEXT))
+            .text_color(rgb(theme::TEXT()))
             .child(menu_bar)
+            // GPUI treats a click inside a focus-tracking element as handled, and Windows then never starts dragging the
+            // window from the title bar; so the menu bar stays outside the element that tracks the root focus.
             .child(
                 div()
                     .flex()
+                    .flex_col()
                     .flex_1()
                     .min_h_0()
-                    .children(sidebar_left)
-                    .child(center)
-                    .children(sidebar_right),
+                    .track_focus(&self.root_focus)
+                    .child(
+                        div()
+                            .flex()
+                            .flex_1()
+                            .min_h_0()
+                            .children(sidebar_left)
+                            .child(center)
+                            .children(sidebar_right),
+                    )
+                    .children(status_bar),
             )
-            .children(status_bar)
             .children(menus)
             .children(self.commit_card_overlay(window, cx))
             .children(palette)

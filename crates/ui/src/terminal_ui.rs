@@ -430,11 +430,11 @@ impl Workbench {
                     .px_2()
                     .cursor_pointer()
                     .when(active, |d| {
-                        d.bg(rgb(theme::SELECTED)).text_color(rgb(theme::TEXT))
+                        d.bg(rgb(theme::SELECTED())).text_color(rgb(theme::TEXT()))
                     })
                     .when(!active, |d| {
-                        d.text_color(rgb(theme::TEXT_DIM))
-                            .hover(|s| s.bg(rgb(theme::HOVER)).text_color(rgb(theme::TEXT)))
+                        d.text_color(rgb(theme::TEXT_DIM()))
+                            .hover(|s| s.bg(rgb(theme::HOVER())).text_color(rgb(theme::TEXT())))
                     })
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         this.active_terminal = i;
@@ -454,7 +454,7 @@ impl Workbench {
                                     .py(px(1.))
                                     .rounded_xs()
                                     .border_1()
-                                    .border_color(rgb(theme::BORDER))
+                                    .border_color(rgb(theme::BORDER()))
                                     .font_family(FONT_FAMILY)
                                     .text_size(px(10.))
                                     .child(">_"),
@@ -473,8 +473,8 @@ impl Workbench {
                             .px_1()
                             .rounded_sm()
                             .text_size(px(12.))
-                            .text_color(rgb(theme::TEXT_DIM))
-                            .hover(|s| s.bg(rgb(theme::HOVER)).text_color(rgb(theme::TEXT)))
+                            .text_color(rgb(theme::TEXT_DIM()))
+                            .hover(|s| s.bg(rgb(theme::HOVER())).text_color(rgb(theme::TEXT())))
                             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                                 cx.stop_propagation();
                                 this.close_terminal(i);
@@ -493,9 +493,9 @@ impl Workbench {
             .flex_none()
             .w(px(140.))
             .h_full()
-            .bg(rgb(theme::SIDEBAR))
+            .bg(rgb(theme::SIDEBAR()))
             .border_l_1()
-            .border_color(rgb(theme::BORDER))
+            .border_color(rgb(theme::BORDER()))
             .child(
                 div()
                     .flex()
@@ -505,7 +505,7 @@ impl Workbench {
                     .px_2()
                     .h(px(24.))
                     .border_b_1()
-                    .border_color(rgb(theme::BORDER))
+                    .border_color(rgb(theme::BORDER()))
                     .child(
                         div()
                             .id("term-side-new")
@@ -513,8 +513,8 @@ impl Workbench {
                             .rounded_sm()
                             .cursor_pointer()
                             .text_size(px(12.))
-                            .text_color(rgb(theme::TEXT_DIM))
-                            .hover(|s| s.bg(rgb(theme::HOVER)).text_color(rgb(theme::TEXT)))
+                            .text_color(rgb(theme::TEXT_DIM()))
+                            .hover(|s| s.bg(rgb(theme::HOVER())).text_color(rgb(theme::TEXT())))
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                                 this.apply_command(Command::NewTerminal, window, cx);
                             }))
@@ -527,12 +527,12 @@ impl Workbench {
                             .rounded_sm()
                             .cursor_pointer()
                             .text_size(px(12.))
-                            .text_color(rgb(theme::TEXT_DIM))
-                            .hover(|s| s.bg(rgb(theme::HOVER)).text_color(rgb(theme::TEXT)))
+                            .text_color(rgb(theme::TEXT_DIM()))
+                            .hover(|s| s.bg(rgb(theme::HOVER())).text_color(rgb(theme::TEXT())))
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                                 this.apply_command(Command::KillTerminal, window, cx);
                             }))
-                            .child(assets::icon("trash", 14., theme::TEXT_DIM)),
+                            .child(assets::icon("trash", 14., theme::TEXT_DIM())),
                     ),
             )
             .child(
@@ -553,7 +553,7 @@ impl Workbench {
                 .px_3()
                 .py_2()
                 .text_size(px(13.))
-                .text_color(rgb(theme::TEXT_DIM))
+                .text_color(rgb(theme::TEXT_DIM()))
                 .child("No terminal open. Press Ctrl+` or click \"+ New\".")
                 .into_any_element();
         };
@@ -606,18 +606,20 @@ impl Workbench {
                 .left(px(cw * c.col as f32))
                 .top(px(LINE_HEIGHT * c.row as f32));
             match (c.shape, focused) {
-                (CursorShape::Beam, true) => base.w(px(2.)).h(px(LINE_HEIGHT)).bg(rgb(theme::TEXT)),
+                (CursorShape::Beam, true) => {
+                    base.w(px(2.)).h(px(LINE_HEIGHT)).bg(rgb(theme::TEXT()))
+                }
                 (CursorShape::Underline, true) => base
                     .w(px(cw))
                     .h(px(2.))
                     .mt(px(LINE_HEIGHT - 2.))
-                    .bg(rgb(theme::TEXT)),
+                    .bg(rgb(theme::TEXT())),
                 (_, true) => base.w(px(cw)).h(px(LINE_HEIGHT)).bg(rgba(0xccccccaa)),
                 (_, false) => base
                     .w(px(cw))
                     .h(px(LINE_HEIGHT))
                     .border_1()
-                    .border_color(rgb(theme::TEXT_DIM)),
+                    .border_color(rgb(theme::TEXT_DIM())),
             }
         });
         let preedit = session
@@ -632,8 +634,8 @@ impl Workbench {
                     .top(px(LINE_HEIGHT * c.row as f32))
                     .w(w)
                     .h(px(LINE_HEIGHT))
-                    .bg(rgb(theme::PANEL))
-                    .text_color(rgb(theme::TEXT))
+                    .bg(rgb(theme::PANEL()))
+                    .text_color(rgb(theme::TEXT()))
                     .underline()
                     .whitespace_nowrap()
                     .child(SharedString::from(text.clone()))

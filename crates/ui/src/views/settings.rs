@@ -72,7 +72,7 @@ impl Workbench {
                     .overflow_y_scroll()
                     .p(px(4.))
                     .rounded_md()
-                    .bg(rgb(theme::MENU_BG))
+                    .bg(rgb(theme::MENU_BG()))
                     .border_1()
                     .border_color(rgb(0x4a4a4a))
                     .shadow_lg()
@@ -92,11 +92,11 @@ impl Workbench {
                                     .rounded_sm()
                                     .text_size(px(12.5))
                                     .cursor_pointer()
-                                    .text_color(rgb(if on { 0xffffff } else { theme::TEXT }))
+                                    .text_color(rgb(if on { 0xffffff } else { theme::TEXT() }))
                                     .when(on, |d| {
-                                        d.font_weight(FontWeight::MEDIUM).bg(rgb(theme::SELECTED))
+                                        d.font_weight(FontWeight::MEDIUM).bg(rgb(theme::SELECTED()))
                                     })
-                                    .hover(|s| s.bg(rgb(theme::HOVER_STRONG)))
+                                    .hover(|s| s.bg(rgb(theme::HOVER_STRONG())))
                                     .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
                                         pick(this);
                                         this.model.dropdown_open = None;
@@ -156,7 +156,7 @@ impl Workbench {
                             .whitespace_nowrap()
                             .child(SharedString::from(current.to_owned())),
                     )
-                    .child(assets::icon("chevron-down", 14., theme::ICON)),
+                    .child(assets::icon("chevron-down", 14., theme::ICON())),
             )
             .children(list)
             .into_any_element()
@@ -400,13 +400,13 @@ impl Workbench {
                             .text_size(px(12.))
                             .cursor_pointer()
                             .when(on, |d| {
-                                d.bg(rgb(theme::ACCENT))
+                                d.bg(rgb(theme::ACCENT()))
                                     .text_color(rgb(0x1e1e1e))
                                     .font_weight(FontWeight::MEDIUM)
                             })
                             .when(!on, |d| {
-                                d.text_color(rgb(theme::TEXT))
-                                    .hover(|s| s.bg(rgb(theme::HOVER)))
+                                d.text_color(rgb(theme::TEXT()))
+                                    .hover(|s| s.bg(rgb(theme::HOVER())))
                             })
                             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                                 this.apply_command(command, window, cx);
@@ -434,7 +434,7 @@ impl Workbench {
             .p(px(2.))
             .rounded_full()
             .cursor_pointer()
-            .bg(rgb(if on { theme::ACCENT } else { 0x3a3a3a }))
+            .bg(rgb(if on { theme::ACCENT() } else { 0x3a3a3a }))
             .when(on, |d| d.justify_end())
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 this.apply_command(command, window, cx);
@@ -516,7 +516,7 @@ impl Workbench {
                         div()
                             .pt_1()
                             .text_size(px(13.))
-                            .text_color(rgb(theme::TEXT_DIM))
+                            .text_color(rgb(theme::TEXT_DIM()))
                             .child("Changes apply at once and are saved on this computer."),
                     )
                     .child(section("LAYOUT"))
@@ -637,7 +637,7 @@ impl Workbench {
                                 div()
                                     .min_w_0()
                                     .text_size(px(11.))
-                                    .text_color(rgb(theme::TEXT_DIM))
+                                    .text_color(rgb(theme::TEXT_DIM()))
                                     .whitespace_nowrap()
                                     .overflow_hidden()
                                     .child(SharedString::from(format!("Saved in {saved_in}"))),
@@ -654,7 +654,7 @@ impl Workbench {
             .flex_col()
             .flex_1()
             .min_h_0()
-            .bg(rgb(theme::EDITOR))
+            .bg(rgb(theme::EDITOR()))
             .child(self.scroll_box(
                 "settings",
                 page.into_any_element(),

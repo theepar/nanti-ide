@@ -130,7 +130,7 @@ pub(crate) fn readme_blocks(text: &str) -> Vec<AnyElement> {
                     .text_size(px(size))
                     .font_weight(FontWeight::SEMIBOLD)
                     .when(level <= 2, |d| {
-                        d.border_b_1().border_color(rgb(theme::BORDER))
+                        d.border_b_1().border_color(rgb(theme::BORDER()))
                     })
                     .child(SharedString::from(t[level..].trim().to_owned()))
                     .into_any_element(),
@@ -192,7 +192,7 @@ impl Workbench {
                 .bg(rgb(0x2d2d2d))
                 .text_size(px(size * 0.45))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(rgb(theme::TEXT_DIM))
+                .text_color(rgb(theme::TEXT_DIM()))
                 .child(SharedString::from(
                     label
                         .chars()
@@ -237,7 +237,7 @@ impl Workbench {
         use crate::extensions::ManifestState;
         let info = match manifest {
             ManifestState::Loading => {
-                return Self::manifest_note("Loading the features...".into(), theme::TEXT_DIM);
+                return Self::manifest_note("Loading the features...".into(), theme::TEXT_DIM());
             }
             ManifestState::Failed(e) => return Self::manifest_note(e.clone(), 0xe5534b),
             ManifestState::Ready(info) => info,
@@ -245,7 +245,7 @@ impl Workbench {
         if info.features.is_empty() {
             return Self::manifest_note(
                 "This extension does not list any contributions.".into(),
-                theme::TEXT_DIM,
+                theme::TEXT_DIM(),
             );
         }
         const SHOWN: usize = 60;
@@ -277,7 +277,7 @@ impl Workbench {
                             .rounded_md()
                             .bg(rgb(0x202020))
                             .border_1()
-                            .border_color(rgb(theme::BORDER))
+                            .border_color(rgb(theme::BORDER()))
                             .children(g.items.iter().take(SHOWN).map(|item| {
                                 div()
                                     .px_3()
@@ -291,7 +291,7 @@ impl Workbench {
                                     .px_3()
                                     .py(px(3.))
                                     .text_size(px(11.))
-                                    .text_color(rgb(theme::TEXT_DIM))
+                                    .text_color(rgb(theme::TEXT_DIM()))
                                     .child(SharedString::from(format!("and {more} more")))
                             })),
                     )
@@ -307,7 +307,7 @@ impl Workbench {
         use crate::extensions::ManifestState;
         let info = match manifest {
             ManifestState::Loading => {
-                return Self::manifest_note("Loading the package...".into(), theme::TEXT_DIM);
+                return Self::manifest_note("Loading the package...".into(), theme::TEXT_DIM());
             }
             ManifestState::Failed(e) => return Self::manifest_note(e.clone(), 0xe5534b),
             ManifestState::Ready(info) => info,
@@ -315,7 +315,7 @@ impl Workbench {
         if info.pack.is_empty() && info.dependencies.is_empty() {
             return Self::manifest_note(
                 "This extension is not an extension pack and has no dependencies.".into(),
-                theme::TEXT_DIM,
+                theme::TEXT_DIM(),
             );
         }
         let section = |title: &'static str, ids: &[String], base: usize, cx: &mut Context<Self>| {
@@ -338,7 +338,7 @@ impl Workbench {
                         .py(px(5.))
                         .text_size(px(12.))
                         .when(!installed, |d| {
-                            d.cursor_pointer().hover(|s| s.bg(rgb(theme::HOVER)))
+                            d.cursor_pointer().hover(|s| s.bg(rgb(theme::HOVER())))
                         })
                         .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
                             if installed {
@@ -354,7 +354,11 @@ impl Workbench {
                         .child(
                             div()
                                 .text_size(px(11.))
-                                .text_color(rgb(if installed { 0x8fd19e } else { theme::TEXT_DIM }))
+                                .text_color(rgb(if installed {
+                                    0x8fd19e
+                                } else {
+                                    theme::TEXT_DIM()
+                                }))
                                 .child(if installed {
                                     "Installed"
                                 } else {
@@ -381,7 +385,7 @@ impl Workbench {
                         .rounded_md()
                         .bg(rgb(0x202020))
                         .border_1()
-                        .border_color(rgb(theme::BORDER))
+                        .border_color(rgb(theme::BORDER()))
                         .children(rows),
                 )
                 .into_any_element()
@@ -470,7 +474,7 @@ impl Workbench {
             if self.model.installing.as_deref() == Some(url.as_str()) {
                 div()
                     .text_size(px(12.))
-                    .text_color(rgb(theme::TEXT_DIM))
+                    .text_color(rgb(theme::TEXT_DIM()))
                     .child(SharedString::from(self.model.install_label()))
                     .into_any_element()
             } else {
@@ -482,7 +486,7 @@ impl Workbench {
                     .px_4()
                     .rounded_md()
                     .cursor_pointer()
-                    .bg(rgb(theme::ACCENT))
+                    .bg(rgb(theme::ACCENT()))
                     .text_color(rgb(0x1e1e1e))
                     .text_size(px(13.))
                     .font_weight(FontWeight::MEDIUM)
@@ -508,7 +512,7 @@ impl Workbench {
                     div()
                         .flex_none()
                         .w(px(84.))
-                        .text_color(rgb(theme::TEXT_DIM))
+                        .text_color(rgb(theme::TEXT_DIM()))
                         .child(label),
                 )
                 .child(div().flex_1().min_w_0().child(SharedString::from(value)))
@@ -522,7 +526,7 @@ impl Workbench {
             .rounded_lg()
             .bg(rgb(0x202020))
             .border_1()
-            .border_color(rgb(theme::BORDER))
+            .border_color(rgb(theme::BORDER()))
             .child(
                 div()
                     .pb_2()
@@ -554,7 +558,7 @@ impl Workbench {
             Readme::Loading => vec![
                 div()
                     .text_size(px(13.))
-                    .text_color(rgb(theme::TEXT_DIM))
+                    .text_color(rgb(theme::TEXT_DIM()))
                     .child("Loading the description...")
                     .into_any_element(),
             ],
@@ -568,7 +572,7 @@ impl Workbench {
             Readme::None => vec![
                 div()
                     .text_size(px(13.))
-                    .text_color(rgb(theme::TEXT_DIM))
+                    .text_color(rgb(theme::TEXT_DIM()))
                     .child("This extension has no description page.")
                     .into_any_element(),
             ],
@@ -579,7 +583,7 @@ impl Workbench {
             .flex()
             .gap_6()
             .border_b_1()
-            .border_color(rgb(theme::BORDER))
+            .border_color(rgb(theme::BORDER()))
             .children(
                 [
                     (DetailTab::Details, "DETAILS"),
@@ -596,12 +600,12 @@ impl Workbench {
                         .cursor_pointer()
                         .text_size(px(11.))
                         .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(rgb(if active { 0xffffff } else { theme::TEXT_DIM }))
+                        .text_color(rgb(if active { 0xffffff } else { theme::TEXT_DIM() }))
                         .border_b_2()
                         .border_color(if active {
-                            rgb(theme::ACCENT)
+                            rgb(theme::ACCENT())
                         } else {
-                            rgb(theme::EDITOR)
+                            rgb(theme::EDITOR())
                         })
                         .hover(|s| s.text_color(rgb(0xffffff)))
                         .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
@@ -669,7 +673,7 @@ impl Workbench {
                             .child(
                                 div()
                                     .text_size(px(13.))
-                                    .text_color(rgb(theme::TEXT_DIM))
+                                    .text_color(rgb(theme::TEXT_DIM()))
                                     .child(SharedString::from(d.publisher.clone())),
                             )
                             .child(
@@ -689,7 +693,7 @@ impl Workbench {
             .flex_col()
             .flex_1()
             .min_h_0()
-            .bg(rgb(theme::EDITOR))
+            .bg(rgb(theme::EDITOR()))
             .child(self.scroll_box(
                 "ext-detail",
                 page.into_any_element(),
@@ -724,8 +728,8 @@ impl Workbench {
             .py(px(10.))
             .cursor_pointer()
             .border_b_1()
-            .border_color(rgb(theme::BORDER))
-            .hover(|s| s.bg(rgb(theme::HOVER)))
+            .border_color(rgb(theme::BORDER()))
+            .hover(|s| s.bg(rgb(theme::HOVER())))
             .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
                 this.model.open_market_detail(i);
                 cx.notify();
@@ -749,7 +753,7 @@ impl Workbench {
                     .children((!m.description.is_empty()).then(|| {
                         div()
                             .text_size(px(11.))
-                            .text_color(rgb(theme::TEXT_DIM))
+                            .text_color(rgb(theme::TEXT_DIM()))
                             .whitespace_nowrap()
                             .overflow_hidden()
                             .child(SharedString::from(m.description.clone()))
@@ -765,7 +769,7 @@ impl Workbench {
                                 div()
                                     .min_w_0()
                                     .text_size(px(11.))
-                                    .text_color(rgb(theme::TEXT_DIM))
+                                    .text_color(rgb(theme::TEXT_DIM()))
                                     .whitespace_nowrap()
                                     .overflow_hidden()
                                     .child(SharedString::from(stats)),
@@ -783,14 +787,14 @@ impl Workbench {
                                 div()
                                     .flex_none()
                                     .text_size(px(11.))
-                                    .text_color(rgb(theme::TEXT_DIM))
+                                    .text_color(rgb(theme::TEXT_DIM()))
                                     .child(SharedString::from(self.model.install_label()))
                                     .into_any_element()
                             } else {
                                 Self::flat_button(("mkt-install-btn", i), "Install")
                                     .flex_none()
                                     .bg(rgb(0x2f2f2f))
-                                    .text_color(rgb(theme::TEXT))
+                                    .text_color(rgb(theme::TEXT()))
                                     .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
                                         cx.stop_propagation();
                                         this.model.install_from_marketplace(&download_url);
@@ -811,10 +815,10 @@ impl Workbench {
                 div()
                     .px_3()
                     .py(px(4.))
-                    .bg(rgb(theme::PANEL))
+                    .bg(rgb(theme::PANEL()))
                     .text_size(px(11.))
                     .font_weight(FontWeight::BOLD)
-                    .text_color(rgb(theme::TEXT_DIM))
+                    .text_color(rgb(theme::TEXT_DIM()))
                     .child("RECOMMENDED")
                     .into_any_element(),
             );
@@ -823,7 +827,7 @@ impl Workbench {
                     .px_3()
                     .py_2()
                     .text_size(px(12.))
-                    .text_color(rgb(theme::TEXT_DIM))
+                    .text_color(rgb(theme::TEXT_DIM()))
                     .child("Loading recommendations from Open VSX...")
                     .into_any_element(),
             );
@@ -832,10 +836,10 @@ impl Workbench {
                 div()
                     .px_3()
                     .py(px(4.))
-                    .bg(rgb(theme::PANEL))
+                    .bg(rgb(theme::PANEL()))
                     .text_size(px(11.))
                     .font_weight(FontWeight::BOLD)
-                    .text_color(rgb(theme::TEXT_DIM))
+                    .text_color(rgb(theme::TEXT_DIM()))
                     .child(SharedString::from(format!(
                         "RECOMMENDED ({})",
                         self.model.marketplace_results.len()
@@ -850,10 +854,10 @@ impl Workbench {
                 div()
                     .px_3()
                     .py(px(4.))
-                    .bg(rgb(theme::PANEL))
+                    .bg(rgb(theme::PANEL()))
                     .text_size(px(11.))
                     .font_weight(FontWeight::BOLD)
-                    .text_color(rgb(theme::TEXT_DIM))
+                    .text_color(rgb(theme::TEXT_DIM()))
                     .child("RECOMMENDED")
                     .into_any_element(),
             );
@@ -881,7 +885,7 @@ impl Workbench {
                         .px_3()
                         .py_2()
                         .text_size(px(12.))
-                        .text_color(rgb(theme::TEXT_DIM))
+                        .text_color(rgb(theme::TEXT_DIM()))
                         .child("Searching Open VSX Marketplace...")
                         .into_any_element(),
                 );
@@ -900,10 +904,10 @@ impl Workbench {
                     div()
                         .px_3()
                         .py(px(4.))
-                        .bg(rgb(theme::PANEL))
+                        .bg(rgb(theme::PANEL()))
                         .text_size(px(11.))
                         .font_weight(FontWeight::BOLD)
-                        .text_color(rgb(theme::TEXT_DIM))
+                        .text_color(rgb(theme::TEXT_DIM()))
                         .child(SharedString::from(format!(
                             "{} ({})",
                             if self.model.marketplace_recommended {
@@ -926,7 +930,7 @@ impl Workbench {
                         .px_3()
                         .py_2()
                         .text_size(px(12.))
-                        .text_color(rgb(theme::TEXT_DIM))
+                        .text_color(rgb(theme::TEXT_DIM()))
                         .child(SharedString::from(format!(
                             "No extensions found for \"{q}\" on Open VSX."
                         )))
@@ -939,10 +943,10 @@ impl Workbench {
             div()
                 .px_3()
                 .py(px(4.))
-                .bg(rgb(theme::PANEL))
+                .bg(rgb(theme::PANEL()))
                 .text_size(px(11.))
                 .font_weight(FontWeight::BOLD)
-                .text_color(rgb(theme::TEXT_DIM))
+                .text_color(rgb(theme::TEXT_DIM()))
                 .child(SharedString::from(format!(
                     "INSTALLED ({})",
                     self.model.extensions.len()
@@ -956,7 +960,7 @@ impl Workbench {
                     .px_3()
                     .py_2()
                     .text_size(px(12.))
-                    .text_color(rgb(theme::TEXT_DIM))
+                    .text_color(rgb(theme::TEXT_DIM()))
                     .child("No extensions installed. Search above or install a .vsix package.")
                     .into_any_element(),
             );
@@ -973,7 +977,7 @@ impl Workbench {
                         .my(px(6.))
                         .h(px(56.))
                         .cursor_pointer()
-                        .hover(|s| s.bg(rgb(theme::HOVER)))
+                        .hover(|s| s.bg(rgb(theme::HOVER())))
                         .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
                             this.model.open_installed_detail(i);
                             cx.notify();
@@ -999,7 +1003,7 @@ impl Workbench {
                                         .whitespace_nowrap()
                                         .overflow_hidden()
                                         .text_size(px(11.))
-                                        .text_color(rgb(theme::TEXT_DIM))
+                                        .text_color(rgb(theme::TEXT_DIM()))
                                         .child(SharedString::from(x.description.clone())),
                                 )
                                 .child(

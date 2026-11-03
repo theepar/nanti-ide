@@ -80,7 +80,7 @@ impl Workbench {
                             size: size(px(SCROLLBAR_W - 5.), px(height)),
                         };
                         window.paint_quad(
-                            fill(thumb, rgb(theme::SCROLL_THUMB)).corner_radii(px(1.5)),
+                            fill(thumb, rgb(theme::SCROLL_THUMB())).corner_radii(px(1.5)),
                         );
                     },
                 )
@@ -147,7 +147,7 @@ impl Workbench {
             .justify_center()
             .w(px(46.))
             .h(px(MENU_BAR_HEIGHT))
-            .hover(move |s| s.bg(rgb(if danger { 0xe81123 } else { theme::HOVER })))
+            .hover(move |s| s.bg(rgb(if danger { 0xe81123 } else { theme::HOVER() })))
             .child(assets::icon(icon_name, 14., 0xe6e6e6))
     }
 
@@ -184,8 +184,8 @@ impl Workbench {
             .rounded_sm()
             .cursor_pointer()
             .text_size(px(11.))
-            .text_color(rgb(theme::TEXT_DIM))
-            .hover(|s| s.bg(rgb(theme::HOVER)).text_color(rgb(theme::TEXT)))
+            .text_color(rgb(theme::TEXT_DIM()))
+            .hover(|s| s.bg(rgb(theme::HOVER())).text_color(rgb(theme::TEXT())))
             .child(label)
     }
 
@@ -202,8 +202,8 @@ impl Workbench {
             .h(px(26.))
             .rounded_sm()
             .cursor_pointer()
-            .hover(|s| s.bg(rgb(theme::HOVER)))
-            .child(assets::icon(icon_name, 17., theme::ICON))
+            .hover(|s| s.bg(rgb(theme::HOVER())))
+            .child(assets::icon(icon_name, 17., theme::ICON()))
     }
 
     pub(crate) fn panel_body(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {

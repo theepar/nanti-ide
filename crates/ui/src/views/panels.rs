@@ -68,7 +68,7 @@ impl Workbench {
                         .py(px(1.))
                         .text_size(px(12.))
                         .cursor_pointer()
-                        .hover(|st| st.bg(rgb(theme::HOVER)))
+                        .hover(|st| st.bg(rgb(theme::HOVER())))
                         .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                             let _ = this.model.go_to_line(line + 1, 1);
                             this.focus_editor(window);
@@ -79,7 +79,7 @@ impl Workbench {
                             div()
                                 .flex_none()
                                 .w(px(46.))
-                                .text_color(rgb(theme::TEXT_DIM))
+                                .text_color(rgb(theme::TEXT_DIM()))
                                 .child(s.kind),
                         )
                         .child(
@@ -99,7 +99,7 @@ impl Workbench {
                 .px_3()
                 .py_1()
                 .text_size(px(11.))
-                .text_color(rgb(theme::TEXT_DIM))
+                .text_color(rgb(theme::TEXT_DIM()))
                 .child("No symbols (open a Rust, JS/TS, Go or Markdown file).")
         });
         div()
@@ -107,16 +107,16 @@ impl Workbench {
             .flex_col()
             .flex_none()
             .border_t_1()
-            .border_color(rgb(theme::BORDER))
+            .border_color(rgb(theme::BORDER()))
             .child(
                 div()
                     .id("outline-header")
                     .px_2()
                     .py(px(4.))
                     .text_size(px(11.))
-                    .text_color(rgb(theme::TEXT_DIM))
+                    .text_color(rgb(theme::TEXT_DIM()))
                     .cursor_pointer()
-                    .hover(|s| s.bg(rgb(theme::HOVER)))
+                    .hover(|s| s.bg(rgb(theme::HOVER())))
                     .on_click(cx.listener(|this, _: &ClickEvent, _w, cx| {
                         this.outline_open = !this.outline_open;
                         cx.notify();
@@ -152,7 +152,7 @@ impl Workbench {
                     .py(px(4.))
                     .text_size(px(13.))
                     .cursor_pointer()
-                    .hover(|s| s.bg(rgb(theme::HOVER)))
+                    .hover(|s| s.bg(rgb(theme::HOVER())))
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         this.run_task(i, window);
                         cx.notify();
@@ -167,7 +167,7 @@ impl Workbench {
                     .child(
                         div()
                             .text_size(px(11.))
-                            .text_color(rgb(theme::TEXT_DIM))
+                            .text_color(rgb(theme::TEXT_DIM()))
                             .child(t.source),
                     )
                     .into_any_element()
@@ -178,7 +178,7 @@ impl Workbench {
                 .px_3()
                 .py_2()
                 .text_size(px(12.))
-                .text_color(rgb(theme::TEXT_DIM))
+                .text_color(rgb(theme::TEXT_DIM()))
                 .child("No tasks found. Tasks come from Cargo.toml, package.json, go.mod or pubspec.yaml in the workspace folder.")
         });
         div()
@@ -207,7 +207,7 @@ impl Workbench {
                     .px_3()
                     .py_2()
                     .text_size(px(11.))
-                    .text_color(rgb(theme::TEXT_DIM))
+                    .text_color(rgb(theme::TEXT_DIM()))
                     .child("Tasks run in the integrated terminal. Debugging (breakpoints, stepping) is not available."),
             )
             .into_any_element()
@@ -220,7 +220,7 @@ impl Workbench {
                 .px_3()
                 .py_2()
                 .text_size(px(13.))
-                .text_color(rgb(theme::TEXT_DIM))
+                .text_color(rgb(theme::TEXT_DIM()))
                 .child("No syntax problems in the open files. (Syntax check only: no type errors or lints.)")
                 .into_any_element();
         }
@@ -263,7 +263,7 @@ impl Workbench {
                         .overflow_hidden()
                         .text_size(px(12.))
                         .cursor_pointer()
-                        .hover(|s| s.bg(rgb(theme::HOVER)))
+                        .hover(|s| s.bg(rgb(theme::HOVER())))
                         .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                             this.model.open_at(&path, line, col, len);
                             this.focus_editor(window);
@@ -274,7 +274,7 @@ impl Workbench {
                         .child(SharedString::from(d.message.clone()))
                         .child(
                             div()
-                                .text_color(rgb(theme::TEXT_DIM))
+                                .text_color(rgb(theme::TEXT_DIM()))
                                 .child(SharedString::from(format!(
                                     "[Ln {}, Col {}]",
                                     d.line + 1,
@@ -332,14 +332,14 @@ impl Workbench {
                 .child(
                     div()
                         .flex_none()
-                        .text_color(rgb(theme::LINE_NUMBER))
+                        .text_color(rgb(theme::LINE_NUMBER()))
                         .child(SharedString::from(crate::output::OutputLog::stamp(l))),
                 )
                 .child(
                     div()
                         .flex_none()
                         .w(px(76.))
-                        .text_color(rgb(theme::ACCENT))
+                        .text_color(rgb(theme::ACCENT()))
                         .child(SharedString::from(l.channel.clone())),
                 )
                 .child(
@@ -365,7 +365,7 @@ impl Workbench {
                     .px_3()
                     .pb_1()
                     .text_size(px(11.))
-                    .text_color(rgb(theme::TEXT_DIM))
+                    .text_color(rgb(theme::TEXT_DIM()))
                     .child(SharedString::from(format!(
                         "{} line(s), newest first",
                         log.len()

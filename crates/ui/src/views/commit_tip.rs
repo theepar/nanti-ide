@@ -194,7 +194,7 @@ impl CommitTip {
             .rounded_sm()
             .cursor_pointer()
             .text_color(rgb(0x3794ff))
-            .hover(|s| s.bg(rgb(theme::HOVER)))
+            .hover(|s| s.bg(rgb(theme::HOVER())))
             .child(assets::icon(icon, 13., 0x3794ff))
             .child(label.into())
     }
@@ -211,13 +211,13 @@ impl Render for CommitTip {
             .gap(px(4.))
             .px_2()
             .py(px(6.))
-            .bg(rgb(theme::MENU_BG))
+            .bg(rgb(theme::MENU_BG()))
             .border_1()
             .border_color(rgb(0x454545))
             .rounded_md()
             .shadow_lg()
             .text_size(px(13.))
-            .text_color(rgb(theme::TEXT));
+            .text_color(rgb(theme::TEXT()));
         let wb = self.workbench.read(cx);
         let s = &wb.model().scm;
         let Some(commit) = s.history.iter().find(|c| c.hash == self.hash) else {
@@ -248,7 +248,7 @@ impl Render for CommitTip {
             .collect();
         let more = (lines.len() > BODY_LINES).then(|| {
             div()
-                .text_color(rgb(theme::TEXT_DIM))
+                .text_color(rgb(theme::TEXT_DIM()))
                 .child(SharedString::from(format!(
                     "... {} more lines",
                     lines.len() - BODY_LINES
@@ -257,12 +257,12 @@ impl Render for CommitTip {
         let stats: AnyElement = match detail {
             None => div()
                 .flex_none()
-                .text_color(rgb(theme::TEXT_DIM))
+                .text_color(rgb(theme::TEXT_DIM()))
                 .child("Loading the size of this change...")
                 .into_any_element(),
             Some(d) if d.files == 0 => div()
                 .flex_none()
-                .text_color(rgb(theme::TEXT_DIM))
+                .text_color(rgb(theme::TEXT_DIM()))
                 .child("No file changes")
                 .into_any_element(),
             Some(d) => div()
@@ -320,8 +320,8 @@ impl Render for CommitTip {
                         .flex()
                         .items_center()
                         .gap_1()
-                        .text_color(rgb(theme::TEXT_DIM))
-                        .child(assets::icon("clock", 14., theme::TEXT_DIM))
+                        .text_color(rgb(theme::TEXT_DIM()))
+                        .child(assets::icon("clock", 14., theme::TEXT_DIM()))
                         .child(SharedString::from(when)),
                 ),
         )
@@ -355,7 +355,7 @@ impl Render for CommitTip {
                         .flex()
                         .items_center()
                         .gap_2()
-                        .child(div().text_color(rgb(theme::TEXT_DIM)).child("|"))
+                        .child(div().text_color(rgb(theme::TEXT_DIM())).child("|"))
                         .child(
                             Self::link_button("commit-tip-open", "external", label).on_click(
                                 cx.listener(move |_this, _: &ClickEvent, _w, cx| {

@@ -32,9 +32,9 @@ impl Workbench {
             .flex_none()
             .items_center()
             .h(px(MENU_BAR_HEIGHT))
-            .bg(rgb(theme::ACTIVITY_BAR))
+            .bg(rgb(theme::ACTIVITY_BAR()))
             .border_b_1()
-            .border_color(rgb(theme::BORDER))
+            .border_color(rgb(theme::BORDER()))
             .text_size(px(12.))
             .child(
                 div()
@@ -61,10 +61,10 @@ impl Workbench {
                     .text_color(rgb(if open == Some(k) {
                         0xffffff
                     } else {
-                        theme::TEXT
+                        theme::TEXT()
                     }))
-                    .when(open == Some(k), |d| d.bg(rgb(theme::SELECTED)))
-                    .hover(|s| s.bg(rgb(theme::HOVER)).text_color(rgb(0xffffff)))
+                    .when(open == Some(k), |d| d.bg(rgb(theme::SELECTED())))
+                    .hover(|s| s.bg(rgb(theme::HOVER())).text_color(rgb(0xffffff)))
                     .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
                         if this.model.menu_open == Some(k) {
                             this.model.close_menus();
@@ -130,7 +130,7 @@ impl Workbench {
                     .h(px(1.))
                     .my(px(4.))
                     .mx_2()
-                    .bg(rgb(theme::BORDER))
+                    .bg(rgb(theme::BORDER()))
                     .into_any_element(),
                 MenuItem::Command(c) => div()
                     .id((id, i))
@@ -144,7 +144,7 @@ impl Workbench {
                     .rounded_sm()
                     .text_size(px(12.))
                     .cursor_pointer()
-                    .hover(|s| s.bg(rgb(theme::HOVER_STRONG)).text_color(rgb(0xffffff)))
+                    .hover(|s| s.bg(rgb(theme::HOVER_STRONG())).text_color(rgb(0xffffff)))
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         this.model.close_menus();
                         this.apply_command(c, window, cx);
@@ -152,7 +152,7 @@ impl Workbench {
                     .child(c.menu_label())
                     .child(
                         div()
-                            .text_color(rgb(theme::TEXT_DIM))
+                            .text_color(rgb(theme::TEXT_DIM()))
                             .child(c.keybinding().unwrap_or("")),
                     )
                     .into_any_element(),
@@ -239,12 +239,12 @@ impl Workbench {
                         .py_1()
                         .flex()
                         .flex_col()
-                        .bg(rgb(theme::MENU_BG))
+                        .bg(rgb(theme::MENU_BG()))
                         .border_1()
-                        .border_color(rgb(theme::BORDER))
+                        .border_color(rgb(theme::BORDER()))
                         .rounded_md()
                         .shadow_xl()
-                        .text_color(rgb(theme::TEXT))
+                        .text_color(rgb(theme::TEXT()))
                         .children(rows),
                 )
                 .into_any_element(),
@@ -259,7 +259,7 @@ impl Workbench {
             .gap_2()
             .px_3()
             .text_size(px(12.))
-            .text_color(rgb(theme::TEXT_DIM))
+            .text_color(rgb(theme::TEXT_DIM()))
             .child("You have not opened a folder yet.")
             .child(
                 Self::scm_button("explorer-open-folder", "Open Folder", true).on_click(
@@ -300,7 +300,7 @@ impl Workbench {
                 div()
                     .pb_4()
                     .text_size(px(14.))
-                    .text_color(rgb(theme::TEXT_DIM))
+                    .text_color(rgb(theme::TEXT_DIM()))
                     .child("Code now. Not later."),
             )
             .children(entries.into_iter().enumerate().map(|(i, (label, cmd))| {
@@ -315,14 +315,14 @@ impl Workbench {
                     .rounded_sm()
                     .cursor_pointer()
                     .text_size(px(13.))
-                    .hover(|s| s.bg(rgb(theme::HOVER)))
+                    .hover(|s| s.bg(rgb(theme::HOVER())))
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         this.apply_command(cmd, window, cx)
                     }))
-                    .child(div().text_color(rgb(theme::ACCENT)).child(label))
+                    .child(div().text_color(rgb(theme::ACCENT())).child(label))
                     .child(
                         div()
-                            .text_color(rgb(theme::TEXT_DIM))
+                            .text_color(rgb(theme::TEXT_DIM()))
                             .child(cmd.keybinding().unwrap_or("")),
                     )
             }))
