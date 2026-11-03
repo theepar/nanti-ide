@@ -1,0 +1,12 @@
+Nanti IDE bundles these programs so a fresh machine needs nothing else. They are separate programs under their own licenses.
+
+Node.js (node.exe)
+  Runs the extension host. MIT license. https://nodejs.org  https://github.com/nodejs/node/blob/main/LICENSE
+
+MinGit (git\)
+  Runs the Git panel. GNU General Public License v2 and others, see git\LICENSE.txt.
+  Source code: https://github.com/git-for-windows/git
+
+Microsoft Edge WebView2 Runtime
+  Installed from Microsoft's own installer when it is missing. Not part of this folder.
+  https://developer.microsoft.com/microsoft-edge/webview2

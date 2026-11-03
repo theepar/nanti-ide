@@ -20,7 +20,7 @@ AllowNoIcons=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=commandline dialog
 OutputDir=..\..\target\release
-OutputBaseFilename=setup
+OutputBaseFilename=Nanti-IDE-1.0.0-setup
 SetupIconFile=..\..\crates\ui\assets\nanti.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2/ultra64
@@ -44,6 +44,10 @@ Name: "addtopath"; Description: "Add to PATH (recommended)"; GroupDescription: "
 Source: "..\..\target\release\nanti.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
 Source: "..\..\target\release\nanti.exe"; DestDir: "{app}"; DestName: "nanti.exe"; Flags: ignoreversion
 Source: "..\..\crates\ui\assets\nanti.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\target\release\runtime\node.exe"; DestDir: "{app}\runtime"; Flags: ignoreversion
+Source: "..\..\target\release\runtime\git\*"; DestDir: "{app}\runtime\git"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "runtime-notice.txt"; DestDir: "{app}\runtime"; Flags: ignoreversion
+Source: "..\..\target\release\runtime\MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: NeedsWebView2
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\nanti.ico"
@@ -72,9 +76,27 @@ Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; Value
 Type: filesandordirs; Name: "{app}"
 
 [Run]
+Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "Installing the WebView2 runtime..."; Flags: waituntilterminated; Check: NeedsWebView2
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [Code]
+function WebView2Version(Root: Integer; Key: string): string;
+begin
+  if not RegQueryStringValue(Root, Key, 'pv', Result) then
+    Result := '';
+end;
+
+function NeedsWebView2: boolean;
+var
+  Found, Clients: string;
+begin
+  Clients := '\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+  Found := WebView2Version(HKLM, 'SOFTWARE\WOW6432Node' + Clients);
+  if Found = '' then Found := WebView2Version(HKLM, 'SOFTWARE' + Clients);
+  if Found = '' then Found := WebView2Version(HKCU, 'Software' + Clients);
+  Result := (Found = '') or (Found = '0.0.0.0');
+end;
+
 function NeedsAddPath(Param: string): boolean;
 var
   OrigPath: string;

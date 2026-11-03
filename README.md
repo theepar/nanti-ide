@@ -124,11 +124,15 @@ graph TD
 
 ## Getting Started
 
-### Prerequisites
+### Installing
+
+Run `Nanti-IDE-1.0.0-setup.exe`. It brings everything: Node.js for extensions and Git for the Git panel are inside `runtime`, and the WebView2 runtime is installed from Microsoft's own installer only when Windows does not have it yet (that one step needs an internet connection; Windows 11 and up-to-date Windows 10 already have it). The portable zip holds only `nanti.exe`; it uses Node.js and Git from `PATH`.
+
+### Prerequisites (building from source)
 - **Operating System:** Windows 10 / 11 (64-bit)
 - **Rust Toolchain:** Stable MSVC (`stable-x86_64-pc-windows-msvc`), managed by `rust-toolchain.toml`
 - **Build Tools:** Visual Studio C++ Build Tools & Windows SDK
-- **Node.js:** Node.js >= 20 (for the out-of-process extension host)
+- **Node.js:** Node.js >= 22 (for the out-of-process extension host)
 - **Git:** Git for Windows (accessible on `PATH`)
 
 ### Building from Source
@@ -154,7 +158,14 @@ graph TD
    ```sh
    cargo build --release -p ui
    ```
-   The standalone executable will be located at `target/release/nanti.exe`.
+   The standalone executable will be located at `target/release/nanti.exe`; the extension host is built into it.
+
+5. **Build the installer** (needs Inno Setup 6):
+   ```sh
+   powershell -File packaging/windows/stage-runtime.ps1
+   ISCC packaging/windows/setup.iss
+   ```
+   `stage-runtime.ps1` collects Node.js, MinGit and the WebView2 bootstrapper into `target/release/runtime`, checking the MinGit SHA-256 and the bootstrapper's Microsoft signature.
 
 ---
 
@@ -190,7 +201,8 @@ graph TD
 | `NANTI_WORKSPACE` | Path to the default workspace root folder |
 | `NANTI_EXTENSION` | Path to an unpacked extension directory for testing |
 | `NANTI_VIEW` | Webview view identifier to bind to the extension panel (shown as a tab in the editor area) |
-| `NANTI_NODE` | Custom path to the Node.js binary (defaults to `node` on `PATH`) |
+| `NANTI_NODE` | Custom path to the Node.js binary (defaults to the one the installer put in `runtime`, then `node` on `PATH`) |
+| `NANTI_GIT` | Custom path to the Git binary (defaults to the one the installer put in `runtime\git`, then `git` on `PATH`) |
 | `NANTI_CONFIG_DIR` | Custom directory for user preferences and layout state |
 
 User settings and window layout states are automatically persisted across sessions in `%APPDATA%\nanti\layout.json`.

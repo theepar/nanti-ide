@@ -103,3 +103,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 IN NO EVENT SHALL THE AUTHORS, COPYRIGHT HOLDERS, OR CONTRIBUTORS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE, INCLUDING BUT NOT LIMITED TO DATA LOSS, SYSTEM DAMAGE, INTERRUPTION OF SERVICE, OR THIRD-PARTY EXTENSION BEHAVIOR.
 
+
+---
+
+## Bundled programs in the Windows installer
+
+The installer also ships Node.js (MIT) and MinGit (GNU GPL v2 and others; source at https://github.com/git-for-windows/git) in a `runtime` folder, with their notices in `runtime/runtime-notice.txt`. They are separate programs run as separate processes, under their own licenses.
