@@ -99,6 +99,16 @@ impl Model {
             .config_dir
             .as_deref()
             .is_some_and(crate::format::load_format_on_save);
+        if let Some(dir) = &self.config_dir {
+            self.prettier_source = crate::format::load_prettier_source(dir);
+        }
+    }
+
+    pub fn set_prettier_source(&mut self, source: crate::format::PrettierSource) {
+        if let Some(dir) = &self.config_dir {
+            let _ = crate::format::save_prettier_source(dir, &source);
+        }
+        self.prettier_source = source;
     }
 
     pub(crate) fn toggle_format_on_save(&mut self) {
@@ -120,7 +130,7 @@ impl Model {
         };
         let (path, before) = (tab.path.clone(), editor.text());
         let dirs: Vec<PathBuf> = self.extensions.iter().map(|x| x.dir.clone()).collect();
-        let Some(plan) = crate::format::plan(&path, &dirs) else {
+        let Some(plan) = crate::format::plan_with(&path, &dirs, &self.prettier_source) else {
             if announce {
                 self.say("Format", "There is no formatter for this file type");
             }

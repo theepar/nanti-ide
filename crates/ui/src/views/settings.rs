@@ -162,6 +162,51 @@ impl Workbench {
             .into_any_element()
     }
 
+    fn prettier_picker(&self, cx: &mut Context<Self>) -> AnyElement {
+        use crate::format::PrettierSource;
+        let source = self.model.prettier_source.clone();
+        let pick = |s: PrettierSource| -> Box<dyn Fn(&mut Workbench) + 'static> {
+            Box::new(move |wb: &mut Workbench| wb.model.set_prettier_source(s.clone()))
+        };
+        let mut options: Vec<DropdownOption> = vec![(
+            "Automatic".into(),
+            source == PrettierSource::Auto,
+            pick(PrettierSource::Auto),
+        )];
+        let mut current = "Automatic".to_owned();
+        for ext in self
+            .model
+            .extensions
+            .iter()
+            .filter(|e| e.id.eq_ignore_ascii_case("esbenp.prettier-vscode"))
+        {
+            let Some(folder) = ext
+                .dir
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+            else {
+                continue;
+            };
+            let choice = PrettierSource::Extension(folder);
+            let label = format!("Extension {} v{}", ext.display_name, ext.version);
+            if source == choice {
+                current = label.clone();
+            }
+            options.push((label.into(), source == choice, pick(choice)));
+        }
+        if crate::format::prettier_on_path() {
+            if source == PrettierSource::Path {
+                current = "Prettier on PATH".to_owned();
+            }
+            options.push((
+                "Prettier on PATH".into(),
+                source == PrettierSource::Path,
+                pick(PrettierSource::Path),
+            ));
+        }
+        self.dropdown("set-prettier", &current, options, cx)
+    }
+
     fn icon_theme_picker(&self, cx: &mut Context<Self>) -> AnyElement {
         let active = self.model.icon_choice.active.clone();
         let mut options: Vec<DropdownOption> = vec![(
@@ -522,6 +567,11 @@ impl Workbench {
                         self.icon_theme_picker(cx),
                     ))
                     .child(section("EDITOR"))
+                    .child(Self::setting_row(
+                        "Prettier",
+                        "Which Prettier formats JavaScript, TypeScript, CSS, HTML, JSON, Markdown and YAML. Automatic uses the project's own, then an installed extension's, then the one on PATH; if the chosen one is gone, Automatic is used.",
+                        self.prettier_picker(cx),
+                    ))
                     .child(Self::setting_row(
                         "Format on save",
                         "Format the file with rustfmt, gofmt, dart format or Prettier right before it is saved.",

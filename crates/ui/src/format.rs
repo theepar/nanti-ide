@@ -37,15 +37,77 @@ pub fn load_format_on_save(dir: &Path) -> bool {
         .unwrap_or(true)
 }
 
-pub fn save_format_on_save(dir: &Path, on: bool) -> Result<(), String> {
-    let text =
-        serde_json::to_string_pretty(&json!({ "formatOnSave": on })).map_err(|e| e.to_string())?;
+/// Which Prettier formats the web file types.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum PrettierSource {
+    /// The project's own, then an installed extension's, then the one on PATH.
+    #[default]
+    Auto,
+    /// The Prettier inside one installed extension, by the name of its folder.
+    Extension(String),
+    Path,
+}
+
+impl PrettierSource {
+    fn key(&self) -> String {
+        match self {
+            Self::Auto => "auto".to_owned(),
+            Self::Extension(folder) => format!("ext:{folder}"),
+            Self::Path => "path".to_owned(),
+        }
+    }
+
+    fn from_key(key: &str) -> Self {
+        match key {
+            "path" => Self::Path,
+            k if k.starts_with("ext:") && k.len() > 4 => Self::Extension(k[4..].to_owned()),
+            _ => Self::Auto,
+        }
+    }
+}
+
+fn update_settings(dir: &Path, key: &str, value: Value) -> Result<(), String> {
+    let mut object = std::fs::read_to_string(dir.join(SETTINGS_FILE))
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(t.trim_start_matches('\u{feff}')).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    object[key] = value;
+    let text = serde_json::to_string_pretty(&object).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     std::fs::write(dir.join(SETTINGS_FILE), text).map_err(|e| e.to_string())
 }
 
+pub fn save_format_on_save(dir: &Path, on: bool) -> Result<(), String> {
+    update_settings(dir, "formatOnSave", json!(on))
+}
+
+pub fn load_prettier_source(dir: &Path) -> PrettierSource {
+    std::fs::read_to_string(dir.join(SETTINGS_FILE))
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(t.trim_start_matches('\u{feff}')).ok())
+        .and_then(|v| {
+            v.get("prettier")
+                .and_then(Value::as_str)
+                .map(PrettierSource::from_key)
+        })
+        .unwrap_or_default()
+}
+
+pub fn save_prettier_source(dir: &Path, source: &PrettierSource) -> Result<(), String> {
+    update_settings(dir, "prettier", json!(source.key()))
+}
+
+pub fn prettier_on_path() -> bool {
+    on_path(&["prettier.cmd", "prettier.exe", "prettier"]).is_some()
+}
+
 /// Picks the formatter for a file: the project's own tool first, then what the installed extensions bring, then PATH.
 pub fn plan(path: &Path, extension_dirs: &[PathBuf]) -> Option<Plan> {
+    plan_with(path, extension_dirs, &PrettierSource::Auto)
+}
+
+pub fn plan_with(path: &Path, extension_dirs: &[PathBuf], source: &PrettierSource) -> Option<Plan> {
     let cwd = path.parent()?.to_path_buf();
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
     match ext.as_str() {
@@ -75,7 +137,7 @@ pub fn plan(path: &Path, extension_dirs: &[PathBuf]) -> Option<Plan> {
             input: Input::TempSibling,
         }),
         e if PRETTIER_FILES.contains(&e) => {
-            let (program, mut args) = find_prettier(&cwd, extension_dirs)?;
+            let (program, mut args) = find_prettier(&cwd, extension_dirs, source)?;
             args.push("--stdin-filepath".into());
             args.push(path.as_os_str().to_owned());
             Some(Plan {
@@ -110,7 +172,11 @@ fn rust_edition(dir: &Path) -> String {
     "2021".to_owned()
 }
 
-fn find_prettier(dir: &Path, extension_dirs: &[PathBuf]) -> Option<(OsString, Vec<OsString>)> {
+fn find_prettier(
+    dir: &Path,
+    extension_dirs: &[PathBuf],
+    source: &PrettierSource,
+) -> Option<(OsString, Vec<OsString>)> {
     let script = |root: &Path| {
         ["bin/prettier.cjs", "bin-prettier.js"]
             .iter()
@@ -118,6 +184,27 @@ fn find_prettier(dir: &Path, extension_dirs: &[PathBuf]) -> Option<(OsString, Ve
             .find(|p| p.is_file())
     };
     let via_node = |p: PathBuf| (OsString::from("node"), vec![p.into_os_string()]);
+    // A chosen source that is gone (extension removed, nothing on PATH) falls back to automatic, so formatting keeps working.
+    match source {
+        PrettierSource::Extension(folder) => {
+            if let Some(found) = extension_dirs
+                .iter()
+                .find(|e| {
+                    e.file_name()
+                        .is_some_and(|n| n.to_string_lossy() == folder.as_str())
+                })
+                .and_then(|e| script(e))
+            {
+                return Some(via_node(found));
+            }
+        }
+        PrettierSource::Path => {
+            if let Some(p) = on_path(&["prettier.cmd", "prettier.exe", "prettier"]) {
+                return Some((p.into_os_string(), Vec::new()));
+            }
+        }
+        PrettierSource::Auto => {}
+    }
     if let Some(found) = dir.ancestors().find_map(script) {
         return Some(via_node(found));
     }
@@ -295,6 +382,62 @@ mod tests {
             PathBuf::from(&local.args[0]),
             d.join("app/node_modules/prettier/bin/prettier.cjs")
         );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_chosen_prettier_source_wins_and_a_missing_one_falls_back() {
+        let d = tmp("source");
+        let one = d.join("extensions/esbenp.prettier-vscode-1.0.0");
+        let two = d.join("extensions/esbenp.prettier-vscode-2.0.0");
+        for e in [&one, &two] {
+            std::fs::create_dir_all(e.join("node_modules/prettier/bin")).unwrap();
+            std::fs::write(e.join("node_modules/prettier/bin/prettier.cjs"), "").unwrap();
+        }
+        let file = d.join("app/a.ts");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let dirs = [one.clone(), two.clone()];
+        let script = |p: &Plan| PathBuf::from(&p.args[0]);
+
+        let auto = plan_with(&file, &dirs, &PrettierSource::Auto).unwrap();
+        assert_eq!(
+            script(&auto),
+            one.join("node_modules/prettier/bin/prettier.cjs")
+        );
+        let chosen = plan_with(
+            &file,
+            &dirs,
+            &PrettierSource::Extension("esbenp.prettier-vscode-2.0.0".into()),
+        )
+        .unwrap();
+        assert_eq!(
+            script(&chosen),
+            two.join("node_modules/prettier/bin/prettier.cjs")
+        );
+        let gone = plan_with(&file, &dirs, &PrettierSource::Extension("removed-9".into())).unwrap();
+        assert_eq!(
+            script(&gone),
+            one.join("node_modules/prettier/bin/prettier.cjs")
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_prettier_choice_is_saved_next_to_format_on_save() {
+        let d = tmp("sourcefile");
+        assert_eq!(load_prettier_source(&d), PrettierSource::Auto);
+        save_prettier_source(&d, &PrettierSource::Extension("x-1".into())).unwrap();
+        save_format_on_save(&d, false).unwrap();
+        assert_eq!(
+            load_prettier_source(&d),
+            PrettierSource::Extension("x-1".into())
+        );
+        assert!(
+            !load_format_on_save(&d),
+            "saving one setting keeps the other"
+        );
+        save_prettier_source(&d, &PrettierSource::Path).unwrap();
+        assert_eq!(load_prettier_source(&d), PrettierSource::Path);
         let _ = std::fs::remove_dir_all(&d);
     }
 

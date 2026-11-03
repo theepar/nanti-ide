@@ -250,6 +250,7 @@ pub struct Model {
     pub extensions: Vec<Extension>,
     pub config_dir: Option<PathBuf>,
     pub format_on_save: bool,
+    pub prettier_source: crate::format::PrettierSource,
     pub icon_themes: Vec<crate::icon_theme::ThemeEntry>,
     pub icon_choice: crate::icon_theme::Choice,
     // Which settings dropdown is open, if any.
@@ -317,6 +318,7 @@ impl Model {
             extensions: Vec::new(),
             config_dir: None,
             format_on_save: false,
+            prettier_source: crate::format::PrettierSource::Auto,
             icon_themes: Vec::new(),
             icon_choice: crate::icon_theme::Choice::default(),
             dropdown_open: None,
