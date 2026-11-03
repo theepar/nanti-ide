@@ -1,5 +1,5 @@
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -13,7 +13,10 @@ const OP_CLOSE: u32 = 2;
 const OP_PING: u32 = 3;
 const OP_PONG: u32 = 4;
 const MAX_FRAME: usize = 64 * 1024;
-const READY_TIMEOUT: Duration = Duration::from_secs(5);
+// Discord looks the application up before it answers and goes silent when asked too often, so tries are spaced out instead of hammered.
+const READY_TIMEOUT: Duration = Duration::from_secs(8);
+const SETTLE: Duration = Duration::from_millis(600);
+const QUICK_RETRIES: u32 = 1;
 const RETRY_AFTER: Duration = Duration::from_secs(15);
 const TICK: Duration = Duration::from_millis(100);
 const MIN_SEND_GAP: Duration = Duration::from_secs(15);
@@ -93,12 +96,30 @@ impl DiscordSettings {
     }
 }
 
+/// Who the Discord app says is signed in: the name, and what is needed to find the profile picture.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Profile {
+    pub name: String,
+    pub id: String,
+    pub avatar: Option<String>,
+}
+
+impl Profile {
+    pub fn named(name: &str) -> Self {
+        Self {
+            name: name.to_owned(),
+            id: String::new(),
+            avatar: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiscordStatus {
     Off,
     NeedsId,
     Connecting,
-    Connected(String),
+    Connected(Profile),
     Unavailable(String),
 }
 
@@ -108,7 +129,7 @@ impl DiscordStatus {
             Self::Off => "Rich Presence is off.".to_owned(),
             Self::NeedsId => "Set an Application ID to connect.".to_owned(),
             Self::Connecting => "Connecting to the Discord app...".to_owned(),
-            Self::Connected(user) => format!("Connected as {user}."),
+            Self::Connected(user) => format!("Connected as {}.", user.name),
             Self::Unavailable(why) => why.clone(),
         }
     }
@@ -239,20 +260,72 @@ fn read_frame(pipe: &mut dyn Pipe) -> io::Result<Option<(u32, Value)>> {
     Ok(Some((op, value)))
 }
 
-fn user_name(ready: &Value) -> String {
+fn user_profile(ready: &Value) -> Profile {
     let user = &ready["data"]["user"];
-    ["global_name", "username"]
-        .iter()
-        .filter_map(|k| user.get(*k).and_then(Value::as_str))
-        .find(|s| !s.is_empty())
-        .unwrap_or("Discord user")
-        .to_owned()
+    let text = |k: &str| {
+        user.get(k)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+    };
+    Profile {
+        name: text("global_name")
+            .or_else(|| text("username"))
+            .unwrap_or_else(|| "Discord user".to_owned()),
+        id: text("id").unwrap_or_default(),
+        avatar: text("avatar"),
+    }
+}
+
+/// Fetches the profile picture once from Discord's image server and keeps it in the config folder.
+pub fn fetch_avatar(dir: &Path, id: &str, hash: &str) -> Option<PathBuf> {
+    let id_ok = (15..=20).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_digit());
+    let hash_ok = !hash.is_empty()
+        && hash.len() <= 40
+        && hash.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+    if !id_ok || !hash_ok {
+        return None;
+    }
+    let file = dir.join(format!("discord-avatar-{hash}.png"));
+    if file.is_file() {
+        return Some(file);
+    }
+    let url = format!("https://cdn.discordapp.com/avatars/{id}/{hash}.png?size=128");
+    let mut cmd = std::process::Command::new("curl.exe");
+    cmd.args([
+        "-sSL",
+        "--fail",
+        "--connect-timeout",
+        "8",
+        "--max-time",
+        "12",
+    ])
+    .args(["--max-filesize", "500000"])
+    .arg(&url);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let out = cmd.output().ok().filter(|o| o.status.success())?;
+    if !out.stdout.starts_with(b"\x89PNG") {
+        return None;
+    }
+    std::fs::create_dir_all(dir).ok()?;
+    std::fs::write(&file, &out.stdout).ok()?;
+    Some(file)
 }
 
 enum Ended {
     Reconfigured(bool, String),
     Shutdown,
     Lost(String),
+}
+
+/// Clears the status and says goodbye, so Discord frees the connection at once instead of waiting for the pipe to break.
+fn goodbye(pipe: &mut dyn Pipe, pid: u32) {
+    let _ = pipe.write_all(&encode_frame(OP_FRAME, &activity_payload(pid, 0, None)));
+    let _ = pipe.write_all(&encode_frame(OP_CLOSE, &json!({})));
 }
 
 fn session(
@@ -272,7 +345,7 @@ fn session(
     let user = loop {
         match read_frame(pipe) {
             Err(e) => return lost(e),
-            Ok(Some((OP_FRAME, v))) if v["evt"] == "READY" => break user_name(&v),
+            Ok(Some((OP_FRAME, v))) if v["evt"] == "READY" => break user_profile(&v),
             Ok(Some((OP_FRAME, v))) if v["evt"] == "ERROR" => {
                 let msg = v["data"]["message"]
                     .as_str()
@@ -331,9 +404,13 @@ fn session(
                 *pending = p;
             }
             Ok(Cmd::Config { enabled, client_id }) => {
+                goodbye(pipe, pid);
                 return Ended::Reconfigured(enabled, client_id);
             }
-            Ok(Cmd::Shutdown) | Err(RecvTimeoutError::Disconnected) => return Ended::Shutdown,
+            Ok(Cmd::Shutdown) | Err(RecvTimeoutError::Disconnected) => {
+                goodbye(pipe, pid);
+                return Ended::Shutdown;
+            }
             Err(RecvTimeoutError::Timeout) => {}
         }
     }
@@ -417,6 +494,7 @@ struct Wanted {
     enabled: bool,
     client_id: String,
     pending: Option<Presence>,
+    failures: u32,
 }
 
 impl Wanted {
@@ -435,15 +513,27 @@ impl Wanted {
 }
 
 /// Sleeps until the retry delay passes or a command arrives. False means stop the worker.
-fn wait_for_change(rx: &Receiver<Cmd>, w: &mut Wanted) -> bool {
-    match rx.recv_timeout(RETRY_AFTER) {
+/// How long to wait before the next try, growing so a Discord that is slow to answer is not flooded.
+fn retry_delay(failures: u32) -> Duration {
+    match failures {
+        0 | 1 => Duration::from_secs(5),
+        2 => RETRY_AFTER,
+        _ => Duration::from_secs(30),
+    }
+}
+
+fn wait_for_change(rx: &Receiver<Cmd>, w: &mut Wanted, after: Duration) -> bool {
+    match rx.recv_timeout(after) {
         Ok(cmd) => w.apply(cmd),
         Err(RecvTimeoutError::Timeout) => true,
         Err(RecvTimeoutError::Disconnected) => false,
     }
 }
 
-fn worker(rx: Receiver<Cmd>, status: Arc<Mutex<DiscordStatus>>) {
+fn worker(rx: Receiver<Cmd>, status: Arc<Mutex<DiscordStatus>>, settle: Duration) {
+    if !settle.is_zero() {
+        std::thread::sleep(settle);
+    }
     let set = |s: DiscordStatus| {
         if let Ok(mut g) = status.lock() {
             *g = s;
@@ -453,6 +543,7 @@ fn worker(rx: Receiver<Cmd>, status: Arc<Mutex<DiscordStatus>>) {
         enabled: false,
         client_id: String::new(),
         pending: None,
+        failures: 0,
     };
     loop {
         if !w.enabled || w.client_id.is_empty() {
@@ -476,7 +567,7 @@ fn worker(rx: Receiver<Cmd>, status: Arc<Mutex<DiscordStatus>>) {
             set(DiscordStatus::Unavailable(
                 "The Discord app is not running. Start it and it connects by itself.".to_owned(),
             ));
-            if !wait_for_change(&rx, &mut w) {
+            if !wait_for_change(&rx, &mut w, RETRY_AFTER) {
                 return;
             }
             continue;
@@ -496,8 +587,16 @@ fn worker(rx: Receiver<Cmd>, status: Arc<Mutex<DiscordStatus>>) {
                 w.client_id = client_id;
             }
             Ended::Lost(why) => {
-                set(DiscordStatus::Unavailable(why));
-                if !wait_for_change(&rx, &mut w) {
+                let was_connected = status.lock().is_ok_and(|s| s.connected());
+                w.failures = if was_connected { 1 } else { w.failures + 1 };
+                // The first few failures retry quietly under "Connecting"; only a lasting failure is shown.
+                set(if w.failures > QUICK_RETRIES {
+                    DiscordStatus::Unavailable(why)
+                } else {
+                    DiscordStatus::Connecting
+                });
+                let delay = retry_delay(w.failures);
+                if !wait_for_change(&rx, &mut w, delay) {
                     return;
                 }
             }
@@ -513,12 +612,16 @@ pub struct DiscordLink {
 
 impl DiscordLink {
     pub fn start() -> Self {
+        Self::start_after(Duration::ZERO)
+    }
+
+    pub fn start_after(settle: Duration) -> Self {
         let (tx, rx) = mpsc::channel();
         let status = Arc::new(Mutex::new(DiscordStatus::Off));
         let shared = status.clone();
         let thread = std::thread::Builder::new()
             .name("discord-rpc".into())
-            .spawn(move || worker(rx, shared))
+            .spawn(move || worker(rx, shared, settle))
             .ok();
         Self { tx, status, thread }
     }
@@ -553,6 +656,11 @@ pub struct DiscordState {
     sent: Option<Presence>,
     sent_at: Option<Instant>,
     pub started_ms: u64,
+    avatar_hash: Option<String>,
+    pub avatar_path: Option<PathBuf>,
+    // The last account seen, kept on screen while a refresh reconnects.
+    pub last_profile: Option<Profile>,
+    avatar_rx: Option<Receiver<Option<PathBuf>>>,
 }
 
 impl Default for DiscordState {
@@ -562,6 +670,10 @@ impl Default for DiscordState {
             link: None,
             sent: None,
             sent_at: None,
+            avatar_hash: None,
+            avatar_path: None,
+            last_profile: None,
+            avatar_rx: None,
             started_ms: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_millis() as u64),
@@ -581,8 +693,17 @@ impl DiscordState {
 
     /// Applies new settings; starts the worker only once the feature is wanted.
     pub fn reconfigure(&mut self) {
-        if self.settings.enabled && self.link.is_none() {
-            self.link = Some(DiscordLink::start());
+        if self.settings.enabled {
+            if self.link.is_none() {
+                self.link = Some(DiscordLink::start());
+            }
+        } else {
+            // Off means off: dropping the link ends its worker thread and closes the pipe to Discord.
+            self.link = None;
+            self.avatar_hash = None;
+            self.avatar_path = None;
+            self.last_profile = None;
+            self.avatar_rx = None;
         }
         if let Some(link) = &self.link {
             link.configure(&self.settings);
@@ -593,11 +714,58 @@ impl DiscordState {
 
     pub fn reconnect(&mut self) {
         self.link = None;
-        self.reconfigure();
+        if self.settings.enabled {
+            self.link = Some(DiscordLink::start_after(SETTLE));
+            if let Some(link) = &self.link {
+                link.configure(&self.settings);
+            }
+            self.sent = None;
+            self.sent_at = None;
+        }
     }
 
     /// Sends the wanted presence when it changed, at most once per 15 seconds. Returns whether the
     /// settings page should refresh (the status may have changed).
+    /// Starts the one-time download of the profile picture once Discord says who is signed in.
+    pub fn pump_avatar(&mut self, dir: Option<&Path>) -> bool {
+        let mut changed = false;
+        if let Some(rx) = &self.avatar_rx {
+            match rx.try_recv() {
+                Ok(path) => {
+                    self.avatar_path = path;
+                    self.avatar_rx = None;
+                    changed = true;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.avatar_rx = None,
+            }
+        }
+        let status = self.status();
+        if let DiscordStatus::Connected(p) = &status
+            && self.last_profile.as_ref() != Some(p)
+        {
+            self.last_profile = Some(p.clone());
+            changed = true;
+        }
+        let (Some(dir), DiscordStatus::Connected(profile)) = (dir, status) else {
+            return changed;
+        };
+        let Some(hash) = profile.avatar else {
+            return changed;
+        };
+        if self.avatar_hash.as_deref() == Some(hash.as_str()) || self.avatar_rx.is_some() {
+            return changed;
+        }
+        self.avatar_hash = Some(hash.clone());
+        let (tx, rx) = mpsc::channel();
+        let (dir, id) = (dir.to_path_buf(), profile.id);
+        std::thread::spawn(move || {
+            let _ = tx.send(fetch_avatar(&dir, &id, &hash));
+        });
+        self.avatar_rx = Some(rx);
+        changed
+    }
+
     pub fn pump(&mut self, wanted: Option<Presence>) -> bool {
         let Some(link) = &self.link else {
             return false;
@@ -619,6 +787,60 @@ impl DiscordState {
 #[cfg(test)]
 mod asset_tests {
     use super::*;
+
+    #[test]
+    fn retries_back_off_instead_of_flooding_discord() {
+        let waits: Vec<_> = (1..=6).map(|n| retry_delay(n).as_millis()).collect();
+        assert_eq!(waits, [5000, 15000, 30000, 30000, 30000, 30000]);
+    }
+
+    #[test]
+    fn the_ready_event_gives_the_name_id_and_picture_hash() {
+        let ready = json!({ "data": { "user": { "id": "123456789012345678", "username": "thepar", "global_name": "", "avatar": "abc123" } } });
+        let p = user_profile(&ready);
+        assert_eq!(p.name, "thepar");
+        assert_eq!(p.id, "123456789012345678");
+        assert_eq!(p.avatar.as_deref(), Some("abc123"));
+        let bare = user_profile(&json!({ "data": { "user": { "username": "x" } } }));
+        assert_eq!((bare.id.as_str(), bare.avatar), ("", None));
+    }
+
+    #[test]
+    fn avatar_requests_only_go_out_for_well_formed_ids_and_hashes() {
+        let dir = std::env::temp_dir().join("nanti-avatar-none");
+        assert!(fetch_avatar(&dir, "12x", "abc").is_none());
+        assert!(fetch_avatar(&dir, "123456789012345678", "../x").is_none());
+        assert!(fetch_avatar(&dir, "123456789012345678", "").is_none());
+    }
+
+    #[test]
+    fn a_cached_picture_is_used_without_any_download() {
+        let dir = std::env::temp_dir().join(format!("nanti-avatar-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("discord-avatar-abc123.png");
+        std::fs::write(&file, b"cached").unwrap();
+        assert_eq!(
+            fetch_avatar(&dir, "123456789012345678", "abc123"),
+            Some(file)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn turning_it_off_drops_the_worker_and_turning_it_on_starts_one() {
+        let mut st = DiscordState::default();
+        st.settings.client_id = String::new();
+        st.settings.enabled = false;
+        st.reconfigure();
+        assert!(st.link.is_none(), "nothing runs while it is off");
+        st.settings.enabled = true;
+        st.reconfigure();
+        assert!(st.link.is_some());
+        st.settings.enabled = false;
+        st.reconfigure();
+        assert!(st.link.is_none(), "switching off ends the worker");
+        assert_eq!(st.status(), DiscordStatus::Off);
+    }
 
     #[test]
     fn the_activity_carries_the_app_logo_and_the_language_icon() {
@@ -766,7 +988,7 @@ mod tests {
         assert!(matches!(ended, Ended::Shutdown));
         assert_eq!(
             *status.lock().unwrap(),
-            DiscordStatus::Connected("Deva".into())
+            DiscordStatus::Connected(Profile::named("Deva"))
         );
         let frames = fake.frames();
         assert_eq!(

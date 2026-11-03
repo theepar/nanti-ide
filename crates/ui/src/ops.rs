@@ -1193,7 +1193,9 @@ impl Model {
             .settings
             .enabled
             .then(|| self.discord_presence());
-        self.discord.pump(wanted)
+        let mut changed = self.discord.pump(wanted);
+        changed |= self.discord.pump_avatar(self.config_dir.as_deref());
+        changed
     }
 
     pub fn palette_is_input(&self) -> bool {

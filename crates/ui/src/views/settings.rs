@@ -52,16 +52,24 @@ impl Workbench {
         use crate::discord::DiscordStatus;
         const AVATARS: [u32; 6] = [0x5865f2, 0x3ba55d, 0xc9811a, 0xc2377f, 0xc03537, 0x2f9e6e];
         let status = self.model.discord.status();
-        let connected = status.connected();
-        let (title, line) = match &status {
-            DiscordStatus::Connected(name) => (
-                name.clone(),
+        // While a refresh reconnects, the account stays on screen instead of looking logged out.
+        let refreshing = matches!(status, DiscordStatus::Connecting)
+            .then(|| self.model.discord.last_profile.clone())
+            .flatten();
+        let connected = status.connected() || refreshing.is_some();
+        let (title, line) = match (&status, &refreshing) {
+            (DiscordStatus::Connected(profile), _) => (
+                profile.name.clone(),
                 "Signed in on the Discord app on this computer".to_owned(),
             ),
-            other => ("Discord".to_owned(), other.describe()),
+            (_, Some(profile)) => (profile.name.clone(), "Refreshing...".to_owned()),
+            (other, None) => ("Discord".to_owned(), other.describe()),
         };
         let hue = AVATARS[title.bytes().map(usize::from).sum::<usize>() % AVATARS.len()];
-        let avatar = div()
+        let photo = connected
+            .then(|| self.model.discord.avatar_path.clone())
+            .flatten();
+        let letter = div()
             .flex()
             .flex_none()
             .items_center()
@@ -84,6 +92,15 @@ impl Workbench {
             } else {
                 assets::icon("person", 24., 0xb0b0b0).into_any_element()
             });
+        let avatar: AnyElement = match photo {
+            Some(path) => gpui::img(path)
+                .flex_none()
+                .size(px(46.))
+                .rounded_full()
+                .object_fit(gpui::ObjectFit::Cover)
+                .into_any_element(),
+            None => letter.into_any_element(),
+        };
         let buttons = if connected {
             div()
                 .flex()

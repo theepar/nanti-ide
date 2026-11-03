@@ -110,7 +110,7 @@ graph TD
 - **HTML shortcuts:** `!` then `Tab` writes an HTML5 page; `ul>li*3`, `div.box`, `a` and similar abbreviations expand on `Tab` in `.html`, `.htm`, `.vue` and `.svelte` files. Built in, no extension needed.
 
 ### Discord Rich Presence (not in the 1.0.0 release build)
-- The code is in the tree but left out of the 1.0.0 build: nothing in Settings, no palette commands, no connection to Discord. Debug builds (`cargo run`) always include it; for a release build use `cargo build --release --features discord`.
+- The code is in the tree but left out of the 1.0.0 build: nothing in Settings, no palette commands, no connection to Discord. While it is signed in, your Discord profile picture is downloaded once from Discord's image server (cdn.discordapp.com) and kept in the config folder; switching Rich Presence off stops the connection and the background thread. Debug builds (`cargo run`) always include it; for a release build use `cargo build --release --features discord`.
 
 ### Modern Dark Theme
 - Tailored dark palette (`#181818` / `#1e1e1e`) with clean borders and subtle contrast.
