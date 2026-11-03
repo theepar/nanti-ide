@@ -21,10 +21,9 @@ fn panel_choice(config_dir: Option<&std::path::Path>) -> Option<(PathBuf, String
 
 fn host_config_from_env(config_dir: Option<&std::path::Path>) -> Option<HostConfig> {
     let (extension_dir, view_type) = panel_choice(config_dir)?;
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     Some(HostConfig {
-        node: std::env::var("NANTI_NODE").unwrap_or_else(|_| "node".into()),
-        entry: root.join("extension-host/src/host.mjs"),
+        node: ui::runtime::node(),
+        entry: ui::runtime::host_entry(),
         extension_dir,
         view_type,
         workspace: std::env::var_os("NANTI_WORKSPACE").map(PathBuf::from),

@@ -183,7 +183,12 @@ fn find_prettier(
             .map(|rel| root.join("node_modules").join("prettier").join(rel))
             .find(|p| p.is_file())
     };
-    let via_node = |p: PathBuf| (OsString::from("node"), vec![p.into_os_string()]);
+    let via_node = |p: PathBuf| {
+        (
+            OsString::from(crate::runtime::node()),
+            vec![p.into_os_string()],
+        )
+    };
     // A chosen source that is gone (extension removed, nothing on PATH) falls back to automatic, so formatting keeps working.
     match source {
         PrettierSource::Extension(folder) => {

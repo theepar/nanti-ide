@@ -34,6 +34,7 @@ pub mod palette;
 pub mod panel;
 pub mod problems;
 pub mod resource;
+pub mod runtime;
 pub mod scm;
 pub mod search;
 pub mod tasks;

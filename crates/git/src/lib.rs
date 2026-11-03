@@ -702,6 +702,19 @@ pub struct Branch {
     pub current: bool,
 }
 
+/// The git to run: `NANTI_GIT`, the one the installer puts in `runtime\git`, then `git` on PATH.
+pub fn program() -> String {
+    if let Some(chosen) = std::env::var_os("NANTI_GIT") {
+        return chosen.to_string_lossy().into_owned();
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| Some(exe.parent()?.join("runtime/git/cmd/git.exe")))
+        .filter(|p| p.is_file())
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "git".to_owned())
+}
+
 #[derive(Debug, Clone)]
 pub struct Repo {
     pub root: PathBuf,
@@ -710,13 +723,13 @@ pub struct Repo {
 
 impl Repo {
     pub fn discover(start: &Path) -> Result<Repo, GitError> {
-        Self::discover_with("git", start)
+        Self::discover_with(&program(), start)
     }
 
     pub fn at_unchecked(root: PathBuf) -> Repo {
         Repo {
             root,
-            program: "git".to_owned(),
+            program: program(),
         }
     }
 
