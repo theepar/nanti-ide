@@ -12,10 +12,10 @@ impl Drop for Tmp {
     }
 }
 
-fn open<'a>(
-    cx: &'a mut TestAppContext,
+fn open(
+    cx: &mut TestAppContext,
     root: PathBuf,
-) -> (WindowHandle<Workbench>, &'a mut VisualTestContext) {
+) -> (WindowHandle<Workbench>, &mut VisualTestContext) {
     let window = cx.add_window(move |_w, cx| Workbench::new(root, cx));
     let vcx = VisualTestContext::from_window(window.into(), cx).into_mut();
     vcx.run_until_parked();
