@@ -168,3 +168,94 @@ fn rename_symbol_replaces_whole_words_only() {
         "let total = 1; let counter = total + 1;\n"
     );
 }
+
+// Runs the real Prettier that ships inside the Prettier extension; needs NANTI_TEST_PRETTIER_EXT to point at the extracted `extension` folder.
+#[test]
+fn real_prettier_from_the_installed_extension_formats_on_save_and_on_demand() {
+    let Some(src) = std::env::var_os("NANTI_TEST_PRETTIER_EXT").map(PathBuf::from) else {
+        return;
+    };
+    let t = tmp("prettier");
+    let cfg = t.0.join("cfg");
+    let ext = cfg.join("extensions").join("esbenp.prettier-vscode-0.0.0");
+    copy_dir(&src, &ext);
+    let work = t.0.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    std::fs::write(work.join(".prettierrc"), "{ \"singleQuote\": true }\n").unwrap();
+
+    let mut m = Model::new(work.clone());
+    m.config_dir = Some(cfg.clone());
+    m.refresh_extensions();
+    assert!(
+        m.extensions.iter().any(|x| x.dir == ext),
+        "the extension is installed: {:?}",
+        m.extensions.iter().map(|x| &x.id).collect::<Vec<_>>()
+    );
+
+    let cases = [
+        (
+            "a.ts",
+            "const a = \"x\" ;function f( b:number ){return b+1}\n",
+            "const a = 'x';\nfunction f(b: number) {\n  return b + 1;\n}\n",
+        ),
+        (
+            "b.json",
+            "{\"a\":1,\"b\":[1,2]}\n",
+            "{ \"a\": 1, \"b\": [1, 2] }\n",
+        ),
+        (
+            "c.css",
+            "a{color:red;margin:0}\n",
+            "a {\n  color: red;\n  margin: 0;\n}\n",
+        ),
+        ("d.md", "#  Title\n\n*  item\n", "# Title\n\n- item\n"),
+    ];
+    for (name, messy, clean) in cases {
+        let file = work.join(name);
+        std::fs::write(&file, messy).unwrap();
+        m.open_file(&file);
+        m.run_command(Cmd::FormatDocument);
+        assert_eq!(
+            m.active_editor_mut().unwrap().text(),
+            clean,
+            "{name}: {:?}",
+            m.message
+        );
+    }
+
+    m.format_on_save = true;
+    let file = work.join("e.js");
+    std::fs::write(&file, "let x = {a:1}\n").unwrap();
+    open_dirty(&mut m, &file);
+    assert_eq!(m.save_active(), SaveOutcome::Saved);
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "let x = { a: 1 };\n"
+    );
+
+    let broken = work.join("broken.ts");
+    std::fs::write(&broken, "const = ;\n").unwrap();
+    open_dirty(&mut m, &broken);
+    assert_eq!(m.save_active(), SaveOutcome::Saved);
+    assert_eq!(std::fs::read_to_string(&broken).unwrap(), "const = ;\n\n");
+    assert!(
+        m.message
+            .as_deref()
+            .is_some_and(|s| s.starts_with("Prettier")),
+        "{:?}",
+        m.message
+    );
+}
+
+fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), &target).unwrap();
+        }
+    }
+}
