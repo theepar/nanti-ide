@@ -112,8 +112,8 @@ graph TD
 - **Colour themes:** dark VS Code colour themes from installed extensions (for example Dracula) restyle the interface and the syntax colours; the first time a theme is installed it is switched on, and Settings > Appearance switches back to the built-in dark colours or to another theme. Light themes are not supported yet.
 - **File icon themes:** an installed icon theme extension (for example Material Icon Theme) is switched on the first time it appears and drawn in the explorer and the tabs; Settings > Appearance switches between it and the built-in icons. SVG and PNG themes work; glyph-font themes do not.
 
-### Discord Rich Presence (not in the 1.0.0 release build)
-- The code is in the tree but left out of the 1.0.0 build: nothing in Settings, no palette commands, no connection to Discord. While it is signed in, your Discord profile picture is downloaded once from Discord's image server (cdn.discordapp.com) and kept in the config folder; switching Rich Presence off clears the status and keeps the connection for ten minutes, so switching it back on is instant (Discord goes quiet for minutes when a closed connection is opened again), then the connection and its background thread are closed; Log out closes them at once. Debug builds (`cargo run`) always include it; for a release build use `cargo build --release --features discord`.
+### Discord Rich Presence
+- Shows the file, language and workspace you are working on in your Discord status. A switch in Settings turns it on and off, and each detail can be hidden. While it is signed in, your Discord profile picture is downloaded once from Discord's image server (cdn.discordapp.com) and kept in the config folder; switching Rich Presence off clears the status and keeps the connection for ten minutes, so switching it back on is instant (Discord goes quiet for minutes when a closed connection is opened again), then the connection and its background thread are closed; Log out closes them at once. Build without it using `cargo build --release --no-default-features`.
 
 ### Modern Dark Theme
 - Tailored dark palette (`#181818` / `#1e1e1e`) with clean borders and subtle contrast.

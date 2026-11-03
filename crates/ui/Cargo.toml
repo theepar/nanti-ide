@@ -21,7 +21,8 @@ url = "=2.5.8"
 wry = "=0.57.1"
 
 [features]
-# Discord Rich Presence is built but kept out of the 1.0.0 release; `--features discord` turns it back on.
+default = ["discord"]
+# Discord Rich Presence; `--no-default-features` builds without it.
 discord = []
 
 [build-dependencies]
