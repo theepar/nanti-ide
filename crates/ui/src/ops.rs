@@ -12,6 +12,7 @@ use crate::problems::DEBOUNCE;
 use crate::tasks;
 use crate::workspace_ops as ops;
 
+const COLOR_FILE: &str = "color-theme.json";
 const ABOUT_PATH: &str = "nanti://about";
 
 impl Model {
@@ -74,6 +75,44 @@ impl Model {
             x,
             y,
         });
+    }
+
+    pub fn load_color_settings(&mut self) {
+        if let Some(dir) = &self.config_dir {
+            self.color_choice = crate::icon_theme::load_choice_in(dir, COLOR_FILE);
+        }
+    }
+
+    fn save_color_choice(&self) {
+        if let Some(dir) = &self.config_dir {
+            let _ = crate::icon_theme::save_choice_in(dir, COLOR_FILE, &self.color_choice);
+        }
+    }
+
+    /// Loads the chosen colour theme into the palette; a theme that is gone or unreadable leaves the built-in dark one.
+    pub fn apply_color_theme(&mut self) {
+        let chosen = self
+            .color_choice
+            .active
+            .as_deref()
+            .and_then(|k| crate::color_theme::entry_path(&self.color_themes, k));
+        self.colors = match chosen {
+            Some(json) => match crate::color_theme::load(&json) {
+                Ok(p) => p,
+                Err(e) => {
+                    self.say("Colors", &format!("Cannot read the colour theme: {e}"));
+                    crate::theme::Palette::DARK
+                }
+            },
+            None => crate::theme::Palette::DARK,
+        };
+    }
+
+    /// `None` goes back to the built-in dark colours.
+    pub fn set_color_theme(&mut self, key: Option<String>) {
+        self.color_choice.active = key;
+        self.save_color_choice();
+        self.apply_color_theme();
     }
 
     pub fn load_icon_settings(&mut self) {
@@ -734,6 +773,18 @@ impl Model {
             Some(dir) => extensions::list_installed(dir, self.panel_extension.as_deref()),
             None => Vec::new(),
         };
+        self.color_themes = crate::color_theme::discover(&self.extensions);
+        if self.config_dir.is_some()
+            && let Some(label) =
+                crate::icon_theme::adopt_new(&mut self.color_choice, &self.color_themes)
+        {
+            self.save_color_choice();
+            self.say(
+                "Colors",
+                &format!("{label} is now the colour theme. You can change it in Settings."),
+            );
+        }
+        self.apply_color_theme();
         self.icon_themes = crate::icon_theme::discover(&self.extensions);
         if self.config_dir.is_some()
             && let Some(label) =

@@ -132,3 +132,103 @@ fn the_settings_dropdown_renders_open_and_picking_an_entry_closes_it(
         .unwrap();
     assert_eq!(active, None);
 }
+
+fn add_colors(cfg: &std::path::Path, folder: &str, label: &str, bg: &str) {
+    let ext = cfg.join("extensions").join(folder);
+    std::fs::create_dir_all(ext.join("themes")).unwrap();
+    std::fs::write(
+        ext.join("package.json"),
+        format!(
+            r#"{{"name":"{folder}","publisher":"demo","version":"1.0.0","contributes":{{"themes":[{{"label":"{label}","uiTheme":"vs-dark","path":"./themes/t.json"}}]}}}}"#
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("themes/t.json"),
+        format!(r##"{{"colors":{{"editor.background":"{bg}","editor.foreground":"#eeeeee"}}}}"##),
+    )
+    .unwrap();
+}
+
+fn colour_model(cfg: &std::path::Path) -> Model {
+    let mut m = Model::new(cfg.to_path_buf());
+    m.config_dir = Some(cfg.to_path_buf());
+    m.load_color_settings();
+    m.refresh_extensions();
+    m
+}
+
+#[test]
+fn a_colour_theme_switches_on_once_applies_to_the_palette_and_the_choice_sticks() {
+    let cfg = std::env::temp_dir().join(format!("nanti-color-model-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&cfg);
+    let _guard = Tmp(cfg.clone());
+    add_colors(&cfg, "demo.night-1.0.0", "Night", "#101010");
+
+    let mut m = colour_model(&cfg);
+    assert_eq!(m.color_themes.len(), 1);
+    assert_eq!(m.colors.editor, 0x101010);
+    assert!(
+        m.message
+            .as_deref()
+            .is_some_and(|s| s.contains("Night") && s.contains("Settings")),
+        "{:?}",
+        m.message
+    );
+
+    m.set_color_theme(None);
+    assert_eq!(m.colors, ui::theme::Palette::DARK);
+    assert_eq!(
+        colour_model(&cfg).colors,
+        ui::theme::Palette::DARK,
+        "going back survives a restart"
+    );
+
+    add_colors(&cfg, "demo.dusk-2.0.0", "Dusk", "#202830");
+    let later = colour_model(&cfg);
+    assert_eq!(later.color_themes.len(), 2);
+    assert_eq!(
+        later.colors.editor, 0x202830,
+        "a theme installed later is new again"
+    );
+}
+
+#[test]
+fn a_broken_colour_theme_falls_back_to_the_built_in_colours() {
+    let cfg = std::env::temp_dir().join(format!("nanti-color-bad-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&cfg);
+    let _guard = Tmp(cfg.clone());
+    add_colors(&cfg, "demo.bad-1.0.0", "Bad", "#101010");
+    std::fs::write(
+        cfg.join("extensions/demo.bad-1.0.0/themes/t.json"),
+        "{ not json",
+    )
+    .unwrap();
+    let m = colour_model(&cfg);
+    assert_eq!(m.colors, ui::theme::Palette::DARK);
+    assert!(
+        m.message
+            .as_deref()
+            .is_some_and(|s| s.contains("Cannot read")),
+        "{:?}",
+        m.message
+    );
+}
+
+#[gpui::test]
+fn the_window_draws_with_the_active_colour_theme(cx: &mut gpui::TestAppContext) {
+    use gpui::VisualTestContext;
+    let cfg = std::env::temp_dir().join(format!("nanti-color-render-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&cfg);
+    let _guard = Tmp(cfg.clone());
+    add_colors(&cfg, "demo.night-1.0.0", "Night", "#101010");
+    let dir = cfg.clone();
+    let window = cx.add_window(move |_w, cx| {
+        let mut wb = ui::Workbench::new(dir.clone(), cx);
+        wb.set_config_dir(dir.clone(), None);
+        wb
+    });
+    let vcx = VisualTestContext::from_window(window.into(), cx).into_mut();
+    vcx.run_until_parked();
+    assert_eq!(ui::theme::current().editor, 0x101010);
+}

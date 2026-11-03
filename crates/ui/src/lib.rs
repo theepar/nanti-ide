@@ -633,6 +633,7 @@ impl Workbench {
         self.model.load_discord_settings();
         self.model.load_format_settings();
         self.model.load_icon_settings();
+        self.model.load_color_settings();
         self.model.panel_extension = panel_extension;
         self.model.refresh_extensions();
     }
@@ -5386,6 +5387,7 @@ impl EntityInputHandler for Workbench {
 
 impl Render for Workbench {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        theme::set(self.model.colors);
         let overlay_open = self.model.palette.is_some()
             || self.model.menu_open.is_some()
             || self.model.context_menu.is_some()

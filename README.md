@@ -109,6 +109,7 @@ graph TD
 - **Right-click menus** in the editor and on tabs, with cut, copy, paste, rename in file, format and the command palette.
 - **HTML shortcuts:** `!` then `Tab` writes an HTML5 page; `ul>li*3`, `div.box`, `a` and similar abbreviations expand on `Tab` in `.html`, `.htm`, `.vue` and `.svelte` files. Built in, no extension needed.
 
+- **Colour themes:** dark VS Code colour themes from installed extensions (for example Dracula) restyle the interface and the syntax colours; the first time a theme is installed it is switched on, and Settings > Appearance switches back to the built-in dark colours or to another theme. Light themes are not supported yet.
 - **File icon themes:** an installed icon theme extension (for example Material Icon Theme) is switched on the first time it appears and drawn in the explorer and the tabs; Settings > Appearance switches between it and the built-in icons. SVG and PNG themes work; glyph-font themes do not.
 
 ### Discord Rich Presence (not in the 1.0.0 release build)

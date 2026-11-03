@@ -207,6 +207,34 @@ impl Workbench {
         self.dropdown("set-prettier", &current, options, cx)
     }
 
+    fn color_theme_picker(&self, cx: &mut Context<Self>) -> AnyElement {
+        let active = self.model.color_choice.active.clone();
+        let mut options: Vec<DropdownOption> = vec![(
+            "Dark (built-in)".into(),
+            active.is_none(),
+            Box::new(|wb: &mut Workbench| wb.pick_color_theme(None)),
+        )];
+        let mut current = "Dark (built-in)".to_owned();
+        for t in &self.model.color_themes {
+            let on = active.as_deref() == Some(t.key.as_str());
+            if on {
+                current = t.label.clone();
+            }
+            let key = t.key.clone();
+            options.push((
+                t.label.clone().into(),
+                on,
+                Box::new(move |wb: &mut Workbench| wb.pick_color_theme(Some(key.clone()))),
+            ));
+        }
+        self.dropdown("set-color-theme", &current, options, cx)
+    }
+
+    pub fn pick_color_theme(&mut self, key: Option<String>) {
+        self.model.set_color_theme(key);
+        self.model.message = Some("Colour theme changed".to_owned());
+    }
+
     fn icon_theme_picker(&self, cx: &mut Context<Self>) -> AnyElement {
         let active = self.model.icon_choice.active.clone();
         let mut options: Vec<DropdownOption> = vec![(
@@ -557,6 +585,11 @@ impl Workbench {
                         self.switch("set-status", l.status_bar, Command::ToggleStatusBar, cx),
                     ))
                     .child(section("APPEARANCE"))
+                    .child(Self::setting_row(
+                        "Colour theme",
+                        "Colours of the interface and the code. Dark themes from installed extensions show up here and a theme you install is switched on once. Light themes are not supported yet; the Claude panel and the terminal keep their own colours.",
+                        self.color_theme_picker(cx),
+                    ))
                     .child(Self::setting_row(
                         "File icon theme",
                         if self.model.icon_themes.is_empty() {

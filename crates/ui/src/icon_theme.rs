@@ -169,7 +169,15 @@ pub struct Choice {
 }
 
 pub fn load_choice(dir: &Path) -> Choice {
-    let Some(v) = std::fs::read_to_string(dir.join(SETTINGS_FILE))
+    load_choice_in(dir, SETTINGS_FILE)
+}
+
+pub fn save_choice(dir: &Path, choice: &Choice) -> Result<(), String> {
+    save_choice_in(dir, SETTINGS_FILE, choice)
+}
+
+pub fn load_choice_in(dir: &Path, file: &str) -> Choice {
+    let Some(v) = std::fs::read_to_string(dir.join(file))
         .ok()
         .and_then(|t| serde_json::from_str::<Value>(t.trim_start_matches('\u{feff}')).ok())
     else {
@@ -188,14 +196,14 @@ pub fn load_choice(dir: &Path) -> Choice {
     }
 }
 
-pub fn save_choice(dir: &Path, choice: &Choice) -> Result<(), String> {
+pub fn save_choice_in(dir: &Path, file: &str, choice: &Choice) -> Result<(), String> {
     let text = serde_json::to_string_pretty(&json!({
         "active": choice.active,
         "seen": choice.seen,
     }))
     .map_err(|e| e.to_string())?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    std::fs::write(dir.join(SETTINGS_FILE), text).map_err(|e| e.to_string())
+    std::fs::write(dir.join(file), text).map_err(|e| e.to_string())
 }
 
 /// Switches a theme on the first time it appears. Returns the label of the theme that was switched on.
